@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Utilities</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .nav-links { margin: 20px 0; }
+        .nav-links a { margin-right: 20px; padding: 10px; background-color: #007bff; color: white; text-decoration: none; border-radius: 5px; }
+        .nav-links a:hover { background-color: #0056b3; }
+        .messages { margin: 10px 0; }
+        .success { color: green; padding: 10px; background-color: #d4edda; border: 1px solid #c3e6cb; margin-bottom: 10px; }
+        .error { color: red; padding: 10px; background-color: #f8d7da; border: 1px solid #f5c6cb; margin-bottom: 10px; white-space: pre-wrap; }
+        .utility-section { margin: 20px 0; padding: 20px; border: 1px solid #ddd; border-radius: 5px; background-color: #f8f9fa; }
+        .utility-section h3 { margin-top: 0; }
+        .utility-btn { background-color: #28a745; color: white; padding: 10px 20px; border: none; cursor: pointer; font-size: 14px; border-radius: 5px; }
+        .utility-btn:hover { background-color: #218838; }
+    </style>
+</head>
+<body>
+    <div class="nav-links">
+        <a href="{% url 'match_list' %}">View by Test Group</a>
+        <a href="{% url 'map_breakdown' %}">View by Map</a>
+        <a href="{% url 'building_timing' %}">Building Timing</a>
+        <a href="{% url 'utilities' %}">Utilities</a>
+    </div>
+
+    <h1>Utilities</h1>
+
+    {% if messages %}
+    <div class="messages">
+        {% for message in messages %}
+        <div class="{{ message.tags }}">{{ message }}</div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <div class="utility-section">
+        <h3>Run Single Match</h3>
+        <p>Launch a single match in Docker (not part of a test group).</p>
+        <form method="post" action="{% url 'run_single_match' %}" style="display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap;">
+            {% csrf_token %}
+            <div>
+                <label for="difficulty">Difficulty:</label><br>
+                <select name="difficulty" id="difficulty">
+                    <option value="Easy">Easy</option>
+                    <option value="Medium">Medium</option>
+                    <option value="MediumHard">MediumHard</option>
+                    <option value="Hard">Hard</option>
+                    <option value="Harder">Harder</option>
+                    <option value="VeryHard">VeryHard</option>
+                    <option value="CheatVision">CheatVision</option>
+                    <option value="CheatMoney">CheatMoney</option>
+                    <option value="CheatInsane" selected>CheatInsane</option>
+                </select>
+            </div>
+            <div>
+                <label for="race">Race:</label><br>
+                <select name="race" id="race">
+                    <option value="random">Random</option>
+                    <option value="protoss">Protoss</option>
+                    <option value="terran">Terran</option>
+                    <option value="zerg">Zerg</option>
+                </select>
+            </div>
+            <div>
+                <label for="build">Build:</label><br>
+                <select name="build" id="build">
+                    <option value="randombuild">Random</option>
+                    <option value="rush">Rush</option>
+                    <option value="timing">Timing</option>
+                    <option value="macro">Macro</option>
+                    <option value="power">Power</option>
+                    <option value="air">Air</option>
+                </select>
+            </div>
+            <div>
+                <button type="submit" class="utility-btn">Run Match</button>
+            </div>
+        </form>
+    </div>
+
+    <div class="utility-section">
+        <h3>Recompile Cython Extensions</h3>
+        <p>Runs <code>python setup.py build_ext --inplace</code> in the cython_extensions directory to rebuild all .pyx modules.</p>
+        <form method="post" action="{% url 'recompile_cython' %}">
+            {% csrf_token %}
+            <button type="submit" class="utility-btn">Recompile Cython</button>
+        </form>
+    </div>
+</body>
+</html>

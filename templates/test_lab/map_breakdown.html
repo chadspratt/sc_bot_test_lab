@@ -1,0 +1,130 @@
+{% load time_filters %}
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Map Breakdown</title>
+    <style>
+        table { border-collapse: collapse; width: 100%; margin-top: 20px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: center; }
+        th { background-color: #f2f2f2; font-weight: bold; }
+        
+        /* Win rate color coding */
+        .very-high-winrate { background-color: #a6ccaf; color: #0a3915; }
+        .high-winrate { background-color: #d4edda; color: #155724; }
+        .medium-winrate { background-color: #fff3cd; color: #856404; }
+        .low-winrate { background-color: #f8d7da; color: #721c24; }
+        .very-low-winrate { background-color: #c49296; color: #541118; }
+        .no-data { background-color: #e2e3e5; color: #383d41; }
+        
+        .difficulty-border-right { border-right: 3px solid #333 !important; }
+        .race-border-right { border-right: 2px solid #666 !important; }
+        .difficulty-header { background-color: #e9ecef; font-weight: bold; }
+        .race-header { background-color: #f8f9fa; font-weight: bold; }
+        
+        .map-column { width: 150px; min-width: 150px; padding: 4px; text-align: left; }
+        
+        .nav-links { margin: 20px 0; }
+        .nav-links a { margin-right: 20px; padding: 10px; background-color: #007bff; color: white; text-decoration: none; border-radius: 5px; }
+        .nav-links a:hover { background-color: #0056b3; }
+        .narrow-column { width: 80px; min-width: 80px; padding: 4px; }
+    </style>
+</head>
+<body>
+    <div class="nav-links">
+        <a href="{% url 'match_list' %}{% if selected_difficulty %}?difficulty={{ selected_difficulty }}{% endif %}">View by Test Group</a>
+        <a href="{% url 'map_breakdown' %}{% if selected_difficulty %}?difficulty={{ selected_difficulty }}{% endif %}">View by Map</a>
+        <a href="{% url 'building_timing' %}">Building Timing</a>
+        <a href="{% url 'utilities' %}">Utilities</a>
+    </div>
+    
+    <h1>Map Breakdown</h1>
+    
+    <div class="trigger-section">
+        <form method="get" action="" style="display: inline-block;">
+            <label for="difficulty">Filter by Difficulty:</label>
+            <select name="difficulty" id="difficulty" onchange="this.form.submit()">
+                <option value="">All Difficulties</option>
+                <option value="Easy" {% if selected_difficulty == 'Easy' %}selected{% endif %}>Easy</option>
+                <option value="Medium" {% if selected_difficulty == 'Medium' %}selected{% endif %}>Medium</option>
+                <option value="MediumHard" {% if selected_difficulty == 'MediumHard' %}selected{% endif %}>MediumHard</option>
+                <option value="Hard" {% if selected_difficulty == 'Hard' %}selected{% endif %}>Hard</option>
+                <option value="Harder" {% if selected_difficulty == 'Harder' %}selected{% endif %}>Harder</option>
+                <option value="VeryHard" {% if selected_difficulty == 'VeryHard' %}selected{% endif %}>VeryHard</option>
+                <option value="CheatVision" {% if selected_difficulty == 'CheatVision' %}selected{% endif %}>CheatVision</option>
+                <option value="CheatMoney" {% if selected_difficulty == 'CheatMoney' %}selected{% endif %}>CheatMoney</option>
+                <option value="CheatInsane" {% if selected_difficulty == 'CheatInsane' %}selected{% endif %}>CheatInsane</option>
+            </select>
+            <noscript>
+                <input type="submit" value="Filter">
+            </noscript>
+        </form>
+    </div>
+    
+    {% if pivot_data %}
+        <table>
+            <thead>
+                <!-- Top level: Difficulty headers -->
+                <tr>
+                    <th rowspan="3" class="map-column">Map</th>
+                    <th rowspan="3" class="narrow-column">Win Rate</th>
+                    <th rowspan="3" class="narrow-column">Avg Game Length</th>
+                    {% for difficulty_group in header_structure %}
+                    <th colspan="{{ difficulty_group.span }}" class="difficulty-header {% if not forloop.last %}difficulty-border-right{% endif %}">{{ difficulty_group.difficulty }} {{ difficulty_group.win_rate }}</th>
+                    {% endfor %}
+                </tr>
+                <!-- Second level: Race headers -->
+                <tr>
+                    {% for difficulty_group in header_structure %}
+                        {% for race_group in difficulty_group.races %}
+                        <th colspan="{{ race_group.span }}" class="race-header {% if not forloop.last %}race-border-right{% elif not forloop.parentloop.last %}difficulty-border-right{% endif %}">{{ race_group.name }} {{ race_group.win_rate }}</th>
+                        {% endfor %}
+                    {% endfor %}
+                </tr>
+                <!-- Third level: Build headers -->
+                <tr>
+                    {% for difficulty_group in header_structure %}
+                        {% for race_group in difficulty_group.races %}
+                            {% for build in race_group.builds %}
+                            <th class="{% if forloop.last and not forloop.parentloop.last %}race-border-right{% elif forloop.last and forloop.parentloop.last and not forloop.parentloop.parentloop.last %}difficulty-border-right{% endif %}">{{ build }}</th>
+                            {% endfor %}
+                        {% endfor %}
+                    {% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in pivot_data %}
+                <tr>
+                    <td class="map-column"><strong>{{ row.map_name }}</strong></td>
+                    <td>
+                        {% if row.overall_win_rate %}
+                            {% with win_pct=row.overall_win_rate|slice:':-1'|add:'0' %}
+                            <span class="{% if win_pct >= 80 %}very-high-winrate{% elif win_pct >= 60 %}high-winrate{% elif win_pct >= 40 %}medium-winrate{% elif win_pct >= 20 %}low-winrate{% else %}very-low-winrate{% endif %}" style="padding: 4px; border-radius: 3px;">
+                                {{ row.overall_win_rate }} ({{ row.overall_wins }}/{{ row.overall_games }})
+                            </span>
+                            {% endwith %}
+                        {% else %}
+                            <span class="no-data" style="padding: 4px; border-radius: 3px;">-</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ row.overall_avg_duration|format_duration|default:"-" }}</td>
+                    {% for cell_data in row.results %}
+                        {% if cell_data.win_rate %}
+                            {% with win_pct=cell_data.win_rate|slice:':-1'|add:'0' %}
+                            <td class="{% if win_pct >= 80 %}very-high-winrate{% elif win_pct >= 60 %}high-winrate{% elif win_pct >= 40 %}medium-winrate{% elif win_pct >= 20 %}low-winrate{% else %}very-low-winrate{% endif %}">
+                                {{ cell_data.win_rate }} ({{ cell_data.wins }}/{{ cell_data.games_played }})<br>
+                                <small>{{ cell_data.avg_duration|format_duration }}</small>
+                            </td>
+                            {% endwith %}
+                        {% else %}
+                        <td class="no-data">-</td>
+                        {% endif %}
+                    {% endfor %}
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <p>No match data available.</p>
+    {% endif %}
+</body>
+</html>

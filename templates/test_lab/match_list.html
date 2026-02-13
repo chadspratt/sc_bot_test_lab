@@ -1,0 +1,136 @@
+{% load time_filters %}
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Match Results</title>
+    <style>
+        table { border-collapse: collapse; width: 100%; margin-top: 20px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: center; }
+        th { background-color: #f2f2f2; font-weight: bold; position: sticky; z-index: 10; }
+        thead tr:first-child th { top: 0; }
+        thead tr:nth-child(2) th { top: 41px; }
+        .victory { background-color: #d4edda; color: #155724; }
+        .defeat { background-color: #f8d7da; color: #721c24; }
+        .crash { background-color: #fff3cd; color: #856404; }
+        .pending { background-color: #e2e3e5; color: #383d41; }
+        /* .opponent-header { writing-mode: vertical-rl; text-orientation: mixed; } */
+        .trigger-section { margin-bottom: 20px; }
+        .trigger-btn { background-color: #007bff; color: white; padding: 10px 20px; border: none; cursor: pointer; font-size: 16px; }
+        .trigger-btn:hover { background-color: #0056b3; }
+        .messages { margin: 10px 0; }
+        .success { color: green; padding: 10px; background-color: #d4edda; border: 1px solid #c3e6cb; }
+        .error { color: red; padding: 10px; background-color: #f8d7da; border: 1px solid #f5c6cb; }
+        
+        /* Pronounced borders for group separation */
+        .difficulty-border-right { border-right: 3px solid #333 !important; }
+        .race-border-right { border-right: 2px solid #666 !important; }
+        .difficulty-header { background-color: #e9ecef; font-weight: bold; }
+        .race-header { background-color: #f8f9fa; font-weight: bold; }
+        .win-percentage-row { background-color: #f8f9fa; font-weight: bold; border-top: 2px solid #333; }
+        
+        .nav-links { margin: 20px 0; }
+        .nav-links a { margin-right: 20px; padding: 10px; background-color: #007bff; color: white; text-decoration: none; border-radius: 5px; }
+        .nav-links a:hover { background-color: #0056b3; }
+
+        /* Narrow first three columns */
+        .narrow-column { width: 80px; min-width: 80px; padding: 4px; }
+        .test-group-column { width: 90px; min-width: 90px; padding: 4px; }
+    </style>
+</head>
+<body>
+    <div class="nav-links">
+        <a href="{% url 'match_list' %}{% if selected_difficulty %}?difficulty={{ selected_difficulty }}{% endif %}">View by Test Group</a>
+        <a href="{% url 'map_breakdown' %}{% if selected_difficulty %}?difficulty={{ selected_difficulty }}{% endif %}">View by Map</a>
+        <a href="{% url 'building_timing' %}">Building Timing</a>
+        <a href="{% url 'utilities' %}">Utilities</a>
+    </div>
+    <h1>Match Test Results</h1>
+    
+    <div class="trigger-section">
+        <form method="get" action="" style="display: inline-block; margin-right: 20px;">
+            <label for="difficulty">Filter by Difficulty:</label>
+            <select name="difficulty" id="difficulty" onchange="this.form.submit()">
+                <option value="">All Difficulties</option>
+                <option value="Easy" {% if selected_difficulty == 'Easy' %}selected{% endif %}>Easy</option>
+                <option value="Medium" {% if selected_difficulty == 'Medium' %}selected{% endif %}>Medium</option>
+                <option value="MediumHard" {% if selected_difficulty == 'MediumHard' %}selected{% endif %}>MediumHard</option>
+                <option value="Hard" {% if selected_difficulty == 'Hard' %}selected{% endif %}>Hard</option>
+                <option value="Harder" {% if selected_difficulty == 'Harder' %}selected{% endif %}>Harder</option>
+                <option value="VeryHard" {% if selected_difficulty == 'VeryHard' %}selected{% endif %}>VeryHard</option>
+                <option value="CheatVision" {% if selected_difficulty == 'CheatVision' %}selected{% endif %}>CheatVision</option>
+                <option value="CheatMoney" {% if selected_difficulty == 'CheatMoney' %}selected{% endif %}>CheatMoney</option>
+                <option value="CheatInsane" {% if selected_difficulty == 'CheatInsane' %}selected{% endif %}>CheatInsane</option>
+            </select>
+            <noscript>
+                <input type="submit" value="Filter">
+            </noscript>
+        </form>
+        
+        <form method="post" action="{% url 'trigger_tests' %}" style="display: inline-block;">
+            {% csrf_token %}
+            <input type="hidden" name="difficulty" value="{{ selected_difficulty }}">
+            <button type="submit" class="trigger-btn">
+                Start Test Suite ({% if selected_difficulty %} {{ selected_difficulty }} {% else %} CheatInsane {% endif %})
+            </button>
+        </form>
+    </div>
+    
+    {% if messages %}
+        <div class="messages">
+            {% for message in messages %}
+                <div class="{% if message.tags %}{{ message.tags }}{% endif %}">{{ message }}</div>
+            {% endfor %}
+        </div>
+    {% endif %}
+    
+    {% if pivot_data %}
+        <table>
+            <thead>
+                <!-- Two level headers: Race and Build -->
+                <tr>
+                    <th rowspan="2" class="test-group-column">Test Group</th>
+                    <th rowspan="2" class="narrow-column">Win %</th>
+                    <th rowspan="2" class="narrow-column">Avg Length</th>
+                    <th rowspan="2" class="narrow-column">Difficulty</th>
+                    {% for race_group in header_structure %}
+                        <th colspan="{{ race_group.span }}" class="race-header {% if not forloop.last %}race-border-right{% elif not forloop.parentloop.last %}difficulty-border-right{% endif %}">{{ race_group.name }} {{ race_group.win_rate }}</th>
+                    {% endfor %}
+                </tr>
+                <!-- Second level: Build headers -->
+                <tr>
+                    {% for race_group in header_structure %}
+                        {% for build in race_group.builds %}
+                        <th class="opponent-header {% if forloop.last and not forloop.parentloop.last %}race-border-right{% elif forloop.last and forloop.parentloop.last and not forloop.parentloop.parentloop.last %}difficulty-border-right{% endif %}">
+                            {{ build }}
+                        </th>
+                        {% endfor %}
+                    {% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in pivot_data %}
+                <tr>
+                    <td class="test-group-column"><strong>{{ row.test_group_id }}</strong></td>
+                    <td class="narrow-column"><strong>{{ row.group_win_percentage }}</strong></td>
+                    <td class="narrow-column"><strong>{{ row.avg_duration|format_duration }}</strong></td>
+                    <td class="narrow-column"><strong>{{ row.difficulty }}</strong></td>
+                    {% for match_data in row.results %}
+                        {% if match_data %}
+                        <td class="{% if match_data.result == 'Victory' %}victory{% elif match_data.result == 'Defeat' %}defeat{% elif match_data.result == 'Crash' %}crash{% elif match_data.result == 'Pending' %}pending{% endif %}">
+                            <a href="{% url 'serve_replay' match_id=match_data.id %}">{{ match_data.id }}</a>
+                            <a href="{% url 'serve_log' match_id=match_data.id %}" target="_blank">{{ match_data.duration_in_game_time|format_duration }}</a>{% if match_data.is_best_time %} <span title="Fastest win or slowest loss on map">⭐</span>{% endif %}<br>
+                            <small>{{ match_data.map_name }}</small>
+                        </td>
+                        {% else %}
+                        <td>-</td>
+                        {% endif %}
+                    {% endfor %}
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <p>No match data available.</p>
+    {% endif %}
+</body>
+</html>
