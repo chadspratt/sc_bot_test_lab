@@ -1,4 +1,5 @@
 {% load time_filters %}
+{% load test_lab_filters %}
 <!DOCTYPE html>
 <html>
 <head>
@@ -69,6 +70,7 @@
         <form method="post" action="{% url 'trigger_tests' %}" style="display: inline-block;">
             {% csrf_token %}
             <input type="hidden" name="difficulty" value="{{ selected_difficulty }}">
+            <input type="text" name="description" placeholder="Test group description" style="padding: 6px 10px; border: 1px solid #555; border-radius: 4px; background: #2a2a2a; color: #e0e0e0; margin-right: 6px; width: 250px;">
             <button type="submit" class="trigger-btn">
                 Start Test Suite ({% if selected_difficulty %} {{ selected_difficulty }} {% else %} CheatInsane {% endif %})
             </button>
@@ -110,7 +112,7 @@
             <tbody>
                 {% for row in pivot_data %}
                 <tr>
-                    <td class="test-group-column"><strong>{{ row.test_group_id }}</strong></td>
+                    <td class="test-group-column" title="{{ test_groups|lookup:row.test_group_id }}"><strong>{{ row.test_group_id }}</strong></td>
                     <td class="narrow-column"><strong>{{ row.group_win_percentage }}</strong></td>
                     <td class="narrow-column"><strong>{{ row.avg_duration|format_duration }}</strong></td>
                     <td class="narrow-column"><strong>{{ row.difficulty }}</strong></td>

@@ -12,4 +12,5 @@ urlpatterns = [
     path('utilities/', views.utilities, name='utilities'),
     path('utilities/recompile-cython/', views.recompile_cython, name='recompile_cython'),
     path('utilities/run-single-match/', views.run_single_match, name='run_single_match'),
+    path('api/trigger-tests/', views.api_trigger_tests, name='api_trigger_tests'),
 ]

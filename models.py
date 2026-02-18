@@ -1,6 +1,18 @@
 from django.db import models
 
 
+class TestGroup(models.Model):
+    class Meta:
+        db_table = 'test_group'
+
+    id = models.AutoField(primary_key=True)
+    description = models.CharField(max_length=255, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Group {self.id}: {self.description}" if self.description else f"Group {self.id}"
+
+
 class Match(models.Model):
     class Meta:
         db_table = 'match'
@@ -12,7 +24,7 @@ class Match(models.Model):
     Result = models.TextChoices('Result', 'Victory Defeat Tie Undecided')
 
     id = models.AutoField(primary_key=True)
-    test_group_id = models.IntegerField()
+    test_group = models.ForeignKey(TestGroup, on_delete=models.CASCADE)
     start_timestamp = models.DateTimeField()
     end_timestamp = models.DateTimeField(null=True, blank=True)
     map_name = models.CharField(max_length=100)
@@ -26,7 +38,7 @@ class Match(models.Model):
     is_best_time: bool = False
 
     def __str__(self):
-        return f"Group {self.test_group_id} - {self.map_name} vs {self.opponent_race}-{self.opponent_build} ({self.result})"
+        return f"Group {self.test_group.id} - {self.map_name} vs {self.opponent_race}-{self.opponent_build} ({self.result})"
 
 class MatchEvent(models.Model):
     class Meta:

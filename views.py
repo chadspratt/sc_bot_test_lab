@@ -5,12 +5,14 @@ from collections import defaultdict
 from datetime import datetime
 
 from django.contrib import messages
-from django.db.models import Avg, Max, Min
-from django.http import Http404, HttpResponse, HttpResponseRedirect
+from django.db.models import Max, Min
+from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_POST
 
-from .models import Match, MatchEvent
+from .models import Match, MatchEvent, TestGroup
 
 
 def match_list(request):
@@ -115,6 +117,9 @@ def match_list(request):
     
     # Sort test groups for consistent display
     sorted_groups = sorted(grouped_matches.keys(), reverse=True)
+    
+    # Fetch test group descriptions
+    test_groups = {tg.id: tg.description for tg in TestGroup.objects.filter(id__in=sorted_groups)}
     
     # Create the pivot table data
     max_group_id = max(sorted_groups) if sorted_groups else -1
@@ -222,7 +227,8 @@ def match_list(request):
         'pivot_data': pivot_data,
         'opponents': sorted_opponents,
         'header_structure': header_structure,
-        'selected_difficulty': selected_difficulty
+        'selected_difficulty': selected_difficulty,
+        'test_groups': test_groups
     })
 
 def get_next_test_group_id() -> int:
@@ -249,70 +255,88 @@ def create_pending_match(test_group_id: int, race: str, build: str, difficulty: 
     assert isinstance(match.id, int)
     return match.id
 
+DOCKER_COMPOSE_PATH = r'c:\Users\inter\Documents\sc_bot\bot'
+LOGS_DIR = r'C:\Users\inter\Documents\StarCraft II\Replays\Multiplayer\docker'
+
+
+def start_test_suite(description: str, difficulty: str = 'CheatInsane') -> tuple[int, int]:
+    """
+    Create a TestGroup and launch all 15 Docker match containers.
+    Returns (test_group_id, number of matches started).
+    Raises FileNotFoundError if docker-compose.yml is missing.
+    """
+    compose_file = os.path.join(DOCKER_COMPOSE_PATH, 'docker-compose.yml')
+    if not os.path.exists(compose_file):
+        raise FileNotFoundError(f'docker-compose.yml not found at: {compose_file}')
+
+    os.makedirs(LOGS_DIR, exist_ok=True)
+
+    test_group = TestGroup.objects.create(description=description)
+    test_group_id = test_group.id
+
+    count = 0
+    for race in ('protoss', 'terran', 'zerg'):
+        for build in ('rush', 'timing', 'macro', 'power', 'air'):
+            match_id = create_pending_match(test_group_id, race, build, difficulty)
+            log_file = os.path.join(LOGS_DIR, f"{match_id}_{race}_{build}.log")
+            command = [
+                'docker', 'compose', 'run', '--rm',
+                '-e', f'RACE={race}',
+                '-e', f'BUILD={build}',
+                '-e', f'MATCH_ID={match_id}',
+                '-e', f'DIFFICULTY={difficulty}',
+                'bot',
+            ]
+            with open(log_file, 'w') as log:
+                subprocess.Popen(command, cwd=DOCKER_COMPOSE_PATH, stdout=log, stderr=log)
+            count += 1
+
+    return test_group_id, count
+
+
 def trigger_tests(request):
-    """Trigger the test suite by starting Docker containers directly."""
+    """Trigger the test suite from the web UI."""
     if request.method == 'POST':
+        difficulty = request.POST.get('difficulty', '') or 'CheatInsane'
+        description = request.POST.get('description', '').strip()
+
         try:
-            docker_compose_path = r'c:\Users\inter\Documents\sc_bot\bot'
-            logs_dir = r'C:\Users\inter\Documents\StarCraft II\Replays\Multiplayer\docker'
-            
-            # Create logs directory if it doesn't exist
-            os.makedirs(logs_dir, exist_ok=True)
-            
-            # Check if docker-compose.yml exists
-            compose_file = os.path.join(docker_compose_path, 'docker-compose.yml')
-            if not os.path.exists(compose_file):
-                messages.error(request, f'docker-compose.yml not found at: {compose_file}')
-                return redirect('match_list')
-            
-            # Get difficulty filter from the current page state
-            difficulty = request.POST.get('difficulty', '')
-            
-            # Get next test group ID
-            test_group_id = get_next_test_group_id()
-            
-            # # Clean up containers first
-            # cleanup_command = ['docker', 'container', 'prune', '-f']
-            # subprocess.run(cleanup_command, cwd=docker_compose_path)
-            
-            # Start all test jobs
-            processes = []
-            for race in ('protoss', 'terran', 'zerg'):
-                for build in ['rush', 'timing', 'macro', 'power', 'air']:
-                    # Create pending match entry and get match ID
-                    match_id = create_pending_match(test_group_id, race, build, difficulty)
-                    
-                    # Create log file path
-                    log_file = os.path.join(logs_dir, f"{match_id}_{race}_{build}.log")
-                    
-                    # Build Docker compose command with environment variables
-                    command = ['docker', 'compose', 'run', '--rm', 
-                              '-e', f'RACE={race}', 
-                              '-e', f'BUILD={build}',
-                              '-e', f'MATCH_ID={match_id}']
-                    
-                    if difficulty:
-                        command.extend(['-e', f'DIFFICULTY={difficulty}'])
-                    
-                    command.append('bot')
-                    
-                    # Start the process with output redirected to log file
-                    with open(log_file, 'w') as log:
-                        process = subprocess.Popen(command, cwd=docker_compose_path, stdout=log, stderr=log)
-                    processes.append((process, f"{race}_{build}"))
-            
-            difficulty_msg = f" with difficulty {difficulty}" if difficulty else ""
-            messages.success(request, f'Test suite started successfully{difficulty_msg}! {len(processes)} tests running. Logs in: {logs_dir}')
-            
+            _, count = start_test_suite(description=description, difficulty=difficulty)
+            messages.success(request, f'Test suite started with difficulty {difficulty}! {count} tests running.')
         except Exception as e:
             messages.error(request, f'Failed to start test suite: {str(e)}')
-    
-    # Preserve the difficulty filter in the redirect
+
     difficulty = request.POST.get('difficulty', '')
     if difficulty:
         return redirect(f"{reverse('match_list')}?difficulty={difficulty}")
-    else:
-        return redirect('match_list')
+    return redirect('match_list')
+
+
+@csrf_exempt
+@require_POST
+def api_trigger_tests(request):
+    """API endpoint to trigger test suite (called from git post-commit hook)."""
+    import json
+    try:
+        body = json.loads(request.body) if request.body else {}
+    except json.JSONDecodeError:
+        body = {}
+
+    difficulty = body.get('difficulty', 'CheatInsane')
+    description = body.get('description', '')
+
+    try:
+        test_group_id, count = start_test_suite(description=description, difficulty=difficulty)
+        return JsonResponse({
+            'status': 'ok',
+            'test_group_id': test_group_id,
+            'matches_started': count,
+            'difficulty': difficulty,
+            'description': description,
+        })
+    except Exception as e:
+        return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
+
 
 def serve_replay(request, match_id):
     """Open replay files with StarCraft 2 locally."""
@@ -328,7 +352,7 @@ def serve_replay(request, match_id):
     file_path = replay_files[0]  # Take the first matching file
 
     subprocess.Popen([r"C:\Program Files (x86)\StarCraft II\Support\SC2Switcher.exe", file_path])
-    from django.http import HttpResponse
+
     return HttpResponse(status=204)
 
 def serve_log(request, match_id):
@@ -714,8 +738,8 @@ def run_single_match(request):
         build = request.POST.get('build', 'randombuild')
         difficulty = request.POST.get('difficulty', 'CheatInsane')
 
-        docker_compose_path = r'c:\Users\inter\Documents\sc_bot\bot'
-        logs_dir = r'C:\Users\inter\Documents\StarCraft II\Replays\Multiplayer\docker'
+        docker_compose_path = DOCKER_COMPOSE_PATH
+        logs_dir = LOGS_DIR
         os.makedirs(logs_dir, exist_ok=True)
 
         try:
