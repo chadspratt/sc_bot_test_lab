@@ -271,7 +271,9 @@ def start_test_suite(description: str, difficulty: str = 'CheatInsane') -> tuple
 
     os.makedirs(LOGS_DIR, exist_ok=True)
 
-    test_group = TestGroup.objects.create(description=description)
+    test_group = TestGroup.objects.create(
+        description=description[:255]  # Truncate to fit CharField max_length
+    )
     test_group_id = test_group.id
 
     count = 0
