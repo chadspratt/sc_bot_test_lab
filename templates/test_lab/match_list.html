@@ -40,8 +40,8 @@
 </head>
 <body>
     <div class="nav-links">
-        <a href="{% url 'match_list' %}{% if selected_difficulty %}?difficulty={{ selected_difficulty }}{% endif %}">View by Test Group</a>
-        <a href="{% url 'map_breakdown' %}{% if selected_difficulty %}?difficulty={{ selected_difficulty }}{% endif %}">View by Map</a>
+        <a href="{% url 'match_list' %}{% if selected_difficulty or selected_limit %}?{% if selected_difficulty %}difficulty={{ selected_difficulty }}{% endif %}{% if selected_difficulty and selected_limit %}&{% endif %}{% if selected_limit %}limit={{ selected_limit }}{% endif %}{% endif %}">View by Test Group</a>
+        <a href="{% url 'map_breakdown' %}{% if selected_difficulty or selected_limit %}?{% if selected_difficulty %}difficulty={{ selected_difficulty }}{% endif %}{% if selected_difficulty and selected_limit %}&{% endif %}{% if selected_limit %}limit={{ selected_limit }}{% endif %}{% endif %}">View by Map</a>
         <a href="{% url 'building_timing' %}">Building Timing</a>
         <a href="{% url 'utilities' %}">Utilities</a>
         <a href="{% url 'position_is_between' %}">Geometry</a>
@@ -63,6 +63,22 @@
                 <option value="CheatMoney" {% if selected_difficulty == 'CheatMoney' %}selected{% endif %}>CheatMoney</option>
                 <option value="CheatInsane" {% if selected_difficulty == 'CheatInsane' %}selected{% endif %}>CheatInsane</option>
             </select>
+            {% if selected_limit %}<input type="hidden" name="limit" value="{{ selected_limit }}">{% endif %}
+            <noscript>
+                <input type="submit" value="Filter">
+            </noscript>
+        </form>
+
+        <form method="get" action="" style="display: inline-block; margin-left: 10px;">
+            <label for="limit">Show:</label>
+            <select name="limit" id="limit" onchange="this.form.submit()">
+                <option value="">All Test Groups</option>
+                <option value="10" {% if selected_limit == '10' %}selected{% endif %}>Last 10</option>
+                <option value="25" {% if selected_limit == '25' %}selected{% endif %}>Last 25</option>
+                <option value="50" {% if selected_limit == '50' %}selected{% endif %}>Last 50</option>
+                <option value="100" {% if selected_limit == '100' %}selected{% endif %}>Last 100</option>
+            </select>
+            {% if selected_difficulty %}<input type="hidden" name="difficulty" value="{{ selected_difficulty }}">{% endif %}
             <noscript>
                 <input type="submit" value="Filter">
             </noscript>

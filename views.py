@@ -25,20 +25,23 @@ def match_list(request):
     
     # Get difficulty filter from request
     selected_difficulty = request.GET.get('difficulty', '')
-    
-    # Debug: Print the filter value and all GET parameters
-    print(f"DEBUG: All GET parameters: {request.GET}")
-    print(f"DEBUG: Selected difficulty filter: '{selected_difficulty}'")
+    selected_limit = request.GET.get('limit', '')
     
     matches = Match.objects.all().exclude(test_group_id=-1)
-    
-    # Debug: Print total matches before filtering
-    print(f"DEBUG: Total matches before filtering: {matches.count()}")
     
     # Apply difficulty filter if selected
     if selected_difficulty:
         matches = matches.filter(opponent_difficulty=selected_difficulty)
-        print(f"DEBUG: Matches after filtering by '{selected_difficulty}': {matches.count()}")
+    
+    # Apply test group limit if selected — only include matches from the N most recent test groups
+    if selected_limit and selected_limit.isdigit():
+        recent_group_ids = list(
+            Match.objects.exclude(test_group_id=-1)
+            .values_list('test_group_id', flat=True)
+            .distinct()
+            .order_by('-test_group_id')[:int(selected_limit)]
+        )
+        matches = matches.filter(test_group_id__in=recent_group_ids)
     
     # Group matches by test_group_id and create pivot structure
     grouped_matches = defaultdict(dict[str,Match])
@@ -228,6 +231,7 @@ def match_list(request):
         'opponents': sorted_opponents,
         'header_structure': header_structure,
         'selected_difficulty': selected_difficulty,
+        'selected_limit': selected_limit,
         'test_groups': test_groups
     })
 
@@ -383,12 +387,23 @@ def map_breakdown(request):
     
     # Get difficulty filter from request
     selected_difficulty = request.GET.get('difficulty', '')
+    selected_limit = request.GET.get('limit', '')
     
     matches = Match.objects.all().exclude(test_group_id=-1)
     
     # Apply difficulty filter if selected
     if selected_difficulty:
         matches = matches.filter(opponent_difficulty=selected_difficulty)
+    
+    # Apply test group limit if selected — only include matches from the N most recent test groups
+    if selected_limit and selected_limit.isdigit():
+        recent_group_ids = list(
+            Match.objects.exclude(test_group_id=-1)
+            .values_list('test_group_id', flat=True)
+            .distinct()
+            .order_by('-test_group_id')[:int(selected_limit)]
+        )
+        matches = matches.filter(test_group_id__in=recent_group_ids)
     
     # Group matches by map and create pivot structure
     grouped_matches = defaultdict(lambda: defaultdict(list))  # map -> opponent -> [matches]
@@ -577,7 +592,8 @@ def map_breakdown(request):
         'pivot_data': pivot_data,
         'opponents': sorted_opponents,
         'header_structure': header_structure,
-        'selected_difficulty': selected_difficulty
+        'selected_difficulty': selected_difficulty,
+        'selected_limit': selected_limit
     })
 
 
