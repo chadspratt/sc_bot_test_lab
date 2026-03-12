@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Position Is Between — Geometry Visualizer</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: Arial, sans-serif; background: #1a1a2e; color: #e0e0e0; display: flex; flex-direction: column; align-items: center; min-height: 100vh; }
+
+        .nav-links { margin: 20px 0; }
+        .nav-links a { margin-right: 20px; padding: 10px; background-color: #007bff; color: white; text-decoration: none; border-radius: 5px; }
+        .nav-links a:hover { background-color: #0056b3; }
+
+        h1 { margin: 10px 0 4px; font-size: 1.4em; }
+        .subtitle { font-size: 0.85em; color: #aaa; margin-bottom: 12px; }
+
+        .container { display: flex; gap: 24px; align-items: flex-start; flex-wrap: wrap; justify-content: center; }
+
+        canvas { border: 2px solid #444; border-radius: 8px; background: #0f0f23; cursor: grab; }
+        canvas.dragging { cursor: grabbing; }
+
+        .info-panel {
+            background: #16213e; border: 1px solid #334; border-radius: 8px;
+            padding: 16px 20px; min-width: 300px; font-size: 0.95em; line-height: 1.8;
+        }
+        .info-panel h2 { font-size: 1.1em; margin-bottom: 8px; color: #7ecfff; }
+
+        .result-true  { color: #4cff72; font-weight: bold; font-size: 1.1em; }
+        .result-false { color: #ff6b6b; font-weight: bold; font-size: 1.1em; }
+
+        .distance-label { color: #bbb; }
+        .distance-value { color: #fff; font-family: monospace; }
+
+        .legend { display: flex; gap: 18px; margin-top: 8px; }
+        .legend-item { display: flex; align-items: center; gap: 6px; font-size: 0.85em; }
+        .legend-dot { width: 14px; height: 14px; border-radius: 50%; border: 2px solid #fff; }
+
+        .code-block {
+            background: #0d1117; border: 1px solid #334; border-radius: 6px;
+            padding: 10px 14px; margin-top: 12px; font-family: monospace;
+            font-size: 0.82em; line-height: 1.6; white-space: pre; color: #c9d1d9; overflow-x: auto;
+        }
+        .code-kw  { color: #ff7b72; }
+        .code-fn  { color: #d2a8ff; }
+        .code-var { color: #79c0ff; }
+        .code-cmt { color: #8b949e; }
+
+        .controls { margin-top: 12px; }
+        .controls h2 { margin-bottom: 6px; }
+        .slider-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+        .slider-row label { min-width: 110px; font-size: 0.9em; color: #bbb; }
+        .slider-row input[type=range] { flex: 1; accent-color: #7ecfff; }
+        .slider-val { min-width: 42px; text-align: right; font-family: monospace; color: #fff; font-size: 0.9em; }
+        .slider-desc { font-size: 0.78em; color: #888; margin-top: -2px; margin-bottom: 6px; line-height: 1.4; }
+        .reset-btn { background: #334; border: 1px solid #556; color: #ccc; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 0.82em; margin-top: 4px; }
+        .reset-btn:hover { background: #445; }
+    </style>
+</head>
+<body>
+    <div class="nav-links">
+        <a href="{% url 'match_list' %}">View by Test Group</a>
+        <a href="{% url 'map_breakdown' %}">View by Map</a>
+        <a href="{% url 'building_timing' %}">Building Timing</a>
+        <a href="{% url 'utilities' %}">Utilities</a>
+        <a href="{% url 'position_is_between' %}">Geometry</a>
+    </div>
+
+    <h1>GeometryMixin.position_is_between</h1>
+    <p class="subtitle">Drag the three points to see how the function evaluates in real time.</p>
+
+    <div class="container">
+        <canvas id="canvas" width="600" height="600"></canvas>
+
+        <div class="info-panel">
+            <h2>Result</h2>
+            <div id="result-text">—</div>
+
+            <h2 style="margin-top: 14px;">Weighted Distances²</h2>
+            <div>
+                <span class="distance-label">Threshold (wAB² × r²):</span>
+                <span class="distance-value" id="dist-ab">—</span>
+            </div>
+            <div>
+                <span class="distance-label">wAP² (point_a ↔ point_to_check):</span>
+                <span class="distance-value" id="dist-ap">—</span>
+            </div>
+            <div>
+                <span class="distance-label">wPB² (point_to_check ↔ point_b):</span>
+                <span class="distance-value" id="dist-pb">—</span>
+            </div>
+
+            <h2 style="margin-top: 14px;">Conditions</h2>
+            <div>
+                <span class="distance-label">wAP² &lt; threshold:</span>
+                <span class="distance-value" id="cond-ap">—</span>
+            </div>
+            <div>
+                <span class="distance-label">wPB² &lt; threshold:</span>
+                <span class="distance-value" id="cond-pb">—</span>
+            </div>
+
+            <h2 style="margin-top: 14px;">Coordinates</h2>
+            <div>
+                <span class="distance-label">point_a:</span>
+                <span class="distance-value" id="coord-a">—</span>
+            </div>
+            <div>
+                <span class="distance-label">point_b:</span>
+                <span class="distance-value" id="coord-b">—</span>
+            </div>
+            <div>
+                <span class="distance-label">point_to_check:</span>
+                <span class="distance-value" id="coord-p">—</span>
+            </div>
+
+            <div class="controls">
+                <h2>Adjustments</h2>
+                <p class="slider-desc">Replace Euclidean distance with a weighted metric that decomposes into parallel (along A→B) and perpendicular components. All at 1.0 = original function.</p>
+                <div class="slider-row">
+                    <label>Radius multiplier</label>
+                    <input type="range" id="w-radius" min="0.2" max="3.0" step="0.05" value="1.0">
+                    <span class="slider-val" id="w-radius-val">1.00</span>
+                </div>
+                <p class="slider-desc">Scales the threshold distance. At 1.0 each perimeter passes through the other point. &gt;1.0 extends the true-region beyond the opposite point.</p>
+                <div class="slider-row">
+                    <label>Parallel (‖) w<sub>par</sub></label>
+                    <input type="range" id="w-par" min="0.1" max="4.0" step="0.05" value="1.0">
+                    <span class="slider-val" id="w-par-val">1.00</span>
+                </div>
+                <button class="reset-btn" id="reset-weights">Reset all to 1.0</button>
+            </div>
+
+            <div class="legend">
+                <div class="legend-item"><div class="legend-dot" style="background:#ff6b6b;"></div> point_a (A)</div>
+                <div class="legend-item"><div class="legend-dot" style="background:#4dabf7;"></div> point_b (B)</div>
+                <div class="legend-item"><div class="legend-dot" style="background:#ffd43b;"></div> point_to_check (P)</div>
+            </div>
+
+            <div class="code-block"><span class="code-cmt"># Original function (w_par=1, w_perp=1):</span>
+<span class="code-kw">def</span> <span class="code-fn">position_is_between</span>(point_to_check, point_a, point_b):
+    <span class="code-var">ab_distance</span> = cy_distance_to_squared(point_a, point_b)
+    <span class="code-var">ap_distance</span> = cy_distance_to_squared(point_a, point_to_check)
+    <span class="code-var">pb_distance</span> = cy_distance_to_squared(point_to_check, point_b)
+    <span class="code-kw">return</span> ap_distance &lt; ab_distance <span class="code-kw">and</span> pb_distance &lt; ab_distance
+
+<span class="code-cmt"># Weighted variant (this visualizer):</span>
+<span class="code-cmt"># Decomposes each vector into parallel (‖ A→B)</span>
+<span class="code-cmt"># and perpendicular (⊥) components, then:</span>
+<span class="code-cmt">#   wDist² = w_par·‖² + ⊥²</span>
+<span class="code-cmt">#   threshold = wAB² * radius_mult²</span>
+<span class="code-cmt">#   return wAP² &lt; threshold and wPB² &lt; threshold</span></div>
+        </div>
+    </div>
+
+    <script>
+    (() => {
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const W = canvas.width, H = canvas.height;
+        const SCALE = W / 200;
+
+        function sc2ToCanvas(x, y) { return [x * SCALE, H - y * SCALE]; }
+        function canvasToSc2(cx, cy) { return [cx / SCALE, (H - cy) / SCALE]; }
+
+        let points = { a: { x: 50, y: 100 }, b: { x: 150, y: 100 }, p: { x: 100, y: 130 } };
+        const COLORS = { a: '#ff6b6b', b: '#4dabf7', p: '#ffd43b' };
+        const LABELS = { a: 'A', b: 'B', p: 'P' };
+        const RADIUS = 12;
+        let dragging = null;
+
+        // --- Slider elements ---
+        const sliderPar    = document.getElementById('w-par');
+        const sliderRadius = document.getElementById('w-radius');
+        const valPar       = document.getElementById('w-par-val');
+        const valRadius    = document.getElementById('w-radius-val');
+        const resetBtn     = document.getElementById('reset-weights');
+
+        sliderPar.addEventListener('input',    () => { valPar.textContent    = parseFloat(sliderPar.value).toFixed(2);    draw(); });
+        sliderRadius.addEventListener('input', () => { valRadius.textContent = parseFloat(sliderRadius.value).toFixed(2); draw(); });
+        resetBtn.addEventListener('click', () => {
+            sliderPar.value = '1.0';    valPar.textContent    = '1.00';
+            sliderRadius.value = '1.0'; valRadius.textContent = '1.00';
+            draw();
+        });
+
+        // --- Weighted distance ---
+        // Decomposes the vector from p1→p2 into components parallel and
+        // perpendicular to the A→B axis, then applies weight to parallel:
+        //   wDistSq = wPar * parallel² + perpendicular²
+        function axisDir() {
+            const dx = points.b.x - points.a.x;
+            const dy = points.b.y - points.a.y;
+            const len = Math.sqrt(dx * dx + dy * dy) || 1e-9;
+            return { x: dx / len, y: dy / len };
+        }
+
+        function weightedDistSq(p1, p2, dir, wPar) {
+            const dx = p2.x - p1.x, dy = p2.y - p1.y;
+            const par  = dx * dir.x + dy * dir.y;       // dot product (parallel)
+            const perp = dx * (-dir.y) + dy * dir.x;    // cross product (perpendicular)
+            return wPar * par * par + perp * perp;
+        }
+
+        function plainDistSq(p1, p2) { return (p1.x - p2.x) ** 2 + (p1.y - p2.y) ** 2; }
+
+        function evaluate() {
+            const wPar    = parseFloat(sliderPar.value);
+            const rMult   = parseFloat(sliderRadius.value);
+            const dir     = axisDir();
+            const ab_raw  = weightedDistSq(points.a, points.b, dir, wPar);
+            const threshold = ab_raw * rMult * rMult;
+            const ap = weightedDistSq(points.a, points.p, dir, wPar);
+            const pb = weightedDistSq(points.p, points.b, dir, wPar);
+            return { result: ap < threshold && pb < threshold, ab: ab_raw, threshold, ap, pb, wPar, rMult, dir };
+        }
+
+        // --- Drawing ---
+        function drawEllipsePath(cx, cy, rPar, rPerp, angle) {
+            ctx.beginPath();
+            // Canvas ellipse rotation is CW from +x; our angle is CCW from +x in SC2
+            // but since canvas y is flipped, the rotation sign flips too → use -angle
+            ctx.ellipse(cx, cy, rPar, rPerp, -angle, 0, Math.PI * 2);
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, W, H);
+
+            // Grid
+            ctx.strokeStyle = '#222'; ctx.lineWidth = 0.5;
+            for (let i = 0; i <= 200; i += 20) {
+                const [cx, cy] = sc2ToCanvas(i, 0);   const [cx2, cy2] = sc2ToCanvas(i, 200);
+                ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx2, cy2); ctx.stroke();
+                const [gx, gy] = sc2ToCanvas(0, i);   const [gx2, gy2] = sc2ToCanvas(200, i);
+                ctx.beginPath(); ctx.moveTo(gx, gy); ctx.lineTo(gx2, gy2); ctx.stroke();
+            }
+            ctx.fillStyle = '#555'; ctx.font = '10px monospace'; ctx.textAlign = 'center';
+            for (let i = 0; i <= 200; i += 40) {
+                const [cx, cy] = sc2ToCanvas(i, 0);
+                ctx.fillText(i, cx, cy - 4);
+                const [lx, ly] = sc2ToCanvas(0, i);
+                ctx.textAlign = 'right'; ctx.fillText(i, lx - 4, ly + 3); ctx.textAlign = 'center';
+            }
+
+            const ev = evaluate();
+            const { result, ab, threshold, ap, pb, wPar, rMult, dir } = ev;
+
+            // A→B axis angle in SC2 space
+            const abAngle = Math.atan2(dir.y, dir.x);
+            const abDist  = Math.sqrt(plainDistSq(points.a, points.b));
+
+            // Ellipse semi-axes in SC2 units, scaled by radius multiplier.
+            // Boundary: wPar·par² + perp² = wPar·AB²·rMult²
+            //  → par²/(AB·rMult)² + perp²/(wPar·(AB·rMult)²) = 1
+            const semiPar  = abDist * rMult;                                    // along A→B
+            const semiPerp = abDist * rMult * Math.sqrt(wPar);                  // perpendicular
+
+            const [caX, caY] = sc2ToCanvas(points.a.x, points.a.y);
+            const [cbX, cbY] = sc2ToCanvas(points.b.x, points.b.y);
+            const rParCanvas  = semiPar  * SCALE;
+            const rPerpCanvas = semiPerp * SCALE;
+
+            // --- Filled intersection of the two ellipses ---
+            ctx.save();
+            ctx.globalAlpha = 0.08;
+            ctx.fillStyle = '#4cff72';
+            ctx.save();
+            drawEllipsePath(caX, caY, rParCanvas, rPerpCanvas, abAngle);
+            ctx.clip();
+            drawEllipsePath(cbX, cbY, rParCanvas, rPerpCanvas, abAngle);
+            ctx.fill();
+            ctx.restore();
+            ctx.globalAlpha = 1.0;
+            ctx.restore();
+
+            // --- Ellipse outlines ---
+            ctx.setLineDash([6, 4]); ctx.lineWidth = 1;
+            ctx.strokeStyle = COLORS.a + '44';
+            drawEllipsePath(caX, caY, rParCanvas, rPerpCanvas, abAngle); ctx.stroke();
+            ctx.strokeStyle = COLORS.b + '44';
+            drawEllipsePath(cbX, cbY, rParCanvas, rPerpCanvas, abAngle); ctx.stroke();
+            ctx.setLineDash([]);
+
+            // --- Lines ---
+            const [cpX, cpY] = sc2ToCanvas(points.p.x, points.p.y);
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = '#888';
+            ctx.beginPath(); ctx.moveTo(caX, caY); ctx.lineTo(cbX, cbY); ctx.stroke();
+            ctx.strokeStyle = ap < threshold ? '#4cff7288' : '#ff6b6b88';
+            ctx.beginPath(); ctx.moveTo(caX, caY); ctx.lineTo(cpX, cpY); ctx.stroke();
+            ctx.strokeStyle = pb < threshold ? '#4cff7288' : '#ff6b6b88';
+            ctx.beginPath(); ctx.moveTo(cbX, cbY); ctx.lineTo(cpX, cpY); ctx.stroke();
+
+            // --- Distance labels ---
+            ctx.font = '11px monospace'; ctx.textAlign = 'center';
+            const abMidX = (caX + cbX) / 2, abMidY = (caY + cbY) / 2;
+            ctx.fillStyle = '#aaa';
+            ctx.fillText(`thresh=${threshold.toFixed(1)}`, abMidX, abMidY - 8);
+            const apMidX = (caX + cpX) / 2, apMidY = (caY + cpY) / 2;
+            ctx.fillStyle = ap < threshold ? '#4cff72' : '#ff6b6b';
+            ctx.fillText(`wAP²=${ap.toFixed(1)}`, apMidX, apMidY - 8);
+            const pbMidX = (cbX + cpX) / 2, pbMidY = (cbY + cpY) / 2;
+            ctx.fillStyle = pb < threshold ? '#4cff72' : '#ff6b6b';
+            ctx.fillText(`wPB²=${pb.toFixed(1)}`, pbMidX, pbMidY - 8);
+
+            // --- Draw points ---
+            for (const key of ['a', 'b', 'p']) {
+                const pt = points[key];
+                const [cx, cy] = sc2ToCanvas(pt.x, pt.y);
+                ctx.beginPath(); ctx.arc(cx, cy, RADIUS, 0, Math.PI * 2);
+                ctx.fillStyle = COLORS[key]; ctx.fill();
+                ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
+                ctx.fillStyle = '#000'; ctx.font = 'bold 13px Arial';
+                ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                ctx.fillText(LABELS[key], cx, cy);
+            }
+
+            // --- Update info panel ---
+            document.getElementById('dist-ab').textContent = threshold.toFixed(2) + (rMult !== 1 ? `  (AB²=${ab.toFixed(2)} × ${(rMult*rMult).toFixed(2)})` : '');
+            document.getElementById('dist-ap').textContent = ap.toFixed(2);
+            document.getElementById('dist-pb').textContent = pb.toFixed(2);
+
+            const condAp = ap < threshold, condPb = pb < threshold;
+            document.getElementById('cond-ap').textContent = condAp ? '✓ True' : '✗ False';
+            document.getElementById('cond-ap').style.color  = condAp ? '#4cff72' : '#ff6b6b';
+            document.getElementById('cond-pb').textContent = condPb ? '✓ True' : '✗ False';
+            document.getElementById('cond-pb').style.color  = condPb ? '#4cff72' : '#ff6b6b';
+
+            const resultEl = document.getElementById('result-text');
+            resultEl.textContent = result ? '✓ True — P is between A and B' : '✗ False — P is NOT between A and B';
+            resultEl.className  = result ? 'result-true' : 'result-false';
+
+            document.getElementById('coord-a').textContent = `(${points.a.x.toFixed(1)}, ${points.a.y.toFixed(1)})`;
+            document.getElementById('coord-b').textContent = `(${points.b.x.toFixed(1)}, ${points.b.y.toFixed(1)})`;
+            document.getElementById('coord-p').textContent = `(${points.p.x.toFixed(1)}, ${points.p.y.toFixed(1)})`;
+        }
+
+        // --- Interaction ---
+        function getPointAt(cx, cy) {
+            for (const key of ['p', 'a', 'b']) {
+                const [px, py] = sc2ToCanvas(points[key].x, points[key].y);
+                if ((cx - px) ** 2 + (cy - py) ** 2 <= (RADIUS + 4) ** 2) return key;
+            }
+            return null;
+        }
+        function canvasCoords(e) {
+            const rect = canvas.getBoundingClientRect();
+            return [(e.clientX - rect.left) * (W / rect.width), (e.clientY - rect.top) * (H / rect.height)];
+        }
+        canvas.addEventListener('mousedown', e => {
+            dragging = getPointAt(...canvasCoords(e));
+            if (dragging) canvas.classList.add('dragging');
+        });
+        canvas.addEventListener('mousemove', e => {
+            const [cx, cy] = canvasCoords(e);
+            if (!dragging) { canvas.style.cursor = getPointAt(cx, cy) ? 'grab' : 'default'; return; }
+            const [sx, sy] = canvasToSc2(cx, cy);
+            points[dragging].x = Math.max(0, Math.min(200, sx));
+            points[dragging].y = Math.max(0, Math.min(200, sy));
+            draw();
+        });
+        canvas.addEventListener('mouseup',    () => { dragging = null; canvas.classList.remove('dragging'); });
+        canvas.addEventListener('mouseleave', () => { dragging = null; canvas.classList.remove('dragging'); });
+
+        // Touch
+        function touchCoords(e) {
+            const rect = canvas.getBoundingClientRect(); const t = e.touches[0];
+            return [(t.clientX - rect.left) * (W / rect.width), (t.clientY - rect.top) * (H / rect.height)];
+        }
+        canvas.addEventListener('touchstart', e => { e.preventDefault(); dragging = getPointAt(...touchCoords(e)); });
+        canvas.addEventListener('touchmove', e => {
+            e.preventDefault(); if (!dragging) return;
+            const [sx, sy] = canvasToSc2(...touchCoords(e));
+            points[dragging].x = Math.max(0, Math.min(200, sx));
+            points[dragging].y = Math.max(0, Math.min(200, sy));
+            draw();
+        });
+        canvas.addEventListener('touchend', () => { dragging = null; });
+
+        draw();
+    })();
+    </script>
+</body>
+</html>

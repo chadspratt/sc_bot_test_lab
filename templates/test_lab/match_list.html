@@ -44,6 +44,7 @@
         <a href="{% url 'map_breakdown' %}{% if selected_difficulty %}?difficulty={{ selected_difficulty }}{% endif %}">View by Map</a>
         <a href="{% url 'building_timing' %}">Building Timing</a>
         <a href="{% url 'utilities' %}">Utilities</a>
+        <a href="{% url 'position_is_between' %}">Geometry</a>
     </div>
     <h1>Match Test Results</h1>
     
@@ -119,8 +120,8 @@
                     {% for match_data in row.results %}
                         {% if match_data %}
                         <td class="{% if match_data.result == 'Victory' %}victory{% elif match_data.result == 'Defeat' %}defeat{% elif match_data.result == 'Crash' %}crash{% elif match_data.result == 'Pending' %}pending{% endif %}">
-                            <a href="{% url 'serve_replay' match_id=match_data.id %}">{{ match_data.id }}</a>
-                            <a href="{% url 'serve_log' match_id=match_data.id %}" target="_blank">{{ match_data.duration_in_game_time|format_duration }}</a>{% if match_data.is_best_time %} <span title="Fastest win or slowest loss on map">⭐</span>{% endif %}<br>
+                            <a href="{% url 'serve_replay' match_id=match_data.id %}" class="checkmark-link">{{ match_data.id }}</a>
+                            <a href="{% url 'serve_log' match_id=match_data.id %}" target="_blank" class="checkmark-link">{{ match_data.duration_in_game_time|format_duration }}</a>{% if match_data.is_best_time %} <span title="Fastest win or slowest loss on map">⭐</span>{% endif %}<br>
                             <small>{{ match_data.map_name }}</small>
                         </td>
                         {% else %}
@@ -134,5 +135,51 @@
     {% else %}
         <p>No match data available.</p>
     {% endif %}
+<script>
+    const STORAGE_KEY = 'visited_match_urls';
+
+    function getVisited() {
+        try {
+            return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+        } catch (e) {
+            console.warn('Failed to parse visited match URLs from localStorage:', e);
+            return [];
+        }
+    }
+
+    function markVisited(url) {
+        const visited = getVisited();
+        if (!visited.includes(url)) {
+            visited.push(url);
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(visited));
+        }
+    }
+
+    function applyCheckmarks() {
+        const visited = getVisited();
+        document.querySelectorAll('a.checkmark-link').forEach(link => {
+            if (visited.includes(link.href)) {
+                if (!link.nextElementSibling || !link.nextElementSibling.classList.contains('link-visited-check')) {
+                    const span = document.createElement('span');
+                    span.className = 'link-visited-check';
+                    span.title = 'Visited';
+                    span.textContent = ' ✓';
+                    span.style.color = '#155724';
+                    link.after(span);
+                }
+            }
+        });
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        document.querySelectorAll('a.checkmark-link').forEach(link => {
+            link.addEventListener('click', () => {
+                markVisited(link.href);
+                setTimeout(applyCheckmarks, 50);
+            });
+        });
+        applyCheckmarks();
+    });
+</script>
 </body>
 </html>

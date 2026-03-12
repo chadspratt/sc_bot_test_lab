@@ -770,3 +770,14 @@ def run_single_match(request):
             messages.error(request, f'Failed to start match: {str(e)}')
 
     return redirect('utilities')
+
+
+def position_is_between(request):
+    """
+    Render an interactive visualization page for testing GeometryMixin.position_is_between.
+
+    This view serves the ``test_lab/position_is_between.html`` template, which provides
+    a drag-and-drop style interface to visualize how the geometry helper evaluates
+    whether a point lies between two other points.
+    """
+    return render(request, 'test_lab/position_is_between.html')
