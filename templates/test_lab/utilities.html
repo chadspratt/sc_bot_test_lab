@@ -113,5 +113,50 @@
         <p><em>No custom bots registered. <a href="{% url 'custom_bots' %}">Register one first.</a></em></p>
         {% endif %}
     </div>
+
+    <div class="utility-section">
+        <h3>Continue from Replay</h3>
+        <p>Upload a replay file and specify a time — BotTato takes over at that point and plays out the game vs a Computer opponent.</p>
+        <form method="post" action="{% url 'run_replay_match' %}" enctype="multipart/form-data" style="display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap;">
+            {% csrf_token %}
+            <div>
+                <label for="replay_file">Replay File (.SC2Replay):</label><br>
+                <input type="file" name="replay_file" id="replay_file" accept=".SC2Replay" required>
+            </div>
+            <div>
+                <label for="takeover_time">Takeover Time (mm:ss or seconds):</label><br>
+                <input type="text" name="takeover_time" id="takeover_time" placeholder="5:30" required style="width: 100px; padding: 4px;">
+            </div>
+            <div>
+                <label for="replay_difficulty">Opponent Difficulty:</label><br>
+                <select name="difficulty" id="replay_difficulty">
+                    <option value="Easy">Easy</option>
+                    <option value="Medium">Medium</option>
+                    <option value="MediumHard">MediumHard</option>
+                    <option value="Hard">Hard</option>
+                    <option value="Harder">Harder</option>
+                    <option value="VeryHard">VeryHard</option>
+                    <option value="CheatVision">CheatVision</option>
+                    <option value="CheatMoney">CheatMoney</option>
+                    <option value="CheatInsane" selected>CheatInsane</option>
+                </select>
+            </div>
+            <div>
+                <label for="bot_player_id">BotTato takes over as:</label><br>
+                <select name="bot_player_id" id="bot_player_id">
+                    <option value="1">Player 1</option>
+                    <option value="2">Player 2</option>
+                </select>
+            </div>
+            <div>
+                <button type="submit" class="utility-btn">Run Replay Match</button>
+            </div>
+        </form>
+        <p style="margin-top: 8px; font-size: 12px; color: #666;">
+            The game state (units, buildings, resources on the map) is reconstructed at the specified time.
+            Limitations: upgrades are not restored; the Computer opponent resets its build logic;
+            hallucinated units become real. BotTato will have no memory of pre-takeover observations.
+        </p>
+    </div>
 </body>
 </html>

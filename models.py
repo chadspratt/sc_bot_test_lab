@@ -61,6 +61,14 @@ class Match(models.Model):
     )
     result = models.CharField(max_length=50, choices=Result)
     duration_in_game_time = models.IntegerField(null=True, blank=True)
+    replay_file = models.CharField(
+        max_length=500, blank=True, default='',
+        help_text="Path to uploaded replay file for continue-from-replay matches"
+    )
+    replay_takeover_game_loop = models.IntegerField(
+        null=True, blank=True,
+        help_text="Game loop at which bots take over from the replay"
+    )
     
     # Non-database attributes (computed dynamically in views)
     is_best_time: bool = False

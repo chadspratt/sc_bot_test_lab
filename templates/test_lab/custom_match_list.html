@@ -31,13 +31,14 @@
     </div>
 
     <h1>Custom Bot Matches</h1>
-    <p>Matches of BotTato vs custom opponent bots. Most recent 50 shown.</p>
+    <p>Matches of BotTato vs custom opponent bots, or continued from a replay. Most recent 50 shown.</p>
 
     {% if matches %}
     <table>
         <thead>
             <tr>
                 <th>Match #</th>
+                <th>Type</th>
                 <th>Opponent</th>
                 <th>Race</th>
                 <th>Map</th>
@@ -51,7 +52,8 @@
             {% for match in matches %}
             <tr>
                 <td>{{ match.id }}</td>
-                <td>{{ match.opponent_bot.name }}</td>
+                <td>{% if match.opponent_bot %}Custom Bot{% else %}Replay{% endif %}</td>
+                <td>{% if match.opponent_bot %}{{ match.opponent_bot.name }}{% else %}-{% endif %}</td>
                 <td>{{ match.opponent_race }}</td>
                 <td>{{ match.map_name }}</td>
                 <td class="

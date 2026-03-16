@@ -5,7 +5,7 @@ from collections import defaultdict
 from datetime import datetime
 
 from django.contrib import messages
-from django.db.models import Max, Min
+from django.db.models import Max, Min, Q
 from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
@@ -956,13 +956,140 @@ def run_custom_match(request):
 
 
 def custom_match_list(request):
-    """List matches against custom bots with replay/log access."""
+    """List matches against custom bots or continued from replay, with replay/log access."""
     matches = (
         Match.objects
-        .filter(opponent_bot__isnull=False)
+        .filter(Q(opponent_bot__isnull=False) | Q(replay_file__gt=''))
         .select_related('opponent_bot')
         .order_by('-start_timestamp')[:50]
     )
     return render(request, 'test_lab/custom_match_list.html', {
         'matches': matches,
     })
+
+
+# ---------------------------------------------------------------------------
+# Continue from Replay
+# ---------------------------------------------------------------------------
+
+REPLAY_UPLOAD_DIR = os.path.join(LOGS_DIR)  # Same dir as logs/replays
+
+
+def _parse_game_time(time_str: str) -> int | None:
+    """Parse a game time string (mm:ss or raw seconds) into game loops.
+
+    Game loops = seconds * 22.4 (SC2 "faster" speed).
+    Accepts:
+        "5:30"  -> 5 min 30 sec -> 7392 loops
+        "330"   -> 330 seconds  -> 7392 loops
+        "7392"  -> treated as raw seconds unless it looks like mm:ss
+    """
+    time_str = time_str.strip()
+    if not time_str:
+        return None
+
+    if ':' in time_str:
+        parts = time_str.split(':')
+        if len(parts) != 2:
+            return None
+        try:
+            minutes, seconds = int(parts[0]), int(parts[1])
+            total_seconds = minutes * 60 + seconds
+        except ValueError:
+            return None
+    else:
+        try:
+            total_seconds = int(time_str)
+        except ValueError:
+            return None
+
+    return int(total_seconds * 22.4)
+
+
+@require_POST
+def run_replay_match(request):
+    """Launch a match that continues from an uploaded replay at a specified time."""
+    replay_file = request.FILES.get('replay_file')
+    takeover_time = request.POST.get('takeover_time', '').strip()
+    difficulty = request.POST.get('difficulty', 'CheatInsane')
+    bot_player_id = request.POST.get('bot_player_id', '1')
+
+    # Validate inputs
+    if not replay_file:
+        messages.error(request, 'Please upload a replay file.')
+        return redirect('utilities')
+
+    if not replay_file.name.endswith('.SC2Replay'):
+        messages.error(request, 'File must be a .SC2Replay file.')
+        return redirect('utilities')
+
+    game_loop = _parse_game_time(takeover_time)
+    if game_loop is None or game_loop <= 0:
+        messages.error(request, 'Invalid takeover time. Use mm:ss (e.g. 5:30) or seconds (e.g. 330).')
+        return redirect('utilities')
+
+    try:
+        bot_player_id_int = int(bot_player_id)
+        if bot_player_id_int not in (1, 2):
+            raise ValueError
+    except ValueError:
+        messages.error(request, 'Bot player ID must be 1 or 2.')
+        return redirect('utilities')
+
+    docker_compose_path = DOCKER_COMPOSE_PATH
+    logs_dir = LOGS_DIR
+    os.makedirs(logs_dir, exist_ok=True)
+
+    try:
+        # Create a pending match
+        match = Match(
+            test_group_id=-1,
+            start_timestamp=datetime.now(),
+            map_name="TBD (from replay)",
+            opponent_race='',
+            opponent_difficulty=difficulty,
+            opponent_build='',
+            result="Pending",
+            replay_takeover_game_loop=game_loop,
+        )
+        match.save()
+        match_id = match.id
+
+        # Save the uploaded replay to the shared replays directory
+        replay_filename = f"{match_id}_source.SC2Replay"
+        replay_dest = os.path.join(logs_dir, replay_filename)
+        with open(replay_dest, 'wb') as dest:
+            for chunk in replay_file.chunks():
+                dest.write(chunk)
+
+        # Update the match with the replay file path (container-side path)
+        container_replay_path = f"/root/replays/{replay_filename}"
+        match.replay_file = container_replay_path
+        match.save()
+
+        log_file = os.path.join(logs_dir, f"{match_id}_continue_replay.log")
+
+        command = [
+            'docker', 'compose', 'run', '--rm',
+            '-e', f'REPLAY_PATH={container_replay_path}',
+            '-e', f'TAKEOVER_GAME_LOOP={game_loop}',
+            '-e', f'BOT_PLAYER_ID={bot_player_id_int}',
+            '-e', f'DIFFICULTY={difficulty}',
+            '-e', f'MATCH_ID={match_id}',
+            'bot',
+            'bash', '/root/bot/run_docker_continue_replay.sh',
+        ]
+
+        with open(log_file, 'w') as log:
+            subprocess.Popen(command, cwd=docker_compose_path, stdout=log, stderr=log)
+
+        takeover_seconds = game_loop / 22.4
+        messages.success(
+            request,
+            f'Continue-from-replay match started! Takeover at {takeover_seconds:.0f}s '
+            f'(loop {game_loop}), difficulty={difficulty} (match #{match_id})'
+        )
+    except Exception as e:
+        messages.error(request, f'Failed to start continue-from-replay match: {e}')
+
+    return redirect('utilities')
