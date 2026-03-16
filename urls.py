@@ -12,6 +12,11 @@ urlpatterns = [
     path('utilities/', views.utilities, name='utilities'),
     path('utilities/recompile-cython/', views.recompile_cython, name='recompile_cython'),
     path('utilities/run-single-match/', views.run_single_match, name='run_single_match'),
+    path('utilities/run-custom-match/', views.run_custom_match, name='run_custom_match'),
+    path('custom-bots/', views.custom_bots, name='custom_bots'),
+    path('custom-bots/create/', views.create_custom_bot, name='create_custom_bot'),
+    path('custom-bots/<int:bot_id>/delete/', views.delete_custom_bot, name='delete_custom_bot'),
+    path('custom-matches/', views.custom_match_list, name='custom_match_list'),
     path('api/trigger-tests/', views.api_trigger_tests, name='api_trigger_tests'),
     path('geometry/position-is-between/', views.position_is_between, name='position_is_between'),
 ]

@@ -22,6 +22,8 @@
         <a href="{% url 'map_breakdown' %}">View by Map</a>
         <a href="{% url 'building_timing' %}">Building Timing</a>
         <a href="{% url 'utilities' %}">Utilities</a>
+        <a href="{% url 'custom_bots' %}">Custom Bots</a>
+        <a href="{% url 'custom_match_list' %}">Custom Matches</a>
         <a href="{% url 'position_is_between' %}">Geometry</a>
     </div>
 
@@ -87,6 +89,29 @@
             {% csrf_token %}
             <button type="submit" class="utility-btn">Recompile Cython</button>
         </form>
+    </div>
+
+    <div class="utility-section">
+        <h3>Run Custom Bot Match</h3>
+        <p>Launch BotTato vs a registered custom opponent bot (Bot vs Bot). <a href="{% url 'custom_bots' %}">Manage custom bots</a></p>
+        {% if custom_bots %}
+        <form method="post" action="{% url 'run_custom_match' %}" style="display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap;">
+            {% csrf_token %}
+            <div>
+                <label for="custom_bot_id">Opponent Bot:</label><br>
+                <select name="custom_bot_id" id="custom_bot_id">
+                    {% for bot in custom_bots %}
+                    <option value="{{ bot.id }}">{{ bot.name }} ({{ bot.race }} - {{ bot.bot_class_name }})</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <button type="submit" class="utility-btn">Run Custom Match</button>
+            </div>
+        </form>
+        {% else %}
+        <p><em>No custom bots registered. <a href="{% url 'custom_bots' %}">Register one first.</a></em></p>
+        {% endif %}
     </div>
 </body>
 </html>

@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Custom Matches</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .nav-links { margin: 20px 0; }
+        .nav-links a { margin-right: 20px; padding: 10px; background-color: #007bff; color: white; text-decoration: none; border-radius: 5px; }
+        .nav-links a:hover { background-color: #0056b3; }
+        table { border-collapse: collapse; width: 100%; }
+        th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+        th { background-color: #343a40; color: white; }
+        tr:nth-child(even) { background-color: #f2f2f2; }
+        .result-victory { color: #28a745; font-weight: bold; }
+        .result-defeat { color: #dc3545; font-weight: bold; }
+        .result-pending { color: #ffc107; font-weight: bold; }
+        .result-crash { color: #dc3545; font-weight: bold; font-style: italic; }
+        .action-link { margin-right: 8px; padding: 4px 10px; background-color: #17a2b8; color: white; text-decoration: none; border-radius: 3px; font-size: 13px; }
+        .action-link:hover { background-color: #138496; }
+    </style>
+</head>
+<body>
+    <div class="nav-links">
+        <a href="{% url 'match_list' %}">View by Test Group</a>
+        <a href="{% url 'map_breakdown' %}">View by Map</a>
+        <a href="{% url 'building_timing' %}">Building Timing</a>
+        <a href="{% url 'utilities' %}">Utilities</a>
+        <a href="{% url 'custom_bots' %}">Custom Bots</a>
+        <a href="{% url 'custom_match_list' %}">Custom Matches</a>
+        <a href="{% url 'position_is_between' %}">Geometry</a>
+    </div>
+
+    <h1>Custom Bot Matches</h1>
+    <p>Matches of BotTato vs custom opponent bots. Most recent 50 shown.</p>
+
+    {% if matches %}
+    <table>
+        <thead>
+            <tr>
+                <th>Match #</th>
+                <th>Opponent</th>
+                <th>Race</th>
+                <th>Map</th>
+                <th>Result</th>
+                <th>Duration</th>
+                <th>Started</th>
+                <th>Replay / Log</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for match in matches %}
+            <tr>
+                <td>{{ match.id }}</td>
+                <td>{{ match.opponent_bot.name }}</td>
+                <td>{{ match.opponent_race }}</td>
+                <td>{{ match.map_name }}</td>
+                <td class="
+                    {% if match.result == 'Victory' %}result-victory
+                    {% elif match.result == 'Defeat' %}result-defeat
+                    {% elif match.result == 'Pending' %}result-pending
+                    {% elif match.result == 'Crash' %}result-crash
+                    {% endif %}
+                ">{{ match.result }}</td>
+                <td>
+                    {% if match.duration_in_game_time %}
+                        {{ match.duration_in_game_time }}s
+                    {% else %}
+                        -
+                    {% endif %}
+                </td>
+                <td>{{ match.start_timestamp|date:"Y-m-d H:i" }}</td>
+                <td>
+                    {% if match.result != 'Pending' %}
+                        <a class="action-link" href="{% url 'serve_replay' match.id %}" title="Open replay in SC2">Replay</a>
+                        <a class="action-link" href="{% url 'serve_log' match.id %}" target="_blank" title="View log file">Log</a>
+                    {% else %}
+                        <em>In progress...</em>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p><em>No custom bot matches yet. Run one from the <a href="{% url 'utilities' %}">Utilities</a> page.</em></p>
+    {% endif %}
+</body>
+</html>

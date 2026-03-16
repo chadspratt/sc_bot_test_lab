@@ -12,7 +12,7 @@ from django.urls import reverse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
-from .models import Match, MatchEvent, TestGroup
+from .models import CustomBot, Match, MatchEvent, TestGroup
 
 
 def match_list(request):
@@ -714,7 +714,10 @@ def building_timing(request):
 
 def utilities(request):
     """Page for triggering various utility actions."""
-    return render(request, 'test_lab/utilities.html')
+    custom_bots_list = CustomBot.objects.all().order_by('name')
+    return render(request, 'test_lab/utilities.html', {
+        'custom_bots': custom_bots_list,
+    })
 
 
 def recompile_cython(request):
@@ -797,3 +800,169 @@ def position_is_between(request):
     whether a point lies between two other points.
     """
     return render(request, 'test_lab/position_is_between.html')
+
+
+# ---------------------------------------------------------------------------
+# Custom Bot management
+# ---------------------------------------------------------------------------
+
+OTHER_BOTS_DIR = os.path.normpath(
+    os.path.join(os.path.dirname(__file__), '..', '..', '..', 'bot', 'other_bots')
+)
+
+
+def _scan_bot_files() -> list[str]:
+    """Return list of .py files in bot/other_bots/ (excluding __init__.py)."""
+    if not os.path.isdir(OTHER_BOTS_DIR):
+        return []
+    return sorted(
+        f for f in os.listdir(OTHER_BOTS_DIR)
+        if f.endswith('.py') and f != '__init__.py'
+    )
+
+
+def custom_bots(request):
+    """List all registered custom bots and available bot files."""
+    bots = CustomBot.objects.all().order_by('-created_at')
+    available_files = _scan_bot_files()
+    return render(request, 'test_lab/custom_bots.html', {
+        'bots': bots,
+        'available_files': available_files,
+    })
+
+
+@require_POST
+def create_custom_bot(request):
+    """Register a new custom bot from form data."""
+    name = request.POST.get('name', '').strip()
+    race = request.POST.get('race', 'Random')
+    bot_file = request.POST.get('bot_file', '').strip()
+    bot_class_name = request.POST.get('bot_class_name', '').strip()
+    description = request.POST.get('description', '').strip()
+
+    if not all([name, bot_file, bot_class_name]):
+        messages.error(request, 'Name, bot file, and class name are required.')
+        return redirect('custom_bots')
+
+    # Verify the file exists
+    file_path = os.path.join(OTHER_BOTS_DIR, bot_file)
+    if not os.path.exists(file_path):
+        messages.error(request, f'Bot file not found: {bot_file}')
+        return redirect('custom_bots')
+
+    # Validate that the class name exists in the file
+    try:
+        with open(file_path, 'r') as f:
+            source = f.read()
+        import ast
+        tree = ast.parse(source)
+        class_names = [node.name for node in ast.walk(tree) if isinstance(node, ast.ClassDef)]
+        if bot_class_name not in class_names:
+            messages.error(
+                request,
+                f'Class "{bot_class_name}" not found in {bot_file}. '
+                f'Available classes: {", ".join(class_names) or "none"}'
+            )
+            return redirect('custom_bots')
+    except SyntaxError as e:
+        messages.error(request, f'Syntax error in {bot_file}: {e}')
+        return redirect('custom_bots')
+
+    try:
+        CustomBot.objects.create(
+            name=name,
+            race=race,
+            bot_file=bot_file,
+            bot_class_name=bot_class_name,
+            description=description,
+        )
+        messages.success(request, f'Custom bot "{name}" registered successfully.')
+    except Exception as e:
+        messages.error(request, f'Failed to create custom bot: {e}')
+
+    return redirect('custom_bots')
+
+
+@require_POST
+def delete_custom_bot(request, bot_id):
+    """Delete a registered custom bot."""
+    try:
+        bot = CustomBot.objects.get(id=bot_id)
+        bot_name = bot.name
+        bot.delete()
+        messages.success(request, f'Custom bot "{bot_name}" deleted.')
+    except CustomBot.DoesNotExist:
+        messages.error(request, 'Custom bot not found.')
+
+    return redirect('custom_bots')
+
+
+@require_POST
+def run_custom_match(request):
+    """Run a match of BotTato vs a custom opponent bot."""
+    bot_id = request.POST.get('custom_bot_id')
+    if not bot_id:
+        messages.error(request, 'No custom bot selected.')
+        return redirect('utilities')
+
+    try:
+        custom_bot = CustomBot.objects.get(id=bot_id)
+    except CustomBot.DoesNotExist:
+        messages.error(request, 'Selected custom bot not found.')
+        return redirect('utilities')
+
+    docker_compose_path = DOCKER_COMPOSE_PATH
+    logs_dir = LOGS_DIR
+    os.makedirs(logs_dir, exist_ok=True)
+
+    try:
+        # Create a pending match with test_group_id = -1 and the custom bot linked
+        match = Match(
+            test_group_id=-1,
+            start_timestamp=datetime.now(),
+            map_name="TBD",
+            opponent_race=custom_bot.race,
+            opponent_difficulty='',
+            opponent_build='',
+            opponent_bot=custom_bot,
+            result="Pending",
+        )
+        match.save()
+        match_id = match.id
+
+        log_file = os.path.join(logs_dir, f"{match_id}_vs_{custom_bot.name}.log")
+
+        command = [
+            'docker', 'compose', 'run', '--rm',
+            '-e', f'OPPONENT_FILE={custom_bot.bot_file}',
+            '-e', f'OPPONENT_CLASS={custom_bot.bot_class_name}',
+            '-e', f'OPPONENT_RACE={custom_bot.race.lower()}',
+            '-e', f'MATCH_ID={match_id}',
+            'bot',
+            'bash', '/root/bot/run_docker_bot_vs_bot.sh',
+        ]
+
+        with open(log_file, 'w') as log:
+            subprocess.Popen(command, cwd=docker_compose_path, stdout=log, stderr=log)
+
+        messages.success(
+            request,
+            f'Custom match started: BotTato vs {custom_bot.name} (match #{match_id})'
+        )
+    except Exception as e:
+        messages.error(request, f'Failed to start custom match: {e}')
+
+    return redirect('utilities')
+
+
+def custom_match_list(request):
+    """List matches against custom bots with replay/log access."""
+    matches = (
+        Match.objects
+        .filter(opponent_bot__isnull=False)
+        .select_related('opponent_bot')
+        .order_by('-start_timestamp')[:50]
+    )
+    return render(request, 'test_lab/custom_match_list.html', {
+        'matches': matches,
+    })

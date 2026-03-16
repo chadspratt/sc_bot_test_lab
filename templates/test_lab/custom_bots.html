@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Custom Bots</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .nav-links { margin: 20px 0; }
+        .nav-links a { margin-right: 20px; padding: 10px; background-color: #007bff; color: white; text-decoration: none; border-radius: 5px; }
+        .nav-links a:hover { background-color: #0056b3; }
+        .messages { margin: 10px 0; }
+        .success { color: green; padding: 10px; background-color: #d4edda; border: 1px solid #c3e6cb; margin-bottom: 10px; }
+        .error { color: red; padding: 10px; background-color: #f8d7da; border: 1px solid #f5c6cb; margin-bottom: 10px; white-space: pre-wrap; }
+        .section { margin: 20px 0; padding: 20px; border: 1px solid #ddd; border-radius: 5px; background-color: #f8f9fa; }
+        .section h3 { margin-top: 0; }
+        .btn { padding: 8px 16px; border: none; cursor: pointer; font-size: 14px; border-radius: 5px; color: white; }
+        .btn-primary { background-color: #28a745; }
+        .btn-primary:hover { background-color: #218838; }
+        .btn-danger { background-color: #dc3545; }
+        .btn-danger:hover { background-color: #c82333; }
+        table { border-collapse: collapse; width: 100%; }
+        th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+        th { background-color: #343a40; color: white; }
+        tr:nth-child(even) { background-color: #f2f2f2; }
+        .form-group { margin-bottom: 12px; }
+        .form-group label { display: block; margin-bottom: 4px; font-weight: bold; }
+        .form-group input, .form-group select, .form-group textarea {
+            width: 100%; max-width: 400px; padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px;
+        }
+        .form-group textarea { height: 60px; resize: vertical; }
+        .file-list { margin-top: 10px; }
+        .file-list code { background: #e9ecef; padding: 2px 6px; border-radius: 3px; }
+    </style>
+</head>
+<body>
+    <div class="nav-links">
+        <a href="{% url 'match_list' %}">View by Test Group</a>
+        <a href="{% url 'map_breakdown' %}">View by Map</a>
+        <a href="{% url 'building_timing' %}">Building Timing</a>
+        <a href="{% url 'utilities' %}">Utilities</a>
+        <a href="{% url 'custom_bots' %}">Custom Bots</a>
+        <a href="{% url 'custom_match_list' %}">Custom Matches</a>
+        <a href="{% url 'position_is_between' %}">Geometry</a>
+    </div>
+
+    <h1>Custom Bots</h1>
+
+    {% if messages %}
+    <div class="messages">
+        {% for message in messages %}
+        <div class="{{ message.tags }}">{{ message }}</div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <div class="section">
+        <h3>Register New Custom Bot</h3>
+        <p>Bot files must be placed in <code>bot/other_bots/</code> and define a class inheriting from <code>BotAI</code>.</p>
+
+        {% if available_files %}
+        <div class="file-list">
+            <strong>Available bot files:</strong>
+            {% for f in available_files %}
+                <code>{{ f }}</code>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p><em>No .py files found in bot/other_bots/. Add a bot file first.</em></p>
+        {% endif %}
+
+        <form method="post" action="{% url 'create_custom_bot' %}" style="margin-top: 15px;">
+            {% csrf_token %}
+            <div class="form-group">
+                <label for="name">Bot Name:</label>
+                <input type="text" name="name" id="name" required placeholder="e.g. Worker Rush">
+            </div>
+            <div class="form-group">
+                <label for="race">Race:</label>
+                <select name="race" id="race">
+                    <option value="Random">Random</option>
+                    <option value="Protoss">Protoss</option>
+                    <option value="Terran">Terran</option>
+                    <option value="Zerg">Zerg</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="bot_file">Bot File:</label>
+                {% if available_files %}
+                <select name="bot_file" id="bot_file">
+                    {% for f in available_files %}
+                    <option value="{{ f }}">{{ f }}</option>
+                    {% endfor %}
+                </select>
+                {% else %}
+                <input type="text" name="bot_file" id="bot_file" required placeholder="e.g. worker_rush.py">
+                {% endif %}
+            </div>
+            <div class="form-group">
+                <label for="bot_class_name">Class Name:</label>
+                <input type="text" name="bot_class_name" id="bot_class_name" required placeholder="e.g. WorkerRushBot">
+            </div>
+            <div class="form-group">
+                <label for="description">Description (optional):</label>
+                <textarea name="description" id="description" placeholder="What does this bot do?"></textarea>
+            </div>
+            <button type="submit" class="btn btn-primary">Register Bot</button>
+        </form>
+    </div>
+
+    <div class="section">
+        <h3>Registered Custom Bots</h3>
+        {% if bots %}
+        <table>
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Race</th>
+                    <th>File</th>
+                    <th>Class</th>
+                    <th>Description</th>
+                    <th>Created</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for bot in bots %}
+                <tr>
+                    <td>{{ bot.name }}</td>
+                    <td>{{ bot.race }}</td>
+                    <td><code>{{ bot.bot_file }}</code></td>
+                    <td><code>{{ bot.bot_class_name }}</code></td>
+                    <td>{{ bot.description }}</td>
+                    <td>{{ bot.created_at|date:"Y-m-d H:i" }}</td>
+                    <td>
+                        <form method="post" action="{% url 'delete_custom_bot' bot.id %}" style="display: inline;" onsubmit="return confirm('Delete {{ bot.name }}?');">
+                            {% csrf_token %}
+                            <button type="submit" class="btn btn-danger">Delete</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p><em>No custom bots registered yet.</em></p>
+        {% endif %}
+    </div>
+</body>
+</html>
