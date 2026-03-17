@@ -1,0 +1,20 @@
+services:
+  bot:
+    build:
+      context: ../../..
+      dockerfile: ./python_sc2/dockerfiles/Dockerfile
+    network_mode: "host"
+    working_dir: /root/bot
+    volumes:
+      - ../../../python_sc2/sc2:/root/bot/sc2
+      - ../../../bot:/root/bot
+      - ./runner:/root/runner
+      - C:\Program Files (x86)\StarCraft II\Maps:/root/StarCraftII/Maps
+      - C:\Users\inter\Documents\StarCraft II\Replays\Multiplayer\docker:/root/replays
+    environment:
+      - DB_HOST=${DB_HOST}
+      - DB_PORT=${DB_PORT}
+      - DB_NAME=${DB_NAME}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+    command: bash /root/runner/run_docker.sh

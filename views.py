@@ -59,7 +59,7 @@ def match_list(request):
         opponent_name = f"{match.opponent_race}-{match.opponent_build}"
         all_opponents.add(opponent_name)
         # Store both result and duration
-        grouped_matches[match.test_group_id][opponent_name] = match
+        grouped_matches[match.test_group.id][opponent_name] = match
         if match.result in ['Victory', 'Defeat']:
             opponent_stats[opponent_name]['total_games'] += 1
             if match.result == 'Victory':
@@ -259,7 +259,7 @@ def create_pending_match(test_group_id: int, race: str, build: str, difficulty: 
     assert isinstance(match.id, int)
     return match.id
 
-DOCKER_COMPOSE_PATH = r'c:\Users\inter\Documents\sc_bot\bot'
+DOCKER_COMPOSE_PATH = os.path.normpath(os.path.join(os.path.dirname(__file__)))
 LOGS_DIR = r'C:\Users\inter\Documents\StarCraft II\Replays\Multiplayer\docker'
 
 
@@ -809,6 +809,7 @@ def position_is_between(request):
 OTHER_BOTS_DIR = os.path.normpath(
     os.path.join(os.path.dirname(__file__), '..', '..', '..', 'bot', 'other_bots')
 )
+RUNNER_DIR = os.path.normpath(os.path.join(os.path.dirname(__file__), 'runner'))
 
 
 def _scan_bot_files() -> list[str]:
@@ -939,7 +940,7 @@ def run_custom_match(request):
             '-e', f'OPPONENT_RACE={custom_bot.race.lower()}',
             '-e', f'MATCH_ID={match_id}',
             'bot',
-            'bash', '/root/bot/run_docker_bot_vs_bot.sh',
+            'bash', '/root/runner/run_docker_bot_vs_bot.sh',
         ]
 
         with open(log_file, 'w') as log:
@@ -1077,7 +1078,7 @@ def run_replay_match(request):
             '-e', f'DIFFICULTY={difficulty}',
             '-e', f'MATCH_ID={match_id}',
             'bot',
-            'bash', '/root/bot/run_docker_continue_replay.sh',
+            'bash', '/root/runner/run_docker_continue_replay.sh',
         ]
 
         with open(log_file, 'w') as log:
