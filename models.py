@@ -18,36 +18,30 @@ class CustomBot(models.Model):
         db_table = 'custom_bot'
 
     Race = models.TextChoices('Race', 'Protoss Terran Zerg Random')
-    BotType = models.TextChoices('BotType', 'python_sc2 external_python aiarena')
 
     id = models.AutoField(primary_key=True)
     name = models.CharField(max_length=100, unique=True)
     race = models.CharField(max_length=7, choices=Race)
     bot_type = models.CharField(
         max_length=20,
-        choices=BotType,
-        default='python_sc2',
-        help_text=(
-            "python_sc2: single .py file in bot/other_bots/; "
-            "external_python: third-party Python bot with own framework; "
-            "aiarena: ladder-packaged bot (any language) run via aiarena infrastructure"
-        ),
+        default='aiarena',
+        help_text="Bot type — currently only 'aiarena' is supported.",
     )
     bot_file = models.CharField(
         max_length=255,
         blank=True,
         default='',
-        help_text="Python filename in bot/other_bots/ (python_sc2) or module path (external_python)",
+        help_text="Deprecated: kept for backward compatibility with older bot registrations.",
     )
     bot_class_name = models.CharField(
         max_length=100,
         blank=True,
         default='',
-        help_text="Class name that inherits from BotAI (python_sc2 / external_python only)",
+        help_text="Deprecated: kept for backward compatibility with older bot registrations.",
     )
     is_external = models.BooleanField(
         default=False,
-        help_text="Deprecated: use bot_type instead. Kept for backward compatibility.",
+        help_text="Deprecated: kept for backward compatibility.",
     )
     bot_directory = models.CharField(
         max_length=500,
@@ -109,11 +103,29 @@ class Match(models.Model):
         null=True, blank=True,
         help_text="Game loop at which bots take over from the replay"
     )
-    
+    opponent_commit_hash = models.CharField(
+        max_length=40, blank=True, default='',
+        help_text="Git commit hash of the bot version used as opponent (past-version matches)"
+    )
+
     # Non-database attributes (computed dynamically in views)
     is_best_time: bool = False
 
+    @property
+    def opponent_short_hash(self) -> str:
+        """Return the first 7 characters of the opponent commit hash."""
+        return self.opponent_commit_hash[:7] if self.opponent_commit_hash else ''
+
+    @property
+    def opponent_version_bot_name(self) -> str:
+        """Return the aiarena bot name for a past-version opponent."""
+        if self.opponent_commit_hash:
+            return f'BotTato_v_{self.opponent_commit_hash[:7]}'
+        return ''
+
     def __str__(self):
+        if self.opponent_commit_hash:
+            return f"Group {self.test_group.id} - {self.map_name} vs BotTato@{self.opponent_commit_hash[:7]} ({self.result})"
         if self.opponent_bot:
             return f"Group {self.test_group.id} - {self.map_name} vs {self.opponent_bot.name} ({self.result})"
         return f"Group {self.test_group.id} - {self.map_name} vs {self.opponent_race}-{self.opponent_build} ({self.result})"

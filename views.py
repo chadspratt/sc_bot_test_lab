@@ -12,7 +12,7 @@ from django.urls import reverse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
-from . import aiarena_runner
+from . import aiarena_runner, bot_versions
 from .models import CustomBot, Match, MatchEvent, TestGroup
 
 
@@ -449,19 +449,22 @@ def api_trigger_tests(request):
 
 def serve_replay(request, match_id):
     """Open replay files with StarCraft 2 locally."""
+    # Check aiarena run directory first
+    replay_path = aiarena_runner.get_replay_path(match_id)
+    if replay_path:
+        subprocess.Popen([r"C:\Program Files (x86)\StarCraft II\Support\SC2Switcher.exe", replay_path])
+        return HttpResponse(status=204)
+
+    # Fall back to legacy directory
     replay_dir = r'C:\Users\inter\Documents\StarCraft II\Replays\Multiplayer\docker'
-    
-    # Find replay file matching the match_id pattern
     replay_pattern = os.path.join(replay_dir, f"{match_id}_*.SC2Replay")
     replay_files = glob.glob(replay_pattern)
     
     if not replay_files:
         raise Http404("Replay file not found")
     
-    file_path = replay_files[0]  # Take the first matching file
-
+    file_path = replay_files[0]
     subprocess.Popen([r"C:\Program Files (x86)\StarCraft II\Support\SC2Switcher.exe", file_path])
-
     return HttpResponse(status=204)
 
 def serve_log(request, match_id):
@@ -471,9 +474,14 @@ def serve_log(request, match_id):
     For legacy matches this is the single-container log.
     """
     from django.http import FileResponse
+
+    # Check aiarena run directory first
+    log_path = aiarena_runner.get_match_log_path(match_id)
+    if log_path:
+        return FileResponse(open(log_path, 'rb'), content_type='text/plain')
+
+    # Fall back to legacy directory
     replay_dir = r'C:\Users\inter\Documents\StarCraft II\Replays\Multiplayer\docker'
-    
-    # Find log file matching the match_id pattern (exclude _stderr bot logs)
     log_pattern = os.path.join(replay_dir, f"{match_id}*.log")
     log_files = [
         f for f in glob.glob(log_pattern)
@@ -483,8 +491,7 @@ def serve_log(request, match_id):
     if not log_files:
         raise Http404("Log file not found")
     
-    file_path = log_files[0]  # Take the first matching file
-    
+    file_path = log_files[0]
     return FileResponse(open(file_path, 'rb'), content_type='text/plain')
 
 def serve_aiarena_bot_log(request, match_id, bot_name):
@@ -833,8 +840,10 @@ def building_timing(request):
 def utilities(request):
     """Page for triggering various utility actions."""
     custom_bots_list = CustomBot.objects.all().order_by('name')
+    recent_commits = bot_versions.get_recent_bot_commits(count=5)
     return render(request, 'test_lab/utilities.html', {
         'custom_bots': custom_bots_list,
+        'recent_commits': recent_commits,
     })
 
 
@@ -924,58 +933,25 @@ def position_is_between(request):
 # Custom Bot management
 # ---------------------------------------------------------------------------
 
-OTHER_BOTS_DIR = os.path.normpath(
-    os.path.join(os.path.dirname(__file__), '..', '..', '..', 'bot', 'other_bots')
-)
-EXTERNAL_BOTS_DIR = os.path.normpath(
-    os.path.join(os.path.dirname(__file__), '..', '..', '..', 'other_bots')
-)
 RUNNER_DIR = os.path.normpath(os.path.join(os.path.dirname(__file__), 'runner'))
 
 
-def _scan_bot_files() -> list[str]:
-    """Return list of .py files in bot/other_bots/ (excluding __init__.py)."""
-    if not os.path.isdir(OTHER_BOTS_DIR):
-        return []
-    return sorted(
-        f for f in os.listdir(OTHER_BOTS_DIR)
-        if f.endswith('.py') and f != '__init__.py'
-    )
-
-
-def _scan_external_bots() -> list[str]:
-    """Return list of directory names under other_bots/ (top-level external bots)."""
-    if not os.path.isdir(EXTERNAL_BOTS_DIR):
-        return []
-    return sorted(
-        d for d in os.listdir(EXTERNAL_BOTS_DIR)
-        if os.path.isdir(os.path.join(EXTERNAL_BOTS_DIR, d))
-    )
-
-
 def custom_bots(request):
-    """List all registered custom bots and available bot files."""
+    """List all registered custom bots and available AI Arena bot directories."""
     bots = CustomBot.objects.all().order_by('-created_at')
-    available_files = _scan_bot_files()
-    external_dirs = _scan_external_bots()
     aiarena_bots = aiarena_runner.get_available_aiarena_bots()
     return render(request, 'test_lab/custom_bots.html', {
         'bots': bots,
-        'available_files': available_files,
-        'external_dirs': external_dirs,
         'aiarena_bots': aiarena_bots,
     })
 
 
 @require_POST
 def create_custom_bot(request):
-    """Register a new custom bot from form data."""
+    """Register a new AI Arena bot from form data."""
     name = request.POST.get('name', '').strip()
     race = request.POST.get('race', 'Random')
-    bot_file = request.POST.get('bot_file', '').strip()
-    bot_class_name = request.POST.get('bot_class_name', '').strip()
     description = request.POST.get('description', '').strip()
-    bot_type_toggle = request.POST.get('bot_type_toggle', 'standard')
     bot_directory = request.POST.get('bot_directory', '').strip()
     aiarena_bot_type = request.POST.get('aiarena_bot_type', 'python').strip()
 
@@ -983,111 +959,27 @@ def create_custom_bot(request):
         messages.error(request, 'Bot name is required.')
         return redirect('custom_bots')
 
-    # ---- AI Arena bot ----
-    if bot_type_toggle == 'aiarena':
-        if not bot_directory:
-            messages.error(request, 'Bot directory is required for AI Arena bots.')
-            return redirect('custom_bots')
-
-        error = aiarena_runner.validate_bot_directory(bot_directory)
-        if error:
-            messages.error(request, error)
-            return redirect('custom_bots')
-
-        try:
-            CustomBot.objects.create(
-                name=name,
-                race=race,
-                bot_type='aiarena',
-                bot_directory=bot_directory,
-                aiarena_bot_type=aiarena_bot_type,
-                description=description,
-            )
-            messages.success(request, f'AI Arena bot "{name}" registered successfully.')
-        except Exception as e:
-            messages.error(request, f'Failed to create custom bot: {e}')
-
+    if not bot_directory:
+        messages.error(request, 'Bot directory is required.')
         return redirect('custom_bots')
 
-    # ---- External Python bot ----
-    if bot_type_toggle == 'external':
-        if not bot_class_name:
-            messages.error(request, 'Class name is required for external Python bots.')
-            return redirect('custom_bots')
-        if not bot_directory:
-            messages.error(request, 'Bot directory is required for external bots.')
-            return redirect('custom_bots')
-        if not bot_file:
-            messages.error(request, 'Module path is required for external bots (e.g. bot.main).')
-            return redirect('custom_bots')
-
-        ext_path = os.path.join(EXTERNAL_BOTS_DIR, bot_directory)
-        if not os.path.isdir(ext_path):
-            messages.error(request, f'External bot directory not found: {bot_directory}')
-            return redirect('custom_bots')
-
-        try:
-            CustomBot.objects.create(
-                name=name,
-                race=race,
-                bot_type='external_python',
-                bot_file=bot_file,
-                bot_class_name=bot_class_name,
-                is_external=True,
-                bot_directory=bot_directory,
-                description=description,
-            )
-            messages.success(request, f'External bot "{name}" registered successfully.')
-        except Exception as e:
-            messages.error(request, f'Failed to create custom bot: {e}')
-
-        return redirect('custom_bots')
-
-    # ---- Standard python_sc2 bot ----
-    if not bot_class_name:
-        messages.error(request, 'Class name is required.')
-        return redirect('custom_bots')
-
-    if not bot_file:
-        messages.error(request, 'Bot file is required.')
-        return redirect('custom_bots')
-
-    # Verify the file exists
-    file_path = os.path.join(OTHER_BOTS_DIR, bot_file)
-    if not os.path.exists(file_path):
-        messages.error(request, f'Bot file not found: {bot_file}')
-        return redirect('custom_bots')
-
-    # Validate that the class name exists in the file
-    try:
-        with open(file_path, 'r') as f:
-            source = f.read()
-        import ast
-        tree = ast.parse(source)
-        class_names = [node.name for node in ast.walk(tree) if isinstance(node, ast.ClassDef)]
-        if bot_class_name not in class_names:
-            messages.error(
-                request,
-                f'Class "{bot_class_name}" not found in {bot_file}. '
-                f'Available classes: {", ".join(class_names) or "none"}'
-            )
-            return redirect('custom_bots')
-    except SyntaxError as e:
-        messages.error(request, f'Syntax error in {bot_file}: {e}')
+    error = aiarena_runner.validate_bot_directory(bot_directory)
+    if error:
+        messages.error(request, error)
         return redirect('custom_bots')
 
     try:
         CustomBot.objects.create(
             name=name,
             race=race,
-            bot_type='python_sc2',
-            bot_file=bot_file,
-            bot_class_name=bot_class_name,
+            bot_type='aiarena',
+            bot_directory=bot_directory,
+            aiarena_bot_type=aiarena_bot_type,
             description=description,
         )
-        messages.success(request, f'Custom bot "{name}" registered successfully.')
+        messages.success(request, f'Bot "{name}" registered successfully.')
     except Exception as e:
-        messages.error(request, f'Failed to create custom bot: {e}')
+        messages.error(request, f'Failed to create bot: {e}')
 
     return redirect('custom_bots')
 
@@ -1132,11 +1024,58 @@ def run_custom_match(request):
     return redirect('utilities')
 
 
+@require_POST
+def run_past_version_match(request):
+    """Run a match of current BotTato vs a past version from git history."""
+    commit_hash = request.POST.get('commit_hash', '').strip()
+    if not commit_hash:
+        messages.error(request, 'No commit selected.')
+        return redirect('utilities')
+
+    # Validate commit hash format (full 40-char SHA)
+    if len(commit_hash) != 40 or not all(c in '0123456789abcdef' for c in commit_hash):
+        messages.error(request, 'Invalid commit hash.')
+        return redirect('utilities')
+
+    short_hash = commit_hash[:7]
+
+    try:
+        # Create the match record
+        match = Match(
+            test_group_id=-1,
+            start_timestamp=datetime.now(),
+            map_name="TBD",
+            opponent_race='Terran',
+            opponent_difficulty='',
+            opponent_build='',
+            result="Pending",
+            opponent_commit_hash=commit_hash,
+        )
+        match.save()
+
+        aiarena_runner.start_past_version_match(
+            match, commit_hash, short_hash,
+        )
+        messages.success(
+            request,
+            f'Past version match started: BotTato (current) vs BotTato@{short_hash} '
+            f'(match #{match.id})'
+        )
+    except Exception as e:
+        messages.error(request, f'Failed to start past version match: {e}')
+
+    return redirect('utilities')
+
+
 def custom_match_list(request):
-    """List matches against custom bots or continued from replay, with replay/log access."""
+    """List matches against custom bots, past versions, or continued from replay."""
     matches = (
         Match.objects
-        .filter(Q(opponent_bot__isnull=False) | Q(replay_file__gt=''))
+        .filter(
+            Q(opponent_bot__isnull=False)
+            | Q(replay_file__gt='')
+            | Q(opponent_commit_hash__gt='')
+        )
         .select_related('opponent_bot')
         .order_by('-start_timestamp')[:50]
     )

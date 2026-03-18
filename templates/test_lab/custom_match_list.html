@@ -52,8 +52,18 @@
             {% for match in matches %}
             <tr>
                 <td>{{ match.id }}</td>
-                <td>{% if match.opponent_bot %}Custom Bot{% else %}Replay{% endif %}</td>
-                <td>{% if match.opponent_bot %}{{ match.opponent_bot.name }}{% else %}-{% endif %}</td>
+                <td>
+                    {% if match.opponent_commit_hash %}Past Version
+                    {% elif match.opponent_bot %}Custom Bot
+                    {% else %}Replay
+                    {% endif %}
+                </td>
+                <td>
+                    {% if match.opponent_commit_hash %}BotTato@{{ match.opponent_short_hash }}
+                    {% elif match.opponent_bot %}{{ match.opponent_bot.name }}
+                    {% else %}-
+                    {% endif %}
+                </td>
                 <td>{{ match.opponent_race }}</td>
                 <td>{{ match.map_name }}</td>
                 <td class="
@@ -75,7 +85,10 @@
                     {% if match.result != 'Pending' %}
                         <a class="action-link" href="{% url 'serve_replay' match.id %}" title="Open replay in SC2">Replay</a>
                         <a class="action-link" href="{% url 'serve_log' match.id %}" target="_blank" title="View docker log">Log</a>
-                        {% if match.opponent_bot and match.opponent_bot.is_aiarena %}
+                        {% if match.opponent_commit_hash %}
+                            <a class="action-link" href="{% url 'serve_aiarena_bot_log' match.id 'BotTato' %}" target="_blank" title="BotTato stderr">BotTato</a>
+                            <a class="action-link" href="{% url 'serve_aiarena_bot_log' match.id match.opponent_version_bot_name %}" target="_blank" title="Past version stderr">Past Ver</a>
+                        {% elif match.opponent_bot and match.opponent_bot.is_aiarena %}
                             <a class="action-link" href="{% url 'serve_aiarena_bot_log' match.id 'BotTato' %}" target="_blank" title="BotTato stderr">BotTato</a>
                             {% if match.opponent_bot.bot_directory == 'BotTato' %}
                                 <a class="action-link" href="{% url 'serve_aiarena_bot_log' match.id 'BotTato_p2' %}" target="_blank" title="BotTato_p2 stderr">BotTato_p2</a>

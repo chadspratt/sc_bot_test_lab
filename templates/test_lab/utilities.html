@@ -119,6 +119,37 @@
     </div>
 
     <div class="utility-section">
+        <h3>Run vs Past Version</h3>
+        <p>Launch current BotTato against a previous version of itself from git history.
+           Both players use the current <code>python_sc2</code> — only bot code differs.</p>
+        {% if recent_commits %}
+        <form method="post" action="{% url 'run_past_version_match' %}" style="display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap;">
+            {% csrf_token %}
+            <div>
+                <label for="commit_hash">Past Version:</label><br>
+                <select name="commit_hash" id="commit_hash" style="min-width: 400px;">
+                    {% for commit in recent_commits %}
+                    <option value="{{ commit.hash }}">
+                        {{ commit.short_hash }} — {{ commit.subject|truncatechars:60 }}
+                        ({{ commit.date|truncatechars:10 }}){% if commit.is_cached %} [cached]{% endif %}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <button type="submit" class="utility-btn">Run vs Past Version</button>
+            </div>
+        </form>
+        <p style="margin-top: 8px; font-size: 12px; color: #666;">
+            The first run for a commit extracts and caches the bot source (~5 seconds).
+            Subsequent runs reuse the cache. HEAD is excluded (use mirror match instead).
+        </p>
+        {% else %}
+        <p><em>No previous commits found in the bot repo git history.</em></p>
+        {% endif %}
+    </div>
+
+    <div class="utility-section">
         <h3>Continue from Replay</h3>
         <p>Upload a replay file and specify a time — BotTato takes over at that point and plays out the game vs a Computer opponent.</p>
         <form method="post" action="{% url 'run_replay_match' %}" enctype="multipart/form-data" style="display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap;">

@@ -4,8 +4,14 @@ bots/*/
 # Keep the bots directory itself
 !bots/.gitkeep
 
+# Cached past bot versions (extracted from git history)
+bot_versions/
+
 # Generated per-match compose override
 docker-compose.override.yml
+
+# Per-match isolated run directories (created at runtime)
+runs/
 
 # Runtime artifacts
 logs/*/

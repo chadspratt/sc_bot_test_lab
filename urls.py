@@ -14,6 +14,7 @@ urlpatterns = [
     path('utilities/recompile-cython/', views.recompile_cython, name='recompile_cython'),
     path('utilities/run-single-match/', views.run_single_match, name='run_single_match'),
     path('utilities/run-custom-match/', views.run_custom_match, name='run_custom_match'),
+    path('utilities/run-past-version-match/', views.run_past_version_match, name='run_past_version_match'),
     path('utilities/run-replay-match/', views.run_replay_match, name='run_replay_match'),
     path('custom-bots/', views.custom_bots, name='custom_bots'),
     path('custom-bots/create/', views.create_custom_bot, name='create_custom_bot'),
