@@ -58,6 +58,33 @@ class CustomBot(models.Model):
         default='python',
         help_text="Bot type for aiarena matches file: python, cppwin32, cpplinux, dotnetcore, java, nodejs, etc.",
     )
+    is_test_subject = models.BooleanField(
+        default=False,
+        help_text="Whether this bot can be used as Player 1 (the bot being tested/developed)",
+    )
+    source_path = models.CharField(
+        max_length=500,
+        blank=True,
+        default='',
+        help_text="Absolute path to the bot's live source directory on the host",
+    )
+    git_repo_path = models.CharField(
+        max_length=500,
+        blank=True,
+        default='',
+        help_text="Absolute path to the bot's git repository (for past version support)",
+    )
+    symlink_mounts = models.JSONField(
+        default=list,
+        blank=True,
+        help_text='Detected symlinks needing separate Docker mounts: [{"name": "...", "target": "..."}]',
+    )
+    dockerfile = models.CharField(
+        max_length=100,
+        blank=True,
+        default='',
+        help_text="Custom Dockerfile name in aiarena/ for mirror/past-version matches (e.g. Dockerfile.bottato)",
+    )
     description = models.TextField(blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -91,7 +118,13 @@ class Match(models.Model):
     opponent_build = models.CharField(max_length=15, choices=Build, blank=True, default='')
     opponent_bot = models.ForeignKey(
         CustomBot, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='opponent_matches',
         help_text="Set when the opponent is a custom bot instead of a built-in Computer"
+    )
+    test_bot = models.ForeignKey(
+        CustomBot, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='test_matches',
+        help_text="The bot being tested (Player 1). NULL = BotTato (legacy).",
     )
     result = models.CharField(max_length=50, choices=Result)
     duration_in_game_time = models.IntegerField(null=True, blank=True)
@@ -120,8 +153,19 @@ class Match(models.Model):
     def opponent_version_bot_name(self) -> str:
         """Return the aiarena bot name for a past-version opponent."""
         if self.opponent_commit_hash:
-            return f'BotTato_v_{self.opponent_commit_hash[:7]}'
+            prefix = self.test_bot.bot_directory if self.test_bot else 'BotTato'
+            return f'{prefix}_v_{self.opponent_commit_hash[:7]}'
         return ''
+
+    @property
+    def test_bot_name(self) -> str:
+        """Display name for the bot being tested."""
+        return self.test_bot.name if self.test_bot else 'BotTato'
+
+    @property
+    def test_bot_directory(self) -> str:
+        """Aiarena directory name of the bot being tested (for log paths)."""
+        return self.test_bot.bot_directory if self.test_bot else 'BotTato'
 
     def __str__(self):
         if self.opponent_commit_hash:

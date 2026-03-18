@@ -103,6 +103,29 @@ def _is_junction(path: str) -> bool:
         return False
 
 
+def scan_directory_symlinks(source_path: str) -> list[dict[str, str]]:
+    """Scan a directory for symlinks/junctions that Docker can't follow.
+
+    Docker on Windows cannot follow NTFS junctions or symlinks inside
+    bind mounts.  This function detects them so they can be mounted as
+    separate volumes.
+
+    Returns a list of ``{"name": "<entry>", "target": "<real_path>"}``
+    for each symlink or junction found in the top level of *source_path*.
+    """
+    results: list[dict[str, str]] = []
+    if not os.path.isdir(source_path):
+        return results
+    for entry in os.scandir(source_path):
+        if entry.is_symlink() or _is_junction(entry.path):
+            target = os.path.realpath(entry.path)
+            results.append({
+                'name': entry.name,
+                'target': os.path.normpath(target),
+            })
+    return results
+
+
 def _resolve_bot_host_path(bot_dir_name: str) -> str | None:
     """Resolve the actual host filesystem path for a bot directory.
 
@@ -126,42 +149,44 @@ def _resolve_bot_host_path(bot_dir_name: str) -> str | None:
     return None
 
 
-def _is_mirror_match(opponent_dir_name: str) -> bool:
-    """Detect whether the opponent is another copy of BotTato.
+def _is_mirror_match(test_bot: CustomBot, opponent_dir_name: str) -> bool:
+    """Detect whether the opponent is the same bot as the test subject.
 
-    Returns True if the opponent directory name is BotTato itself, or if
-    it resolves to the same host path as BotTato (e.g. a user-created copy
-    that is actually a junction/symlink back to the same directory).
+    Returns True if the opponent directory name matches the test bot,
+    or if it resolves to the same host path (e.g. a junction/symlink).
     """
-    if opponent_dir_name in (BOTTATO_NAME, BOTTATO_MIRROR_NAME):
+    mirror_name = f'{test_bot.name}_p2'
+    if opponent_dir_name in (test_bot.bot_directory, test_bot.name, mirror_name):
         return True
-    opponent_path = _resolve_bot_host_path(opponent_dir_name)
-    if opponent_path:
-        bot_src_norm = os.path.normpath(BOT_SRC_DIR)
-        if opponent_path == bot_src_norm:
-            return True
+    if test_bot.source_path:
+        opponent_path = _resolve_bot_host_path(opponent_dir_name)
+        if opponent_path:
+            if os.path.normpath(opponent_path) == os.path.normpath(test_bot.source_path):
+                return True
     return False
 
 
-def _ensure_mirror_overlay() -> None:
-    """Ensure the BotTato_p2 overlay directory has the required files.
+def _ensure_mirror_overlay(test_bot: CustomBot) -> str:
+    """Ensure a mirror overlay directory exists for the test bot.
 
-    The overlay only contains aiarena-specific files (run.py,
-    requirements.txt, ladderbots.json with renamed key).  If any are
-    missing, copy them from the BotTato overlay directory.
+    Creates ``aiarena/bots/<BotName>_p2/`` with overlay files cloned
+    from the test bot's overlay, but with the bot key renamed in
+    ladderbots.json so the proxy can route the two players.
+
+    Returns the mirror bot name (e.g. ``BotTato_p2``).
     """
-    src = os.path.join(AIARENA_BOTS_DIR, BOTTATO_NAME)
-    dst = os.path.join(AIARENA_BOTS_DIR, BOTTATO_MIRROR_NAME)
+    bot_dir = test_bot.bot_directory or test_bot.name
+    mirror_name = f'{test_bot.name}_p2'
+    src = os.path.join(AIARENA_BOTS_DIR, bot_dir)
+    dst = os.path.join(AIARENA_BOTS_DIR, mirror_name)
 
     if not os.path.isdir(src):
         raise FileNotFoundError(
-            f'{BOTTATO_NAME} overlay directory not found. '
-            f'Run prepare_bottato.py first.'
+            f'{bot_dir} overlay directory not found in aiarena/bots/.'
         )
 
     os.makedirs(dst, exist_ok=True)
 
-    # Copy run.py and requirements.txt from BotTato overlay if missing
     for filename in ('run.py', 'requirements.txt'):
         dst_file = os.path.join(dst, filename)
         if not os.path.isfile(dst_file):
@@ -176,49 +201,47 @@ def _ensure_mirror_overlay() -> None:
         if os.path.isfile(src_lb):
             with open(src_lb) as f:
                 lb_data = json.load(f)
-            if 'Bots' in lb_data and BOTTATO_NAME in lb_data['Bots']:
-                lb_data['Bots'][BOTTATO_MIRROR_NAME] = lb_data['Bots'].pop(BOTTATO_NAME)
+            if 'Bots' in lb_data and bot_dir in lb_data['Bots']:
+                lb_data['Bots'][mirror_name] = lb_data['Bots'].pop(bot_dir)
             with open(dst_lb, 'w') as f:
                 json.dump(lb_data, f, indent=4)
 
+    return mirror_name
 
-def _ensure_version_overlay(short_hash: str) -> str:
-    """Ensure an overlay directory exists for a past BotTato version.
 
-    Creates ``aiarena/bots/BotTato_v_<short_hash>/`` with the same
-    aiarena-specific files as the mirror overlay (run.py, requirements.txt,
-    ladderbots.json) but keyed to the version-specific bot name.
+def _ensure_version_overlay(test_bot: CustomBot, short_hash: str) -> str:
+    """Ensure an overlay directory for a past version of the test bot.
 
-    Returns the bot name used in the matches file / compose override
-    (e.g. ``BotTato_v_d019795``).
+    Creates ``aiarena/bots/<BotName>_v_<short_hash>/`` with overlay
+    files cloned from the test bot's overlay.
+
+    Returns the version-specific bot name.
     """
-    bot_name = f'{BOTTATO_VERSION_PREFIX}{short_hash}'
-    src = os.path.join(AIARENA_BOTS_DIR, BOTTATO_NAME)
+    bot_dir = test_bot.bot_directory or test_bot.name
+    bot_name = f'{test_bot.name}_v_{short_hash}'
+    src = os.path.join(AIARENA_BOTS_DIR, bot_dir)
     dst = os.path.join(AIARENA_BOTS_DIR, bot_name)
 
     if not os.path.isdir(src):
         raise FileNotFoundError(
-            f'{BOTTATO_NAME} overlay directory not found. '
-            f'Run prepare_bottato.py first.'
+            f'{bot_dir} overlay directory not found in aiarena/bots/.'
         )
 
     os.makedirs(dst, exist_ok=True)
 
-    # Always refresh overlay files so they stay current with the BotTato
-    # overlay (run.py compilation logic, requirements, etc.)
     for filename in ('run.py', 'requirements.txt'):
         src_file = os.path.join(src, filename)
         dst_file = os.path.join(dst, filename)
         if os.path.isfile(src_file):
             shutil.copy2(src_file, dst_file)
 
-    # ladderbots.json with version-specific bot key
+    # ladderbots.json with version-specific key
     src_lb = os.path.join(src, 'ladderbots.json')
     if os.path.isfile(src_lb):
         with open(src_lb) as f:
             lb_data = json.load(f)
-        if 'Bots' in lb_data and BOTTATO_NAME in lb_data['Bots']:
-            lb_data['Bots'][bot_name] = lb_data['Bots'].pop(BOTTATO_NAME)
+        if 'Bots' in lb_data and bot_dir in lb_data['Bots']:
+            lb_data['Bots'][bot_name] = lb_data['Bots'].pop(bot_dir)
         dst_lb = os.path.join(dst, 'ladderbots.json')
         with open(dst_lb, 'w') as f:
             json.dump(lb_data, f, indent=4)
@@ -226,88 +249,112 @@ def _ensure_version_overlay(short_hash: str) -> str:
     return bot_name
 
 
-def _bottato_volume_mounts(bot_name: str) -> list[str]:
-    """Generate Docker Compose volume mount lines for a BotTato instance.
+def _test_bot_volume_mounts(test_bot: CustomBot, aiarena_name: str) -> list[str]:
+    """Generate Docker Compose volume mount lines for a test subject bot.
 
-    Mounts the live ``bot/`` source tree as the base, then overlays
-    ``python_sc2/sc2/`` and the aiarena-specific files (run.py,
-    requirements.txt, ladderbots.json) on top.  This means bot code
-    changes take effect immediately without re-running prepare_bottato.
+    Mounts the live source directory as the base, then mounts symlink
+    targets separately (Docker on Windows can't follow junctions), and
+    overlays any aiarena-specific files (run.py, requirements.txt,
+    ladderbots.json) from the bot's overlay directory.
     """
-    bot_src = BOT_SRC_DIR.replace('\\', '/')
-    sc2_src = SC2_SRC_DIR.replace('\\', '/')
-    overlay = os.path.join(AIARENA_BOTS_DIR, bot_name).replace('\\', '/')
-    return [
-        f'      - "{bot_src}:/bots/{bot_name}"',
-        f'      - "{sc2_src}:/bots/{bot_name}/sc2"',
-        f'      - "{overlay}/run.py:/bots/{bot_name}/run.py"',
-        f'      - "{overlay}/requirements.txt:/bots/{bot_name}/requirements.txt"',
-        f'      - "{overlay}/ladderbots.json:/bots/{bot_name}/ladderbots.json"',
-    ]
+    source = test_bot.source_path.replace('\\', '/')
+    mounts = [f'      - "{source}:/bots/{aiarena_name}"']
+
+    # Mount symlink/junction targets explicitly
+    for link in test_bot.symlink_mounts or []:
+        name = link['name']
+        target = link['target'].replace('\\', '/')
+        mounts.append(f'      - "{target}:/bots/{aiarena_name}/{name}"')
+
+    # Overlay files from aiarena/bots/<dir>/
+    overlay_dir = os.path.join(AIARENA_BOTS_DIR, aiarena_name)
+    for filename in ('run.py', 'requirements.txt', 'ladderbots.json'):
+        overlay_file = os.path.join(overlay_dir, filename)
+        if os.path.isfile(overlay_file):
+            f_unix = overlay_file.replace('\\', '/')
+            mounts.append(f'      - "{f_unix}:/bots/{aiarena_name}/{filename}"')
+
+    return mounts
 
 
-def _past_version_volume_mounts(bot_name: str, cache_path: str) -> list[str]:
-    """Generate Docker Compose volume mount lines for a past BotTato version.
+def _past_version_volume_mounts(
+    test_bot: CustomBot, aiarena_name: str, cache_path: str,
+) -> list[str]:
+    """Generate volume mounts for a past version of a test subject bot.
 
-    Similar to ``_bottato_volume_mounts`` but uses a cached copy of the bot
-    source from a previous commit instead of the live ``bot/`` tree.  The
-    current ``python_sc2/sc2/`` is still mounted on top so all versions use
-    the same SC2 client library.
+    Uses the cached source from a previous commit as the base, then
+    mounts the current symlink targets on top (shared libraries like
+    python_sc2/sc2 should be the same across versions).  Overlay files
+    are also applied.
     """
     cached_src = cache_path.replace('\\', '/')
-    sc2_src = SC2_SRC_DIR.replace('\\', '/')
-    overlay = os.path.join(AIARENA_BOTS_DIR, bot_name).replace('\\', '/')
-    return [
-        f'      - "{cached_src}:/bots/{bot_name}"',
-        f'      - "{sc2_src}:/bots/{bot_name}/sc2"',
-        f'      - "{overlay}/run.py:/bots/{bot_name}/run.py"',
-        f'      - "{overlay}/requirements.txt:/bots/{bot_name}/requirements.txt"',
-        f'      - "{overlay}/ladderbots.json:/bots/{bot_name}/ladderbots.json"',
-    ]
+    mounts = [f'      - "{cached_src}:/bots/{aiarena_name}"']
+
+    # Symlink mounts from the current host (not from the cache)
+    for link in test_bot.symlink_mounts or []:
+        name = link['name']
+        target = link['target'].replace('\\', '/')
+        mounts.append(f'      - "{target}:/bots/{aiarena_name}/{name}"')
+
+    overlay_dir = os.path.join(AIARENA_BOTS_DIR, aiarena_name)
+    for filename in ('run.py', 'requirements.txt', 'ladderbots.json'):
+        overlay_file = os.path.join(overlay_dir, filename)
+        if os.path.isfile(overlay_file):
+            f_unix = overlay_file.replace('\\', '/')
+            mounts.append(f'      - "{f_unix}:/bots/{aiarena_name}/{filename}"')
+
+    return mounts
 
 
 def _write_compose_override(
     run_dir: str,
+    *,
+    test_bot: CustomBot,
+    test_bot_aiarena_name: str,
     bot2_name: str,
     bot2_host_path: str | None,
-    *,
     is_mirror: bool = False,
+    mirror_aiarena_name: str | None = None,
     is_past_version: bool = False,
     past_version_cache_path: str | None = None,
 ) -> None:
     """Generate docker-compose.override.yml with per-bot volume mounts.
 
-    Bot 1 (BotTato) always uses live source mounts via
-    ``_bottato_volume_mounts``.  Bot 2 is either:
+    Bot 1 (test subject) uses live source mounts via
+    ``_test_bot_volume_mounts``.  Bot 2 is either:
     - A regular opponent (single directory mount)
-    - A mirror match (live mounts + custom Dockerfile)
-    - A past version (cached source + current sc2 + custom Dockerfile)
+    - A mirror match (live mounts + optional custom Dockerfile)
+    - A past version (cached source + symlink mounts + optional Dockerfile)
     """
     lines = [
         'services:',
         '  bot_controller1:',
         '    volumes:',
     ]
-    lines += _bottato_volume_mounts(BOTTATO_NAME)
+    lines += _test_bot_volume_mounts(test_bot, test_bot_aiarena_name)
 
     lines.append('  bot_controller2:')
+    dockerfile = test_bot.dockerfile
     if is_past_version:
         assert past_version_cache_path is not None
-        lines += [
-            '    build:',
-            '      context: .',
-            '      dockerfile: Dockerfile.bottato',
-            '    volumes:',
-        ]
-        lines += _past_version_volume_mounts(bot2_name, past_version_cache_path)
+        if dockerfile:
+            lines += [
+                '    build:',
+                '      context: .',
+                f'      dockerfile: {dockerfile}',
+            ]
+        lines += ['    volumes:']
+        lines += _past_version_volume_mounts(test_bot, bot2_name, past_version_cache_path)
     elif is_mirror:
-        lines += [
-            '    build:',
-            '      context: .',
-            '      dockerfile: Dockerfile.bottato',
-            '    volumes:',
-        ]
-        lines += _bottato_volume_mounts(BOTTATO_MIRROR_NAME)
+        assert mirror_aiarena_name is not None
+        if dockerfile:
+            lines += [
+                '    build:',
+                '      context: .',
+                f'      dockerfile: {dockerfile}',
+            ]
+        lines += ['    volumes:']
+        lines += _test_bot_volume_mounts(test_bot, mirror_aiarena_name)
     else:
         assert bot2_host_path is not None
         b2 = bot2_host_path.replace('\\', '/')
@@ -325,16 +372,17 @@ def _write_compose_override(
 def get_available_aiarena_bots() -> list[str]:
     """Return directory names under aiarena/bots/ that have a ladderbots.json.
 
-    Excludes the internal mirror copy (BotTato_p2) which is an
-    implementation detail of self-play — users should register BotTato
-    as the opponent and mirror detection handles the rest.
+    Excludes internal mirror/version copies (names ending with ``_p2`` or
+    matching ``*_v_*``) which are implementation details of self-play and
+    past-version testing.
     """
     if not os.path.isdir(AIARENA_BOTS_DIR):
         return []
     return sorted(
         d for d in os.listdir(AIARENA_BOTS_DIR)
         if (
-            d != BOTTATO_MIRROR_NAME
+            not d.endswith('_p2')
+            and '_v_' not in d
             and os.path.isdir(os.path.join(AIARENA_BOTS_DIR, d))
             and os.path.isfile(os.path.join(AIARENA_BOTS_DIR, d, 'ladderbots.json'))
         )
@@ -499,10 +547,16 @@ def get_bot_log_path(match_id: int, bot_name: str) -> str | None:
 
 def start_aiarena_match(
     match: Match,
-    custom_bot: CustomBot,
+    opponent_bot: CustomBot,
+    test_bot: CustomBot | None = None,
     map_name: str | None = None,
 ) -> None:
     """Launch an aiarena match in a background thread.
+
+    *test_bot* is the bot being tested (Player 1).  If ``None``, falls
+    back to the legacy BotTato constants for backward compatibility.
+
+    *opponent_bot* is the opponent (Player 2).
 
     Each match gets its own run directory under ``aiarena/runs/<match_id>/``
     so multiple matches can run concurrently without conflicting.
@@ -512,30 +566,46 @@ def start_aiarena_match(
     if map_name is None:
         map_name = random.choice(AIARENA_MAP_LIST)
 
-    # Update the match with the chosen map
     match.map_name = map_name
     match.save()
 
-    opponent_race_code = RACE_TO_CODE.get(custom_bot.race, 'R')
-    opponent_type = custom_bot.aiarena_bot_type or 'python'
-    opponent_dir_name = custom_bot.bot_directory
+    opponent_race_code = RACE_TO_CODE.get(opponent_bot.race, 'R')
+    opponent_type = opponent_bot.aiarena_bot_type or 'python'
+    opponent_dir_name = opponent_bot.bot_directory
 
-    # Detect mirror/self-play match: opponent resolves to the same bot as
-    # BotTato.  The aiarena proxy routes by name so both players can't share
-    # the same name.  We use the BotTato_p2 mirror copy for bot2 instead.
-    is_mirror = _is_mirror_match(opponent_dir_name)
+    # Determine test bot info
+    if test_bot and test_bot.is_test_subject and test_bot.source_path:
+        test_bot_dir = test_bot.bot_directory or test_bot.name
+        test_bot_race = RACE_TO_CODE.get(test_bot.race, 'R')
+        test_bot_type = test_bot.aiarena_bot_type or 'python'
+    else:
+        # Legacy fallback: use BotTato constants
+        test_bot_dir = BOTTATO_NAME
+        test_bot_race = BOTTATO_RACE
+        test_bot_type = BOTTATO_TYPE
+
+    # Detect mirror/self-play match
+    is_mirror = (
+        _is_mirror_match(test_bot, opponent_dir_name)
+        if test_bot and test_bot.is_test_subject
+        else opponent_dir_name in (BOTTATO_NAME, BOTTATO_MIRROR_NAME)
+    )
+    mirror_name: str | None = None
     if is_mirror:
-        _ensure_mirror_overlay()
-        opponent_dir_name = BOTTATO_MIRROR_NAME
+        if test_bot and test_bot.is_test_subject:
+            mirror_name = _ensure_mirror_overlay(test_bot)
+        else:
+            mirror_name = _ensure_mirror_overlay_legacy()
+        opponent_dir_name = mirror_name
 
-    # Verify BotTato overlay exists
-    bottato_overlay = os.path.join(AIARENA_BOTS_DIR, BOTTATO_NAME)
-    if not os.path.isdir(bottato_overlay):
+    # Verify overlay exists
+    overlay_dir = os.path.join(AIARENA_BOTS_DIR, test_bot_dir)
+    if not os.path.isdir(overlay_dir):
         raise FileNotFoundError(
-            f'BotTato overlay directory not found. Run prepare_bottato.py first.'
+            f'{test_bot_dir} overlay directory not found in aiarena/bots/.'
         )
 
-    # Resolve opponent host path (not needed for mirror — handled by live mounts)
+    # Resolve opponent host path (not needed for mirror)
     opponent_path = None
     if not is_mirror:
         opponent_path = _resolve_bot_host_path(opponent_dir_name)
@@ -547,120 +617,41 @@ def start_aiarena_match(
             )
 
     match_id = match.id
-
-    # Create isolated run directory for this match
     run_dir = _create_run_dir(match_id)
 
-    # Set up the match
     _write_matches_file(
         run_dir,
-        bot1_name=BOTTATO_NAME,
-        bot1_race=BOTTATO_RACE,
-        bot1_type=BOTTATO_TYPE,
+        bot1_name=test_bot_dir,
+        bot1_race=test_bot_race,
+        bot1_type=test_bot_type,
         bot2_name=opponent_dir_name,
         bot2_race=opponent_race_code,
         bot2_type=opponent_type,
         map_name=map_name,
     )
 
-    # Generate per-match compose override with live source mounts for BotTato.
-    # Mirror matches also use live mounts + custom image for bot_controller2.
-    _write_compose_override(
-        run_dir,
-        bot2_name=opponent_dir_name,
-        bot2_host_path=opponent_path,
-        is_mirror=is_mirror,
-    )
+    if test_bot and test_bot.is_test_subject:
+        _write_compose_override(
+            run_dir,
+            test_bot=test_bot,
+            test_bot_aiarena_name=test_bot_dir,
+            bot2_name=opponent_dir_name,
+            bot2_host_path=opponent_path,
+            is_mirror=is_mirror,
+            mirror_aiarena_name=mirror_name,
+        )
+    else:
+        _write_compose_override_legacy(
+            run_dir,
+            bot2_name=opponent_dir_name,
+            bot2_host_path=opponent_path,
+            is_mirror=is_mirror,
+        )
 
     log_file_path = os.path.join(run_dir, 'compose_output.log')
 
     def _run_match():
-        """Background thread: run docker compose and process results."""
-        try:
-            with open(log_file_path, 'w') as log_file:
-                subprocess.run(
-                    [
-                        'docker', 'compose',
-                        '-f', 'docker-compose.yml',
-                        '-f', 'docker-compose.override.yml',
-                        '-p', f'aiarena_{match_id}',
-                        'up', '--abort-on-container-exit',
-                    ],
-                    cwd=run_dir,
-                    stdout=log_file,
-                    stderr=subprocess.STDOUT,
-                    timeout=7200,  # 2 hour timeout
-                )
-
-            # Docker compose finished — parse results
-            aiarena_result = _parse_results(run_dir)
-
-            from .models import Match as MatchModel
-
-            try:
-                match_obj = MatchModel.objects.get(id=match_id)
-            except MatchModel.DoesNotExist:
-                return
-
-            if aiarena_result:
-                result_type = aiarena_result.get('type', 'Error')
-                game_steps = aiarena_result.get('game_steps', 0)
-
-                match_obj.result = _map_result_to_match(result_type)
-                if game_steps > 0:
-                    match_obj.duration_in_game_time = _game_steps_to_seconds(game_steps)
-            else:
-                match_obj.result = 'Crash'
-
-            match_obj.end_timestamp = timezone.now()
-            match_obj.save()
-
-            # Bring down containers; artifacts remain in run_dir
-            subprocess.run(
-                [
-                    'docker', 'compose',
-                    '-f', 'docker-compose.yml',
-                    '-f', 'docker-compose.override.yml',
-                    '-p', f'aiarena_{match_id}', 'down',
-                ],
-                cwd=run_dir,
-                capture_output=True,
-                timeout=120,
-            )
-
-        except subprocess.TimeoutExpired:
-            from .models import Match as MatchModel
-
-            try:
-                match_obj = MatchModel.objects.get(id=match_id)
-                match_obj.result = 'Crash'
-                match_obj.end_timestamp = timezone.now()
-                match_obj.save()
-            except MatchModel.DoesNotExist:
-                pass
-
-            subprocess.run(
-                [
-                    'docker', 'compose',
-                    '-f', 'docker-compose.yml',
-                    '-f', 'docker-compose.override.yml',
-                    '-p', f'aiarena_{match_id}', 'down',
-                ],
-                cwd=run_dir,
-                capture_output=True,
-                timeout=60,
-            )
-
-        except Exception:
-            from .models import Match as MatchModel
-
-            try:
-                match_obj = MatchModel.objects.get(id=match_id)
-                match_obj.result = 'Crash'
-                match_obj.end_timestamp = timezone.now()
-                match_obj.save()
-            except MatchModel.DoesNotExist:
-                pass
+        _run_docker_match(run_dir, match_id, log_file_path)
 
     thread = threading.Thread(target=_run_match, daemon=True)
     thread.start()
@@ -670,15 +661,16 @@ def start_past_version_match(
     match: Match,
     commit_hash: str,
     short_hash: str,
+    test_bot: CustomBot | None = None,
     map_name: str | None = None,
 ) -> None:
-    """Launch an aiarena match of current BotTato vs a past version.
+    """Launch a match of the current test bot vs a past version.
 
     The past version's bot code is extracted from git history into a
-    cache directory.  The current ``python_sc2/sc2`` is mounted on top
-    so all versions share the same SC2 client library.
+    cache directory.  Symlink targets (e.g. shared libraries) are mounted
+    from the current host so all versions share the same runtime deps.
 
-    The match record should already exist with status ``'Pending'``.
+    If *test_bot* is ``None``, falls back to BotTato legacy behavior.
     """
     from . import bot_versions
 
@@ -688,135 +680,278 @@ def start_past_version_match(
     match.map_name = map_name
     match.save()
 
+    # Determine test bot info
+    if test_bot and test_bot.is_test_subject and test_bot.source_path:
+        test_bot_dir = test_bot.bot_directory or test_bot.name
+        test_bot_race = RACE_TO_CODE.get(test_bot.race, 'R')
+        test_bot_type = test_bot.aiarena_bot_type or 'python'
+        repo_path = test_bot.git_repo_path
+    else:
+        test_bot_dir = BOTTATO_NAME
+        test_bot_race = BOTTATO_RACE
+        test_bot_type = BOTTATO_TYPE
+        repo_path = ''
+
     # Extract (or reuse) cached bot source for this commit
-    cache_path = bot_versions.get_or_create_version_cache(commit_hash)
+    cache_path = bot_versions.get_or_create_version_cache(
+        commit_hash, repo_path=repo_path or None,
+    )
 
     # Create overlay directory with aiarena-specific files
-    opponent_bot_name = _ensure_version_overlay(short_hash)
+    if test_bot and test_bot.is_test_subject:
+        opponent_bot_name = _ensure_version_overlay(test_bot, short_hash)
+    else:
+        opponent_bot_name = _ensure_version_overlay_legacy(short_hash)
 
-    # Verify BotTato overlay exists
-    bottato_overlay = os.path.join(AIARENA_BOTS_DIR, BOTTATO_NAME)
-    if not os.path.isdir(bottato_overlay):
+    # Verify overlay exists
+    overlay_dir = os.path.join(AIARENA_BOTS_DIR, test_bot_dir)
+    if not os.path.isdir(overlay_dir):
         raise FileNotFoundError(
-            f'BotTato overlay directory not found. Run prepare_bottato.py first.'
+            f'{test_bot_dir} overlay directory not found in aiarena/bots/.'
         )
 
     match_id = match.id
-
-    # Create isolated run directory for this match
     run_dir = _create_run_dir(match_id)
 
-    # Set up the match file
     _write_matches_file(
         run_dir,
-        bot1_name=BOTTATO_NAME,
-        bot1_race=BOTTATO_RACE,
-        bot1_type=BOTTATO_TYPE,
+        bot1_name=test_bot_dir,
+        bot1_race=test_bot_race,
+        bot1_type=test_bot_type,
         bot2_name=opponent_bot_name,
-        bot2_race=BOTTATO_RACE,  # past version is also Terran
-        bot2_type=BOTTATO_TYPE,
+        bot2_race=test_bot_race,  # past version has same race
+        bot2_type=test_bot_type,
         map_name=map_name,
     )
 
-    # Generate compose override with cached source for bot2
-    _write_compose_override(
-        run_dir,
-        bot2_name=opponent_bot_name,
-        bot2_host_path=None,
-        is_past_version=True,
-        past_version_cache_path=cache_path,
-    )
+    if test_bot and test_bot.is_test_subject:
+        _write_compose_override(
+            run_dir,
+            test_bot=test_bot,
+            test_bot_aiarena_name=test_bot_dir,
+            bot2_name=opponent_bot_name,
+            bot2_host_path=None,
+            is_past_version=True,
+            past_version_cache_path=cache_path,
+        )
+    else:
+        _write_compose_override_legacy(
+            run_dir,
+            bot2_name=opponent_bot_name,
+            bot2_host_path=None,
+            is_past_version=True,
+            past_version_cache_path=cache_path,
+        )
 
     log_file_path = os.path.join(run_dir, 'compose_output.log')
 
     def _run_match():
-        """Background thread: run docker compose and process results."""
-        try:
-            with open(log_file_path, 'w') as log_file:
-                subprocess.run(
-                    [
-                        'docker', 'compose',
-                        '-f', 'docker-compose.yml',
-                        '-f', 'docker-compose.override.yml',
-                        '-p', f'aiarena_{match_id}',
-                        'up', '--abort-on-container-exit',
-                    ],
-                    cwd=run_dir,
-                    stdout=log_file,
-                    stderr=subprocess.STDOUT,
-                    timeout=7200,
-                )
-
-            aiarena_result = _parse_results(run_dir)
-
-            from .models import Match as MatchModel
-
-            try:
-                match_obj = MatchModel.objects.get(id=match_id)
-            except MatchModel.DoesNotExist:
-                return
-
-            if aiarena_result:
-                result_type = aiarena_result.get('type', 'Error')
-                game_steps = aiarena_result.get('game_steps', 0)
-
-                match_obj.result = _map_result_to_match(result_type)
-                if game_steps > 0:
-                    match_obj.duration_in_game_time = _game_steps_to_seconds(
-                        game_steps
-                    )
-            else:
-                match_obj.result = 'Crash'
-
-            match_obj.end_timestamp = timezone.now()
-            match_obj.save()
-
-            # Bring down containers; artifacts remain in run_dir
-            subprocess.run(
-                [
-                    'docker', 'compose',
-                    '-f', 'docker-compose.yml',
-                    '-f', 'docker-compose.override.yml',
-                    '-p', f'aiarena_{match_id}', 'down',
-                ],
-                cwd=run_dir,
-                capture_output=True,
-                timeout=120,
-            )
-
-        except subprocess.TimeoutExpired:
-            from .models import Match as MatchModel
-
-            try:
-                match_obj = MatchModel.objects.get(id=match_id)
-                match_obj.result = 'Crash'
-                match_obj.end_timestamp = timezone.now()
-                match_obj.save()
-            except MatchModel.DoesNotExist:
-                pass
-
-            subprocess.run(
-                [
-                    'docker', 'compose',
-                    '-f', 'docker-compose.yml',
-                    '-f', 'docker-compose.override.yml',
-                    '-p', f'aiarena_{match_id}', 'down',
-                ],
-                cwd=run_dir,
-                capture_output=True,
-                timeout=60,
-            )
-
-        except Exception:
-            from .models import Match as MatchModel
-
-            try:
-                match_obj = MatchModel.objects.get(id=match_id)
-                match_obj.result = 'Crash'
-                match_obj.end_timestamp = timezone.now()
-                match_obj.save()
-            except MatchModel.DoesNotExist:
-                pass
+        _run_docker_match(run_dir, match_id, log_file_path)
 
     thread = threading.Thread(target=_run_match, daemon=True)
     thread.start()
+
+
+# ---------------------------------------------------------------------------
+# Legacy helpers (BotTato-specific, used when test_bot is None)
+# ---------------------------------------------------------------------------
+
+def _ensure_mirror_overlay_legacy() -> str:
+    """Legacy: ensure BotTato_p2 overlay for backward compat."""
+    src = os.path.join(AIARENA_BOTS_DIR, BOTTATO_NAME)
+    dst = os.path.join(AIARENA_BOTS_DIR, BOTTATO_MIRROR_NAME)
+    if not os.path.isdir(src):
+        raise FileNotFoundError(
+            f'{BOTTATO_NAME} overlay directory not found. Run prepare_bottato.py first.'
+        )
+    os.makedirs(dst, exist_ok=True)
+    for filename in ('run.py', 'requirements.txt'):
+        dst_file = os.path.join(dst, filename)
+        if not os.path.isfile(dst_file):
+            src_file = os.path.join(src, filename)
+            if os.path.isfile(src_file):
+                shutil.copy2(src_file, dst_file)
+    dst_lb = os.path.join(dst, 'ladderbots.json')
+    if not os.path.isfile(dst_lb):
+        src_lb = os.path.join(src, 'ladderbots.json')
+        if os.path.isfile(src_lb):
+            with open(src_lb) as f:
+                lb_data = json.load(f)
+            if 'Bots' in lb_data and BOTTATO_NAME in lb_data['Bots']:
+                lb_data['Bots'][BOTTATO_MIRROR_NAME] = lb_data['Bots'].pop(BOTTATO_NAME)
+            with open(dst_lb, 'w') as f:
+                json.dump(lb_data, f, indent=4)
+    return BOTTATO_MIRROR_NAME
+
+
+def _ensure_version_overlay_legacy(short_hash: str) -> str:
+    """Legacy: ensure BotTato_v_<hash> overlay for backward compat."""
+    bot_name = f'{BOTTATO_VERSION_PREFIX}{short_hash}'
+    src = os.path.join(AIARENA_BOTS_DIR, BOTTATO_NAME)
+    dst = os.path.join(AIARENA_BOTS_DIR, bot_name)
+    if not os.path.isdir(src):
+        raise FileNotFoundError(
+            f'{BOTTATO_NAME} overlay directory not found. Run prepare_bottato.py first.'
+        )
+    os.makedirs(dst, exist_ok=True)
+    for filename in ('run.py', 'requirements.txt'):
+        src_file = os.path.join(src, filename)
+        dst_file = os.path.join(dst, filename)
+        if os.path.isfile(src_file):
+            shutil.copy2(src_file, dst_file)
+    src_lb = os.path.join(src, 'ladderbots.json')
+    if os.path.isfile(src_lb):
+        with open(src_lb) as f:
+            lb_data = json.load(f)
+        if 'Bots' in lb_data and BOTTATO_NAME in lb_data['Bots']:
+            lb_data['Bots'][bot_name] = lb_data['Bots'].pop(BOTTATO_NAME)
+        dst_lb = os.path.join(dst, 'ladderbots.json')
+        with open(dst_lb, 'w') as f:
+            json.dump(lb_data, f, indent=4)
+    return bot_name
+
+
+def _write_compose_override_legacy(
+    run_dir: str,
+    bot2_name: str,
+    bot2_host_path: str | None,
+    *,
+    is_mirror: bool = False,
+    is_past_version: bool = False,
+    past_version_cache_path: str | None = None,
+) -> None:
+    """Legacy compose override using hardcoded BotTato volume mounts."""
+    bot_src = BOT_SRC_DIR.replace('\\', '/')
+    sc2_src = SC2_SRC_DIR.replace('\\', '/')
+
+    def _bottato_mounts(name: str) -> list[str]:
+        overlay = os.path.join(AIARENA_BOTS_DIR, name).replace('\\', '/')
+        return [
+            f'      - "{bot_src}:/bots/{name}"',
+            f'      - "{sc2_src}:/bots/{name}/sc2"',
+            f'      - "{overlay}/run.py:/bots/{name}/run.py"',
+            f'      - "{overlay}/requirements.txt:/bots/{name}/requirements.txt"',
+            f'      - "{overlay}/ladderbots.json:/bots/{name}/ladderbots.json"',
+        ]
+
+    lines = [
+        'services:',
+        '  bot_controller1:',
+        '    volumes:',
+    ]
+    lines += _bottato_mounts(BOTTATO_NAME)
+
+    lines.append('  bot_controller2:')
+    if is_past_version:
+        assert past_version_cache_path is not None
+        cached = past_version_cache_path.replace('\\', '/')
+        overlay = os.path.join(AIARENA_BOTS_DIR, bot2_name).replace('\\', '/')
+        lines += [
+            '    build:',
+            '      context: .',
+            '      dockerfile: Dockerfile.bottato',
+            '    volumes:',
+            f'      - "{cached}:/bots/{bot2_name}"',
+            f'      - "{sc2_src}:/bots/{bot2_name}/sc2"',
+            f'      - "{overlay}/run.py:/bots/{bot2_name}/run.py"',
+            f'      - "{overlay}/requirements.txt:/bots/{bot2_name}/requirements.txt"',
+            f'      - "{overlay}/ladderbots.json:/bots/{bot2_name}/ladderbots.json"',
+        ]
+    elif is_mirror:
+        lines += [
+            '    build:',
+            '      context: .',
+            '      dockerfile: Dockerfile.bottato',
+            '    volumes:',
+        ]
+        lines += _bottato_mounts(BOTTATO_MIRROR_NAME)
+    else:
+        assert bot2_host_path is not None
+        b2 = bot2_host_path.replace('\\', '/')
+        lines += [
+            '    volumes:',
+            f'      - "{b2}:/bots/{bot2_name}"',
+        ]
+    lines.append('')
+
+    override_path = os.path.join(run_dir, 'docker-compose.override.yml')
+    with open(override_path, 'w') as f:
+        f.write('\n'.join(lines))
+
+
+def _run_docker_match(run_dir: str, match_id: int, log_file_path: str) -> None:
+    """Run a Docker match in the current thread.  Shared by both start functions."""
+    compose_down_cmd = [
+        'docker', 'compose',
+        '-f', 'docker-compose.yml',
+        '-f', 'docker-compose.override.yml',
+        '-p', f'aiarena_{match_id}', 'down',
+        '--rmi', 'local',
+    ]
+
+    try:
+        with open(log_file_path, 'w') as log_file:
+            subprocess.run(
+                [
+                    'docker', 'compose',
+                    '-f', 'docker-compose.yml',
+                    '-f', 'docker-compose.override.yml',
+                    '-p', f'aiarena_{match_id}',
+                    'up', '--abort-on-container-exit',
+                ],
+                cwd=run_dir,
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
+                timeout=7200,
+            )
+
+        aiarena_result = _parse_results(run_dir)
+
+        from .models import Match as MatchModel
+        try:
+            match_obj = MatchModel.objects.get(id=match_id)
+        except MatchModel.DoesNotExist:
+            return
+
+        if aiarena_result:
+            result_type = aiarena_result.get('type', 'Error')
+            game_steps = aiarena_result.get('game_steps', 0)
+            match_obj.result = _map_result_to_match(result_type)
+            if game_steps > 0:
+                match_obj.duration_in_game_time = _game_steps_to_seconds(game_steps)
+        else:
+            match_obj.result = 'Crash'
+
+        match_obj.end_timestamp = timezone.now()
+        match_obj.save()
+
+    except subprocess.TimeoutExpired:
+        from .models import Match as MatchModel
+        try:
+            match_obj = MatchModel.objects.get(id=match_id)
+            match_obj.result = 'Crash'
+            match_obj.end_timestamp = timezone.now()
+            match_obj.save()
+        except MatchModel.DoesNotExist:
+            pass
+
+    except Exception:
+        from .models import Match as MatchModel
+        try:
+            match_obj = MatchModel.objects.get(id=match_id)
+            match_obj.result = 'Crash'
+            match_obj.end_timestamp = timezone.now()
+            match_obj.save()
+        except MatchModel.DoesNotExist:
+            pass
+
+    # Always attempt cleanup, but never let it affect match results.
+    try:
+        subprocess.run(
+            compose_down_cmd,
+            cwd=run_dir,
+            capture_output=True,
+            timeout=120,
+        )
+    except Exception:
+        pass

@@ -122,6 +122,35 @@
                 <label for="description">Description (optional):</label>
                 <textarea name="description" id="description" placeholder="What does this bot do?"></textarea>
             </div>
+            <hr style="margin: 16px 0;">
+            <h4 style="margin-top: 0;">Test Subject Settings</h4>
+            <p style="font-size: 12px; color: #666;">
+                Mark a bot as a <strong>test subject</strong> to enable running it as Player 1
+                against opponents and past versions of itself.
+            </p>
+            <div class="form-group">
+                <label>
+                    <input type="checkbox" name="is_test_subject" id="is_test_subject" onchange="document.getElementById('test-subject-fields').style.display = this.checked ? 'block' : 'none';">
+                    This bot is a test subject (Player 1)
+                </label>
+            </div>
+            <div id="test-subject-fields" style="display: none;">
+                <div class="form-group">
+                    <label for="source_path">Source Path:</label>
+                    <input type="text" name="source_path" id="source_path" placeholder="e.g. C:\Users\me\mybot">
+                    <small style="color: #666;">Absolute path to the bot source on the host. Mounted into Docker at runtime.</small>
+                </div>
+                <div class="form-group">
+                    <label for="git_repo_path">Git Repo Path (optional):</label>
+                    <input type="text" name="git_repo_path" id="git_repo_path" placeholder="e.g. C:\Users\me\mybot">
+                    <small style="color: #666;">Path to git repo for past-version matches. Leave blank to disable.</small>
+                </div>
+                <div class="form-group">
+                    <label for="dockerfile">Custom Dockerfile (optional):</label>
+                    <input type="text" name="dockerfile" id="dockerfile" placeholder="e.g. Dockerfile.mybot">
+                    <small style="color: #666;">Dockerfile name (relative to test_lab/aiarena/) for custom build steps. Leave blank for vanilla image.</small>
+                </div>
+            </div>
             <button type="submit" class="btn btn-primary">Register Bot</button>
         </form>
     </div>
@@ -136,6 +165,7 @@
                     <th>Race</th>
                     <th>Directory</th>
                     <th>Bot Type</th>
+                    <th>Test Subject</th>
                     <th>Description</th>
                     <th>Created</th>
                     <th>Actions</th>
@@ -148,6 +178,17 @@
                     <td>{{ bot.race }}</td>
                     <td><code>{{ bot.bot_directory }}</code></td>
                     <td><code>{{ bot.aiarena_bot_type }}</code></td>
+                    <td>
+                        {% if bot.is_test_subject %}
+                            <span style="color: #28a745; font-weight: bold;">Yes</span>
+                            {% if bot.source_path %}<br><small>src: <code>{{ bot.source_path }}</code></small>{% endif %}
+                            {% if bot.git_repo_path %}<br><small>git: <code>{{ bot.git_repo_path }}</code></small>{% endif %}
+                            {% if bot.dockerfile %}<br><small>dockerfile: <code>{{ bot.dockerfile }}</code></small>{% endif %}
+                            {% if bot.symlink_mounts %}<br><small>symlinks: {{ bot.symlink_mounts|length }}</small>{% endif %}
+                        {% else %}
+                            <span style="color: #999;">No</span>
+                        {% endif %}
+                    </td>
                     <td>{{ bot.description }}</td>
                     <td>{{ bot.created_at|date:"Y-m-d H:i" }}</td>
                     <td>

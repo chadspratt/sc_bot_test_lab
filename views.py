@@ -18,22 +18,24 @@ from .models import CustomBot, Match, MatchEvent, TestGroup
 
 def match_list(request):
     """View to display match data grouped by test_group_id in a pivot table."""
-    # Define difficulty order to match the filter dropdown
-    difficulty_order = [
-        'Easy', 'Medium', 'MediumHard', 'Hard', 'Harder', 'VeryHard',
-        'CheatVision', 'CheatMoney', 'CheatInsane'
-    ]
-    
-    # Get difficulty filter from request
+    # Get filters from request
     selected_difficulty = request.GET.get('difficulty', '')
     selected_limit = request.GET.get('limit', '')
-    
-    matches = Match.objects.all().exclude(test_group_id=-1)
-    
-    # Apply difficulty filter if selected
+    selected_test_bot = request.GET.get('test_bot', '')
+
+    matches = Match.objects.select_related('opponent_bot').exclude(test_group_id=-1)
+
+    # Apply test bot filter
+    if selected_test_bot and selected_test_bot.isdigit():
+        matches = matches.filter(test_bot_id=int(selected_test_bot))
+
+    # Difficulty filter applies only to computer opponents; custom-bot matches
+    # are always included (they run regardless of difficulty).
     if selected_difficulty:
-        matches = matches.filter(opponent_difficulty=selected_difficulty)
-    
+        matches = matches.filter(
+            Q(opponent_difficulty=selected_difficulty) | Q(opponent_bot__isnull=False)
+        )
+
     # Apply test group limit if selected — only include matches from the N most recent test groups
     if selected_limit and selected_limit.isdigit():
         recent_group_ids = list(
@@ -43,199 +45,204 @@ def match_list(request):
             .order_by('-test_group_id')[:int(selected_limit)]
         )
         matches = matches.filter(test_group_id__in=recent_group_ids)
-    
+
+    # ------------------------------------------------------------------
     # Group matches by test_group_id and create pivot structure
-    grouped_matches = defaultdict(dict[str,Match])
-    all_opponents = set()
-    race_groups = defaultdict(list)  # race -> builds
-    
-    # Track win/loss counts for each opponent
-    opponent_stats = defaultdict(lambda: {'victories': 0, 'total_games': 0})
-    
-    # Track fastest victories for each race/build/map/difficulty combination
-    fastest_victories = {}  # key: (race, build, difficulty, map) -> (duration, match_id)
-    slowest_losses = {}  # key: (race, build, difficulty, map) -> (duration, match_id)
-    
+    # ------------------------------------------------------------------
+    grouped_matches: dict[int, dict[str, Match]] = defaultdict(dict)
+    race_groups: dict[str, list[str]] = defaultdict(list)  # race -> builds
+    custom_bot_opponents: dict[int, CustomBot] = {}  # bot_id -> CustomBot
+
+    # Track win/loss counts for each opponent column
+    opponent_stats: dict[str, dict] = defaultdict(lambda: {'victories': 0, 'total_games': 0})
+
+    # Track fastest victories / slowest losses per combination
+    fastest_victories: dict[tuple, tuple[int, int]] = {}
+    slowest_losses: dict[tuple, tuple[int, int]] = {}
+
     for match in matches:
-        opponent_name = f"{match.opponent_race}-{match.opponent_build}"
-        all_opponents.add(opponent_name)
-        # Store both result and duration
-        grouped_matches[match.test_group.id][opponent_name] = match
-        if match.result in ['Victory', 'Defeat']:
-            opponent_stats[opponent_name]['total_games'] += 1
+        opp_bot = match.opponent_bot
+        if opp_bot is not None:
+            # Custom bot opponent — key by bot id
+            opponent_key = f"bot_{opp_bot.id}"
+            custom_bot_opponents[opp_bot.id] = opp_bot
+        else:
+            # Computer opponent — key by race-build
+            opponent_key = f"{match.opponent_race}-{match.opponent_build}"
+            race_groups[match.opponent_race].append(match.opponent_build)
+
+        grouped_matches[match.test_group.id][opponent_key] = match
+
+        if match.result in ('Victory', 'Defeat'):
+            opponent_stats[opponent_key]['total_games'] += 1
             if match.result == 'Victory':
-                opponent_stats[opponent_name]['victories'] += 1
-                
-                # Track fastest victory for this combination
+                opponent_stats[opponent_key]['victories'] += 1
                 if match.duration_in_game_time and match.duration_in_game_time > 0:
-                    key = (match.opponent_race, match.opponent_build, match.opponent_difficulty, match.map_name)
+                    key = (opponent_key, match.opponent_difficulty, match.map_name)
                     if key not in fastest_victories or match.duration_in_game_time < fastest_victories[key][0]:
                         fastest_victories[key] = (match.duration_in_game_time, match.id)
             else:
-                # Track slowest loss for this combination
                 if match.duration_in_game_time and match.duration_in_game_time > 0:
-                    key = (match.opponent_race, match.opponent_build, match.opponent_difficulty, match.map_name)
+                    key = (opponent_key, match.opponent_difficulty, match.map_name)
                     if key not in slowest_losses or match.duration_in_game_time > slowest_losses[key][0]:
                         slowest_losses[key] = (match.duration_in_game_time, match.id)
-        
-        # Build hierarchical structure for headers
-        race_groups[match.opponent_race].append(match.opponent_build)
 
-    best_time_match_ids = {match_id for _, match_id in fastest_victories.values()}
-    best_time_match_ids.update(match_id for _, match_id in slowest_losses.values())
-    
-    # Sort and deduplicate builds within each race/difficulty group
-    for race in race_groups:
-        race_groups[race] = sorted(list(set(race_groups[race])))
-    
-    # Create ordered list of opponents for consistent column ordering
-    sorted_opponents = []
-    
-    # Build header structure and opponent order
-    header_structure = []
-    
-    # All difficulties - collapse into unique race-build combinations
-    # Collect all unique race-build combinations across all difficulties
-    race_build_map = defaultdict(set)  # race -> set of builds
-    
-    for race in race_groups:
-        for build in race_groups[race]:
-            race_build_map[race].add(build)
-    
-    # Create sorted_opponents as just the unique race-build combinations
-    # We'll match based on the row's difficulty later
+    best_time_match_ids = {mid for _, mid in fastest_victories.values()}
+    best_time_match_ids.update(mid for _, mid in slowest_losses.values())
+
+    # ------------------------------------------------------------------
+    # Build sorted opponent columns and header structure
+    # ------------------------------------------------------------------
+    # 1) Computer opponents (race-build)
+    race_build_map: dict[str, set[str]] = defaultdict(set)
+    for race, builds in race_groups.items():
+        race_build_map[race].update(builds)
+
+    sorted_opponents: list[str] = []
+    header_structure: list[dict] = []
+
     for race in sorted(race_build_map.keys()):
-        builds = sorted(list(race_build_map[race]))
+        builds = sorted(race_build_map[race])
         for build in builds:
-            # Store as race-build (without difficulty)
             sorted_opponents.append(f"{race}-{build}")
-    
-    # Build a single header structure with all races
-    for race in sorted(race_build_map.keys()):
-        builds = sorted(list(race_build_map[race]))
         header_structure.append({
             'name': race,
             'span': len(builds),
-            'builds': builds
+            'builds': list(builds),
         })
-    
-    # Sort test groups for consistent display
-    sorted_groups = sorted(grouped_matches.keys(), reverse=True)
-    
-    # Fetch test group descriptions
-    test_groups = {tg.id: tg.description for tg in TestGroup.objects.filter(id__in=sorted_groups)}
-    
-    # Create the pivot table data
-    max_group_id = max(sorted_groups) if sorted_groups else -1
-    pivot_data = []
-    for group_id in sorted_groups:
-        row = {'test_group_id': group_id, 'results': [], 'difficulty': None}
-        
-        # Get difficulty from first match in this group
-        for match in grouped_matches[group_id].values():
-            row['difficulty'] = match.opponent_difficulty
-            break
-        
-        # Calculate win percentage and average duration for this group
-        group_victories = 0
-        group_total_games = 0
-        group_total_duration = 0
-        group_games_with_duration = 0
-        
-        for opponent in sorted_opponents:
-            match_data = grouped_matches[group_id].get(opponent, None)
-            if not match_data:
-                row['results'].append(None)
-                continue
-                
-            if group_id != max_group_id and match_data.result == 'Pending':
-                match_data.result = 'Aborted'
-            
-            match_data.is_best_time = match_data.id in best_time_match_ids
 
-            row['results'].append(match_data)
-            
-            # Count wins/losses for group percentage
-            result = match_data.result
-            duration = match_data.duration_in_game_time
-            
-            if result in ['Victory', 'Defeat']:
-                group_total_games += 1
-                if result == 'Victory':
-                    group_victories += 1
-        
-            # Sum durations for average calculation
-            if duration is not None and duration > 0:
-                group_total_duration += duration
-                group_games_with_duration += 1
-        
-        # Calculate group win percentage
-        if group_total_games > 0:
-            group_win_percentage = (group_victories / group_total_games) * 100
-            row['group_win_percentage'] = f"{group_win_percentage:.1f}%"
-        else:
-            row['group_win_percentage'] = "-"
-        
-        # Calculate average game length
-        if group_games_with_duration > 0:
-            avg_duration = group_total_duration / group_games_with_duration
-            row['avg_duration'] = int(avg_duration)
-        else:
-            row['avg_duration'] = None
-        
-        pivot_data.append(row)
-    
-    # Calculate win percentages for each opponent column
-    win_percentages = []
-    for opponent in sorted_opponents:
-        stats = opponent_stats[opponent]
-        if stats['total_games'] > 0:
-            win_percentage = (stats['victories'] / stats['total_games']) * 100
-            win_percentages.append(f"{win_percentage:.1f}%")
-        else:
-            win_percentages.append("-")
+    # 2) Custom bot opponents (appended after computer columns)
+    custom_bot_keys: list[str] = []
+    custom_bot_names: list[str] = []
+    for bot_id in sorted(custom_bot_opponents.keys()):
+        bot = custom_bot_opponents[bot_id]
+        key = f"bot_{bot_id}"
+        custom_bot_keys.append(key)
+        custom_bot_names.append(bot.name)
+        sorted_opponents.append(key)
 
-    # Calculate win rates by race within each difficulty
+    if custom_bot_keys:
+        header_structure.append({
+            'name': 'Custom Bots',
+            'span': len(custom_bot_keys),
+            'builds': list(custom_bot_names),
+        })
+
+    # ------------------------------------------------------------------
+    # Compute per-race (and custom-bots group) win-rate labels
+    # ------------------------------------------------------------------
     for race_group in header_structure:
         race_name = race_group['name']
         race_victories = 0
         race_total_games = 0
-        
-        # All difficulties - aggregate across all difficulties for this race
-        for opponent_key in opponent_stats.keys():
-            # Match race at start and extract difficulty and build
-            if opponent_key.startswith(f"{race_name}-"):
-                stats = opponent_stats[opponent_key]
+
+        if race_name == 'Custom Bots':
+            # Aggregate across all custom bot columns
+            for key in custom_bot_keys:
+                stats = opponent_stats[key]
                 race_total_games += stats['total_games']
                 race_victories += stats['victories']
-        
+        else:
+            for opp_key, stats in opponent_stats.items():
+                if opp_key.startswith(f"{race_name}-"):
+                    race_total_games += stats['total_games']
+                    race_victories += stats['victories']
+
         if race_total_games > 0:
-            race_win_percentage = (race_victories / race_total_games) * 100
-            race_group['win_rate'] = f"{race_win_percentage:.0f}%"
+            race_group['win_rate'] = f"{(race_victories / race_total_games) * 100:.0f}%"
         else:
             race_group['win_rate'] = "-"
-        
-        # Add win rates to individual builds
-        for i, build in enumerate(race_group['builds']):
-            stats = opponent_stats[f"{race_name}-{build}"]
-            build_total_games = stats['total_games']
-            build_victories = stats['victories']
-            
-            if build_total_games > 0:
-                build_win_percentage = (build_victories / build_total_games) * 100
-                race_group['builds'][i] = f"{build} {build_win_percentage:.0f}%"
-            else:
-                race_group['builds'][i] = f"{build} -"
 
-    custom_bots_list = CustomBot.objects.all().order_by('name')
+        # Per-build / per-bot win rates
+        if race_name == 'Custom Bots':
+            for i, key in enumerate(custom_bot_keys):
+                s = opponent_stats[key]
+                if s['total_games'] > 0:
+                    pct = (s['victories'] / s['total_games']) * 100
+                    race_group['builds'][i] = f"{custom_bot_names[i]} {pct:.0f}%"
+                else:
+                    race_group['builds'][i] = f"{custom_bot_names[i]} -"
+        else:
+            raw_builds = sorted(race_build_map.get(race_name, set()))
+            for i, build in enumerate(raw_builds):
+                s = opponent_stats[f"{race_name}-{build}"]
+                if s['total_games'] > 0:
+                    pct = (s['victories'] / s['total_games']) * 100
+                    race_group['builds'][i] = f"{build} {pct:.0f}%"
+                else:
+                    race_group['builds'][i] = f"{build} -"
+
+    # ------------------------------------------------------------------
+    # Build pivot rows
+    # ------------------------------------------------------------------
+    sorted_groups = sorted(grouped_matches.keys(), reverse=True)
+    test_groups = {tg.id: tg.description for tg in TestGroup.objects.filter(id__in=sorted_groups)}
+    max_group_id = max(sorted_groups) if sorted_groups else -1
+
+    pivot_data = []
+    for group_id in sorted_groups:
+        row = {'test_group_id': group_id, 'results': [], 'difficulty': None}
+
+        # Get difficulty from first computer match in this group
+        for m in grouped_matches[group_id].values():
+            if m.opponent_difficulty:
+                row['difficulty'] = m.opponent_difficulty
+                break
+
+        group_victories = 0
+        group_total_games = 0
+        group_total_duration = 0
+        group_games_with_duration = 0
+
+        for opponent in sorted_opponents:
+            match_data = grouped_matches[group_id].get(opponent)
+            if not match_data:
+                row['results'].append(None)
+                continue
+
+            if group_id != max_group_id and match_data.result == 'Pending':
+                match_data.result = 'Aborted'
+
+            match_data.is_best_time = match_data.id in best_time_match_ids
+            row['results'].append(match_data)
+
+            result = match_data.result
+            duration = match_data.duration_in_game_time
+
+            if result in ('Victory', 'Defeat'):
+                group_total_games += 1
+                if result == 'Victory':
+                    group_victories += 1
+
+            if duration is not None and duration > 0:
+                group_total_duration += duration
+                group_games_with_duration += 1
+
+        if group_total_games > 0:
+            row['group_win_percentage'] = f"{(group_victories / group_total_games) * 100:.1f}%"
+        else:
+            row['group_win_percentage'] = "-"
+
+        if group_games_with_duration > 0:
+            row['avg_duration'] = int(group_total_duration / group_games_with_duration)
+        else:
+            row['avg_duration'] = None
+
+        pivot_data.append(row)
+
+    # ------------------------------------------------------------------
+    # Context
+    # ------------------------------------------------------------------
+    test_subject_bots = CustomBot.objects.all().order_by('name')
     return render(request, 'test_lab/match_list.html', {
         'pivot_data': pivot_data,
         'opponents': sorted_opponents,
         'header_structure': header_structure,
         'selected_difficulty': selected_difficulty,
         'selected_limit': selected_limit,
+        'selected_test_bot': selected_test_bot,
         'test_groups': test_groups,
-        'custom_bots': custom_bots_list,
+        'test_subject_bots': test_subject_bots,
     })
 
 def get_next_test_group_id() -> int:
@@ -247,8 +254,17 @@ def get_next_test_group_id() -> int:
     # If no completed matches exist, start at 0, otherwise increment by 1
     return 0 if result is None else result + 1
 
-def create_pending_match(test_group_id: int, race: str, build: str, difficulty: str) -> int:
-    """Create a pending match entry and return the match ID."""
+def create_pending_match(
+    test_group_id: int, race: str, build: str, difficulty: str,
+    test_bot: CustomBot | None = None,
+) -> int:
+    """Create a pending match entry and return the match ID.
+
+    *test_bot* is the Player-1 bot being tested.  When ``None`` the match
+    is attributed to BotTato (id 5) by default.
+    """
+    if test_bot is None:
+        test_bot = CustomBot.objects.filter(id=5).first()
     match = Match(
         test_group_id=test_group_id,
         start_timestamp=datetime.now(),
@@ -256,6 +272,7 @@ def create_pending_match(test_group_id: int, race: str, build: str, difficulty: 
         opponent_race=race.capitalize(),
         opponent_difficulty=difficulty or "CheatInsane",
         opponent_build=build.capitalize(),
+        test_bot=test_bot,
         result="Pending"
     )
     match.save()
@@ -266,21 +283,34 @@ DOCKER_COMPOSE_PATH = os.path.normpath(os.path.join(os.path.dirname(__file__)))
 LOGS_DIR = r'C:\Users\inter\Documents\StarCraft II\Replays\Multiplayer\docker'
 
 
-def start_custom_bot_match(custom_bot: CustomBot) -> int:
+def start_custom_bot_match(
+    custom_bot: CustomBot,
+    test_bot: CustomBot | None = None,
+    test_group_id: int = -1,
+) -> int:
     """Launch a single Docker match against a custom bot.
     Returns the match ID.
+
+    ``test_bot`` is the test-subject bot (player 1).  When *None* defaults
+    to BotTato (id 5).
+
+    ``test_group_id`` defaults to ``-1`` (ad-hoc match).  Pass a real
+    TestGroup id to include this match in a test group.
 
     For aiarena-type bots, uses the aiarena local-play-bootstrap infrastructure.
     For python_sc2 / external_python bots, uses the existing single-container approach.
     """
+    if test_bot is None:
+        test_bot = CustomBot.objects.filter(id=5).first()
     match = Match(
-        test_group_id=-1,
+        test_group_id=test_group_id,
         start_timestamp=datetime.now(),
         map_name="TBD",
         opponent_race=custom_bot.race,
         opponent_difficulty='',
         opponent_build='',
         opponent_bot=custom_bot,
+        test_bot=test_bot,
         result="Pending",
     )
     match.save()
@@ -288,7 +318,7 @@ def start_custom_bot_match(custom_bot: CustomBot) -> int:
 
     if custom_bot.is_aiarena:
         # Use aiarena infrastructure (supports any language/framework)
-        aiarena_runner.start_aiarena_match(match, custom_bot)
+        aiarena_runner.start_aiarena_match(match, custom_bot, test_bot=test_bot)
         return match_id
 
     # Legacy path: python_sc2 / external_python bots
@@ -322,11 +352,21 @@ def start_custom_bot_match(custom_bot: CustomBot) -> int:
     return match_id
 
 
-def start_test_suite(description: str, difficulty: str = 'CheatInsane') -> tuple[int, int]:
+def start_test_suite(
+    description: str,
+    difficulty: str = 'CheatInsane',
+    test_bot: CustomBot | None = None,
+) -> tuple[int, int]:
     """
-    Create a TestGroup and launch all 15 Docker match containers.
+    Create a TestGroup and launch Docker match containers for every
+    race/build combination against the built-in AI as well as every
+    registered custom bot.
+
     Returns (test_group_id, number of matches started).
     Raises FileNotFoundError if docker-compose.yml is missing.
+
+    *test_bot* is the Player-1 bot; ``None`` defaults to BotTato (id 5).
+    Custom bot matches run regardless of difficulty.
     """
     compose_file = os.path.join(DOCKER_COMPOSE_PATH, 'docker-compose.yml')
     if not os.path.exists(compose_file):
@@ -334,15 +374,20 @@ def start_test_suite(description: str, difficulty: str = 'CheatInsane') -> tuple
 
     os.makedirs(LOGS_DIR, exist_ok=True)
 
+    if test_bot is None:
+        test_bot = CustomBot.objects.filter(id=5).first()
+
     test_group = TestGroup.objects.create(
         description=description[:255]  # Truncate to fit CharField max_length
     )
     test_group_id = test_group.id
 
     count = 0
+
+    # --- Computer AI matches (15 = 3 races x 5 builds) ---
     for race in ('protoss', 'terran', 'zerg'):
         for build in ('rush', 'timing', 'macro', 'power', 'air'):
-            match_id = create_pending_match(test_group_id, race, build, difficulty)
+            match_id = create_pending_match(test_group_id, race, build, difficulty, test_bot=test_bot)
             log_file = os.path.join(LOGS_DIR, f"{match_id}_{race}_{build}.log")
             command = [
                 'docker', 'compose', 'run', '--rm',
@@ -356,41 +401,52 @@ def start_test_suite(description: str, difficulty: str = 'CheatInsane') -> tuple
                 subprocess.Popen(command, cwd=DOCKER_COMPOSE_PATH, stdout=log, stderr=log)
             count += 1
 
+    # --- Custom bot matches (one per registered bot, excluding the test bot) ---
+    custom_bots = CustomBot.objects.exclude(id=test_bot.id) if test_bot else CustomBot.objects.all()
+    for bot in custom_bots:
+        try:
+            start_custom_bot_match(bot, test_bot=test_bot, test_group_id=test_group_id)
+            count += 1
+        except Exception:
+            # Don't let a single custom-bot failure abort the whole suite
+            pass
+
     return test_group_id, count
 
 
 def trigger_tests(request):
-    """Trigger the test suite from the web UI."""
+    """Trigger the test suite from the web UI.
+
+    The form posts the current filter state (test_bot, difficulty) plus an
+    optional description.  After starting the suite, the user is redirected
+    back to the match list with those filters preserved.
+    """
     if request.method == 'POST':
         difficulty = request.POST.get('difficulty', '') or 'CheatInsane'
         description = request.POST.get('description', '').strip()
 
-        # Check if a custom bot was selected (value like "bot_<id>")
-        if difficulty.startswith('bot_'):
-            try:
-                bot_id = int(difficulty.removeprefix('bot_'))
-                custom_bot = CustomBot.objects.get(id=bot_id)
-                match_id = start_custom_bot_match(custom_bot)
-                messages.success(
-                    request,
-                    f'Custom match started: BotTato vs {custom_bot.name} (match #{match_id})'
-                )
-            except CustomBot.DoesNotExist:
-                messages.error(request, 'Selected custom bot not found.')
-            except Exception as e:
-                messages.error(request, f'Failed to start custom match: {str(e)}')
-            return redirect('match_list')
+        # Resolve test subject bot from the filter value
+        test_bot = None
+        test_bot_id = request.POST.get('test_bot')
+        if test_bot_id:
+            test_bot = CustomBot.objects.filter(id=test_bot_id).first()
 
         try:
-            _, count = start_test_suite(description=description, difficulty=difficulty)
+            _, count = start_test_suite(
+                description=description, difficulty=difficulty, test_bot=test_bot,
+            )
             messages.success(request, f'Test suite started with difficulty {difficulty}! {count} tests running.')
         except Exception as e:
             messages.error(request, f'Failed to start test suite: {str(e)}')
 
-    difficulty = request.POST.get('difficulty', '')
-    if difficulty:
-        return redirect(f"{reverse('match_list')}?difficulty={difficulty}")
-    return redirect('match_list')
+    # Redirect back preserving filter state
+    params = []
+    for key in ('test_bot', 'difficulty', 'limit'):
+        val = request.POST.get(key, '')
+        if val:
+            params.append(f'{key}={val}')
+    qs = '?' + '&'.join(params) if params else ''
+    return redirect(f"{reverse('match_list')}{qs}")
 
 
 @csrf_exempt
@@ -411,7 +467,19 @@ def api_trigger_tests(request):
         body = {}
 
     custom_bot_id = body.get('custom_bot_id')
+    test_bot_id = body.get('test_bot_id')
     description = body.get('description', '')
+
+    # Resolve test subject bot
+    test_bot = None
+    if test_bot_id is not None:
+        try:
+            test_bot = CustomBot.objects.get(id=test_bot_id)
+        except CustomBot.DoesNotExist:
+            return JsonResponse(
+                {'status': 'error', 'message': f'Test bot with id {test_bot_id} not found'},
+                status=404,
+            )
 
     # Custom bot match
     if custom_bot_id is not None:
@@ -423,11 +491,12 @@ def api_trigger_tests(request):
                 status=404,
             )
         try:
-            match_id = start_custom_bot_match(custom_bot)
+            match_id = start_custom_bot_match(custom_bot, test_bot=test_bot)
             return JsonResponse({
                 'status': 'ok',
                 'match_id': match_id,
                 'custom_bot': custom_bot.name,
+                'test_bot': test_bot.name if test_bot else 'BotTato',
             })
         except Exception as e:
             return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
@@ -435,7 +504,9 @@ def api_trigger_tests(request):
     # Standard test suite
     difficulty = body.get('difficulty', 'CheatInsane')
     try:
-        test_group_id, count = start_test_suite(description=description, difficulty=difficulty)
+        test_group_id, count = start_test_suite(
+            description=description, difficulty=difficulty, test_bot=test_bot,
+        )
         return JsonResponse({
             'status': 'ok',
             'test_group_id': test_group_id,
@@ -840,10 +911,27 @@ def building_timing(request):
 def utilities(request):
     """Page for triggering various utility actions."""
     custom_bots_list = CustomBot.objects.all().order_by('name')
-    recent_commits = bot_versions.get_recent_bot_commits(count=5)
+    test_subject_bots = CustomBot.objects.all().order_by('name')
+
+    # Collect recent commits for each test-subject bot that has a git repo,
+    # plus the default BotTato repo.
+    recent_commits_by_bot: dict[int | None, list] = {
+        None: bot_versions.get_recent_bot_commits(count=5),  # legacy BotTato
+    }
+    for bot in test_subject_bots:
+        if bot.git_repo_path:
+            recent_commits_by_bot[bot.id] = bot_versions.get_recent_bot_commits(
+                count=5, repo_path=bot.git_repo_path
+            )
+
+    # Flatten for the default (backwards-compat) template variable
+    recent_commits = recent_commits_by_bot.get(None, [])
+
     return render(request, 'test_lab/utilities.html', {
         'custom_bots': custom_bots_list,
+        'test_subject_bots': test_subject_bots,
         'recent_commits': recent_commits,
+        'recent_commits_by_bot': recent_commits_by_bot,
     })
 
 
@@ -954,6 +1042,10 @@ def create_custom_bot(request):
     description = request.POST.get('description', '').strip()
     bot_directory = request.POST.get('bot_directory', '').strip()
     aiarena_bot_type = request.POST.get('aiarena_bot_type', 'python').strip()
+    is_test_subject = request.POST.get('is_test_subject') == 'on'
+    source_path = request.POST.get('source_path', '').strip()
+    git_repo_path = request.POST.get('git_repo_path', '').strip()
+    dockerfile = request.POST.get('dockerfile', '').strip()
 
     if not name:
         messages.error(request, 'Bot name is required.')
@@ -968,16 +1060,38 @@ def create_custom_bot(request):
         messages.error(request, error)
         return redirect('custom_bots')
 
+    if is_test_subject and not source_path:
+        messages.error(request, 'Source path is required for test subject bots.')
+        return redirect('custom_bots')
+
+    if is_test_subject and source_path and not os.path.isdir(source_path):
+        messages.error(request, f'Source path not found: {source_path}')
+        return redirect('custom_bots')
+
+    # Auto-detect symlinks/junctions in the source directory
+    symlink_mounts: list[dict[str, str]] = []
+    if is_test_subject and source_path:
+        symlink_mounts = aiarena_runner.scan_directory_symlinks(source_path)
+
     try:
-        CustomBot.objects.create(
+        bot = CustomBot.objects.create(
             name=name,
             race=race,
             bot_type='aiarena',
             bot_directory=bot_directory,
             aiarena_bot_type=aiarena_bot_type,
+            is_test_subject=is_test_subject,
+            source_path=source_path,
+            git_repo_path=git_repo_path,
+            symlink_mounts=symlink_mounts,
+            dockerfile=dockerfile,
             description=description,
         )
-        messages.success(request, f'Bot "{name}" registered successfully.')
+        msg = f'Bot "{name}" registered successfully.'
+        if symlink_mounts:
+            link_names = ', '.join(m['name'] for m in symlink_mounts)
+            msg += f' Detected symlinks: {link_names}'
+        messages.success(request, msg)
     except Exception as e:
         messages.error(request, f'Failed to create bot: {e}')
 
@@ -1000,7 +1114,7 @@ def delete_custom_bot(request, bot_id):
 
 @require_POST
 def run_custom_match(request):
-    """Run a match of BotTato vs a custom opponent bot."""
+    """Run a match of a test-subject bot vs a custom opponent bot."""
     bot_id = request.POST.get('custom_bot_id')
     if not bot_id:
         messages.error(request, 'No custom bot selected.')
@@ -1012,11 +1126,18 @@ def run_custom_match(request):
         messages.error(request, 'Selected custom bot not found.')
         return redirect('utilities')
 
+    # Resolve test subject bot
+    test_bot = None
+    test_bot_id = request.POST.get('test_bot_id')
+    if test_bot_id:
+        test_bot = CustomBot.objects.filter(id=test_bot_id, is_test_subject=True).first()
+
     try:
-        match_id = start_custom_bot_match(custom_bot)
+        match_id = start_custom_bot_match(custom_bot, test_bot=test_bot)
+        test_name = test_bot.name if test_bot else 'BotTato'
         messages.success(
             request,
-            f'Custom match started: BotTato vs {custom_bot.name} (match #{match_id})'
+            f'Custom match started: {test_name} vs {custom_bot.name} (match #{match_id})'
         )
     except Exception as e:
         messages.error(request, f'Failed to start custom match: {e}')
@@ -1026,7 +1147,7 @@ def run_custom_match(request):
 
 @require_POST
 def run_past_version_match(request):
-    """Run a match of current BotTato vs a past version from git history."""
+    """Run a match of the current version of a test-subject bot vs a past version."""
     commit_hash = request.POST.get('commit_hash', '').strip()
     if not commit_hash:
         messages.error(request, 'No commit selected.')
@@ -1039,26 +1160,38 @@ def run_past_version_match(request):
 
     short_hash = commit_hash[:7]
 
+    # Resolve test subject bot (defaults to BotTato id=5)
+    test_bot = None
+    test_bot_id = request.POST.get('test_bot_id')
+    if test_bot_id:
+        test_bot = CustomBot.objects.filter(id=test_bot_id, is_test_subject=True).first()
+    if test_bot is None:
+        test_bot = CustomBot.objects.filter(id=5).first()
+
+    test_name = test_bot.name if test_bot else 'BotTato'
+    test_race = test_bot.race if test_bot else 'Terran'
+
     try:
         # Create the match record
         match = Match(
             test_group_id=-1,
             start_timestamp=datetime.now(),
             map_name="TBD",
-            opponent_race='Terran',
+            opponent_race=test_race,
             opponent_difficulty='',
             opponent_build='',
             result="Pending",
             opponent_commit_hash=commit_hash,
+            test_bot=test_bot,
         )
         match.save()
 
         aiarena_runner.start_past_version_match(
-            match, commit_hash, short_hash,
+            match, commit_hash, short_hash, test_bot=test_bot,
         )
         messages.success(
             request,
-            f'Past version match started: BotTato (current) vs BotTato@{short_hash} '
+            f'Past version match started: {test_name} (current) vs {test_name}@{short_hash} '
             f'(match #{match.id})'
         )
     except Exception as e:
@@ -1076,11 +1209,24 @@ def custom_match_list(request):
             | Q(replay_file__gt='')
             | Q(opponent_commit_hash__gt='')
         )
-        .select_related('opponent_bot')
+        .select_related('opponent_bot', 'test_bot')
         .order_by('-start_timestamp')[:50]
     )
+
+    # Optional filter by test subject bot
+    selected_test_bot = request.GET.get('test_bot', '')
+    if selected_test_bot:
+        if selected_test_bot == 'bottato':
+            matches = matches.filter(test_bot__isnull=True)
+        elif selected_test_bot.isdigit():
+            matches = matches.filter(test_bot_id=int(selected_test_bot))
+
+    test_subject_bots = CustomBot.objects.all().order_by('name')
+
     return render(request, 'test_lab/custom_match_list.html', {
         'matches': matches,
+        'test_subject_bots': test_subject_bots,
+        'selected_test_bot': selected_test_bot,
     })
 
 

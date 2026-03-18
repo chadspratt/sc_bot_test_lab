@@ -1,13 +1,13 @@
 """
-Manage cached copies of past BotTato versions from git history.
+Manage cached copies of past bot versions from git history.
 
-Extracts bot source code from previous commits in the ``bot/`` git repo
-into a local cache directory.  Each version is identified by its full
-commit hash and stored under ``aiarena/bot_versions/<hash>/``.
+Extracts bot source code from previous commits into a local cache
+directory.  Each version is identified by its full commit hash and
+stored under ``aiarena/bot_versions/<hash>/``.
 
-Cached versions are used for "current vs past" regression testing.  All
-versions use the **current** ``python_sc2/sc2`` (mounted at runtime via
-Docker Compose), so only the bot's own code varies between versions.
+Cached versions are used for "current vs past" regression testing.
+Symlink targets (e.g. shared libraries) are mounted at runtime via
+Docker Compose, so only the bot's own code varies between versions.
 """
 
 from __future__ import annotations
@@ -56,24 +56,27 @@ class BotCommit:
     is_cached: bool     # whether a cached copy already exists
 
 
-def get_recent_bot_commits(count: int = 5) -> list[BotCommit]:
-    """Return the most recent *count* commits from the bot repo.
+def get_recent_bot_commits(
+    count: int = 5, repo_path: str | None = None,
+) -> list[BotCommit]:
+    """Return the most recent *count* commits from a bot repo.
+
+    *repo_path* defaults to the BotTato repo (``bot/``) for backward
+    compatibility.  Pass a custom path to query another bot's history.
 
     Skips the current HEAD commit (index 0) since there's no point
     running the current version against itself — that's what mirror
     matches are for.  Returns commits starting from HEAD~1.
-
-    Each entry includes a flag indicating whether the version is
-    already cached locally.
     """
+    cwd = repo_path or BOT_REPO_DIR
     try:
         result = subprocess.run(
             [
                 'git', 'log',
                 '--format=%H|%h|%s|%ai',
-                f'-{count + 1}',   # +1 because we skip HEAD
+                f'-{count + 1}',
             ],
-            cwd=BOT_REPO_DIR,
+            cwd=cwd,
             capture_output=True,
             text=True,
             timeout=10,
@@ -118,26 +121,29 @@ def get_version_cache_path(commit_hash: str) -> str:
     return os.path.join(VERSION_CACHE_DIR, commit_hash)
 
 
-def get_or_create_version_cache(commit_hash: str) -> str:
+def get_or_create_version_cache(
+    commit_hash: str, repo_path: str | None = None,
+) -> str:
     """Extract bot source from a past commit into the cache.
 
-    Uses ``git archive`` to create a zip of the relevant files at the
-    specified commit, then extracts them into the cache directory.
+    *repo_path* defaults to the BotTato repo.  For BotTato, only specific
+    paths are archived.  For other repos, the entire tree is archived.
 
     Returns the absolute path to the cache directory.
-
     Raises ``ValueError`` if the commit hash is invalid or extraction fails.
     """
+    cwd = repo_path or BOT_REPO_DIR
+    is_bottato = (os.path.normpath(cwd) == os.path.normpath(BOT_REPO_DIR))
     cache_path = get_version_cache_path(commit_hash)
 
     if is_version_cached(commit_hash):
         return cache_path
 
-    # Validate the commit exists in the bot repo
+    # Validate the commit exists
     try:
         result = subprocess.run(
             ['git', 'cat-file', '-t', commit_hash],
-            cwd=BOT_REPO_DIR,
+            cwd=cwd,
             capture_output=True,
             text=True,
             timeout=5,
@@ -154,35 +160,41 @@ def get_or_create_version_cache(commit_hash: str) -> str:
     os.makedirs(cache_path, exist_ok=True)
 
     # Use git archive to create a zip, then extract it.
-    # First determine which optional paths exist at this commit so we
-    # don't pass non-existent paths to git archive (which would fail).
     zip_path = cache_path + '.zip'
     try:
-        archive_paths = list(BOT_ARCHIVE_PATHS_REQUIRED)
+        if is_bottato:
+            # BotTato: archive specific paths
+            archive_paths = list(BOT_ARCHIVE_PATHS_REQUIRED)
+            for opt_path in BOT_ARCHIVE_PATHS_OPTIONAL:
+                probe = subprocess.run(
+                    ['git', 'ls-tree', '--name-only', commit_hash, opt_path],
+                    cwd=cwd,
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                if probe.returncode == 0 and probe.stdout.strip():
+                    archive_paths.append(opt_path)
 
-        # Probe optional paths via git ls-tree
-        for opt_path in BOT_ARCHIVE_PATHS_OPTIONAL:
-            probe = subprocess.run(
-                ['git', 'ls-tree', '--name-only', commit_hash, opt_path],
-                cwd=BOT_REPO_DIR,
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            if probe.returncode == 0 and probe.stdout.strip():
-                archive_paths.append(opt_path)
-
-        archive_cmd = [
-            'git', 'archive',
-            '--format=zip',
-            '-o', zip_path,
-            commit_hash,
-            '--',
-        ] + archive_paths
+            archive_cmd = [
+                'git', 'archive',
+                '--format=zip',
+                '-o', zip_path,
+                commit_hash,
+                '--',
+            ] + archive_paths
+        else:
+            # Generic bot: archive entire tree
+            archive_cmd = [
+                'git', 'archive',
+                '--format=zip',
+                '-o', zip_path,
+                commit_hash,
+            ]
 
         result = subprocess.run(
             archive_cmd,
-            cwd=BOT_REPO_DIR,
+            cwd=cwd,
             capture_output=True,
             text=True,
             timeout=30,
@@ -198,9 +210,11 @@ def get_or_create_version_cache(commit_hash: str) -> str:
             zf.extractall(cache_path)
 
         if not os.path.isfile(os.path.join(cache_path, 'bot.py')):
-            raise ValueError(
-                f'Extraction succeeded but bot.py not found at {commit_hash}'
-            )
+            # For non-BotTato bots, check for ladderbots.json instead
+            if is_bottato:
+                raise ValueError(
+                    f'Extraction succeeded but bot.py not found at {commit_hash}'
+                )
 
     finally:
         # Clean up zip file

@@ -49,8 +49,23 @@
     <h1>Match Test Results</h1>
     
     <div class="trigger-section">
+        <!-- Filter 1: Test Bot -->
         <form method="get" action="" style="display: inline-block; margin-right: 20px;">
-            <label for="difficulty">Filter by Difficulty:</label>
+            <label for="test_bot">Test Bot:</label>
+            <select name="test_bot" id="test_bot" onchange="this.form.submit()">
+                <option value="">All Bots</option>
+                {% for bot in test_subject_bots %}
+                <option value="{{ bot.id }}" {% if selected_test_bot == bot.id|stringformat:"d" %}selected{% endif %}>{{ bot.name }}</option>
+                {% endfor %}
+            </select>
+            {% if selected_difficulty %}<input type="hidden" name="difficulty" value="{{ selected_difficulty }}">{% endif %}
+            {% if selected_limit %}<input type="hidden" name="limit" value="{{ selected_limit }}">{% endif %}
+            <noscript><input type="submit" value="Filter"></noscript>
+        </form>
+
+        <!-- Filter 2: Difficulty -->
+        <form method="get" action="" style="display: inline-block; margin-right: 20px;">
+            <label for="difficulty">Difficulty:</label>
             <select name="difficulty" id="difficulty" onchange="this.form.submit()">
                 <option value="">All Difficulties</option>
                 <option value="Easy" {% if selected_difficulty == 'Easy' %}selected{% endif %}>Easy</option>
@@ -63,13 +78,13 @@
                 <option value="CheatMoney" {% if selected_difficulty == 'CheatMoney' %}selected{% endif %}>CheatMoney</option>
                 <option value="CheatInsane" {% if selected_difficulty == 'CheatInsane' %}selected{% endif %}>CheatInsane</option>
             </select>
+            {% if selected_test_bot %}<input type="hidden" name="test_bot" value="{{ selected_test_bot }}">{% endif %}
             {% if selected_limit %}<input type="hidden" name="limit" value="{{ selected_limit }}">{% endif %}
-            <noscript>
-                <input type="submit" value="Filter">
-            </noscript>
+            <noscript><input type="submit" value="Filter"></noscript>
         </form>
 
-        <form method="get" action="" style="display: inline-block; margin-left: 10px;">
+        <!-- Filter 3: Limit -->
+        <form method="get" action="" style="display: inline-block; margin-right: 20px;">
             <label for="limit">Show:</label>
             <select name="limit" id="limit" onchange="this.form.submit()">
                 <option value="">All Test Groups</option>
@@ -78,34 +93,17 @@
                 <option value="50" {% if selected_limit == '50' %}selected{% endif %}>Last 50</option>
                 <option value="100" {% if selected_limit == '100' %}selected{% endif %}>Last 100</option>
             </select>
+            {% if selected_test_bot %}<input type="hidden" name="test_bot" value="{{ selected_test_bot }}">{% endif %}
             {% if selected_difficulty %}<input type="hidden" name="difficulty" value="{{ selected_difficulty }}">{% endif %}
-            <noscript>
-                <input type="submit" value="Filter">
-            </noscript>
+            <noscript><input type="submit" value="Filter"></noscript>
         </form>
-        
+
+        <!-- Trigger: uses current filter state for test_bot & difficulty -->
         <form method="post" action="{% url 'trigger_tests' %}" style="display: inline-block;">
             {% csrf_token %}
-            <select name="difficulty" style="padding: 6px 10px; border: 1px solid #555; border-radius: 4px; background: #2a2a2a; color: #e0e0e0; margin-right: 6px;">
-                <optgroup label="Difficulty">
-                    <option value="Easy"{% if selected_difficulty == 'Easy' %} selected{% endif %}>Easy</option>
-                    <option value="Medium"{% if selected_difficulty == 'Medium' %} selected{% endif %}>Medium</option>
-                    <option value="MediumHard"{% if selected_difficulty == 'MediumHard' %} selected{% endif %}>MediumHard</option>
-                    <option value="Hard"{% if selected_difficulty == 'Hard' %} selected{% endif %}>Hard</option>
-                    <option value="Harder"{% if selected_difficulty == 'Harder' %} selected{% endif %}>Harder</option>
-                    <option value="VeryHard"{% if selected_difficulty == 'VeryHard' %} selected{% endif %}>VeryHard</option>
-                    <option value="CheatVision"{% if selected_difficulty == 'CheatVision' %} selected{% endif %}>CheatVision</option>
-                    <option value="CheatMoney"{% if selected_difficulty == 'CheatMoney' %} selected{% endif %}>CheatMoney</option>
-                    <option value="CheatInsane"{% if selected_difficulty == 'CheatInsane' or not selected_difficulty %} selected{% endif %}>CheatInsane</option>
-                </optgroup>
-                {% if custom_bots %}
-                <optgroup label="Custom Bots">
-                    {% for bot in custom_bots %}
-                    <option value="bot_{{ bot.id }}">{{ bot.name }} ({{ bot.race }})</option>
-                    {% endfor %}
-                </optgroup>
-                {% endif %}
-            </select>
+            {% if selected_test_bot %}<input type="hidden" name="test_bot" value="{{ selected_test_bot }}">{% endif %}
+            <input type="hidden" name="difficulty" value="{{ selected_difficulty|default:'CheatInsane' }}">
+            {% if selected_limit %}<input type="hidden" name="limit" value="{{ selected_limit }}">{% endif %}
             <input type="text" name="description" placeholder="Test group description" style="padding: 6px 10px; border: 1px solid #555; border-radius: 4px; background: #2a2a2a; color: #e0e0e0; margin-right: 6px; width: 250px;">
             <button type="submit" class="trigger-btn">
                 Start Test Suite
@@ -156,7 +154,7 @@
                         {% if match_data %}
                         <td class="{% if match_data.result == 'Victory' %}victory{% elif match_data.result == 'Defeat' %}defeat{% elif match_data.result == 'Crash' %}crash{% elif match_data.result == 'Pending' %}pending{% endif %}">
                             <a href="{% url 'serve_replay' match_id=match_data.id %}" class="checkmark-link">{{ match_data.id }}</a>
-                            <a href="{% url 'serve_log' match_id=match_data.id %}" target="_blank" class="checkmark-link">{{ match_data.duration_in_game_time|format_duration }}</a>{% if match_data.is_best_time %} <span title="Fastest win or slowest loss on map">⭐</span>{% endif %}<br>
+                            {% if match_data.opponent_bot %}<a href="{% url 'serve_aiarena_bot_log' match_id=match_data.id bot_name=match_data.test_bot_directory %}" target="_blank" class="checkmark-link">{{ match_data.duration_in_game_time|format_duration }}</a>{% else %}<a href="{% url 'serve_log' match_id=match_data.id %}" target="_blank" class="checkmark-link">{{ match_data.duration_in_game_time|format_duration }}</a>{% endif %}{% if match_data.is_best_time %} <span title="Fastest win or slowest loss on map">⭐</span>{% endif %}<br>
                             <small>{{ match_data.map_name }}</small>
                         </td>
                         {% else %}

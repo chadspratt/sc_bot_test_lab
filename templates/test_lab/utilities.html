@@ -93,7 +93,7 @@
 
     <div class="utility-section">
         <h3>Run Custom Bot Match</h3>
-        <p>Launch BotTato vs a registered custom opponent bot. <a href="{% url 'custom_bots' %}">Manage custom bots</a></p>
+        <p>Launch a test-subject bot vs a registered custom opponent bot. <a href="{% url 'custom_bots' %}">Manage custom bots</a></p>
         <p style="font-size: 12px; color: #666;">
             AI Arena bots use the <a href="https://github.com/aiarena/local-play-bootstrap" target="_blank">local-play-bootstrap</a>
             infrastructure (supports any language). Standard/External bots use the legacy single-container runner (Python only).
@@ -101,6 +101,17 @@
         {% if custom_bots %}
         <form method="post" action="{% url 'run_custom_match' %}" style="display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap;">
             {% csrf_token %}
+            {% if test_subject_bots %}
+            <div>
+                <label for="test_bot_id_custom">Test Bot (Player 1):</label><br>
+                <select name="test_bot_id" id="test_bot_id_custom">
+                    <option value="">BotTato (default)</option>
+                    {% for bot in test_subject_bots %}
+                    <option value="{{ bot.id }}">{{ bot.name }} ({{ bot.race }})</option>
+                    {% endfor %}
+                </select>
+            </div>
+            {% endif %}
             <div>
                 <label for="custom_bot_id">Opponent Bot:</label><br>
                 <select name="custom_bot_id" id="custom_bot_id">
@@ -120,11 +131,22 @@
 
     <div class="utility-section">
         <h3>Run vs Past Version</h3>
-        <p>Launch current BotTato against a previous version of itself from git history.
+        <p>Launch the current version of a test-subject bot against a previous version of itself from git history.
            Both players use the current <code>python_sc2</code> — only bot code differs.</p>
         {% if recent_commits %}
         <form method="post" action="{% url 'run_past_version_match' %}" style="display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap;">
             {% csrf_token %}
+            {% if test_subject_bots %}
+            <div>
+                <label for="test_bot_id_version">Test Bot:</label><br>
+                <select name="test_bot_id" id="test_bot_id_version">
+                    <option value="">BotTato (default)</option>
+                    {% for bot in test_subject_bots %}
+                    <option value="{{ bot.id }}">{{ bot.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            {% endif %}
             <div>
                 <label for="commit_hash">Past Version:</label><br>
                 <select name="commit_hash" id="commit_hash" style="min-width: 400px;">
