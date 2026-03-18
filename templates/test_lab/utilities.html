@@ -38,6 +38,72 @@
     {% endif %}
 
     <div class="utility-section">
+        <h3>Test Suites</h3>
+        <p>Define which opponents are included when starting a test suite. The default "All" suite runs all 15 Blizzard AI matches plus every custom bot.</p>
+
+        {% if test_suites %}
+        <table style="width: auto; border-collapse: collapse; margin-bottom: 15px;">
+            <thead>
+                <tr>
+                    <th style="border: 1px solid #ddd; padding: 6px 10px; text-align: left;">Name</th>
+                    <th style="border: 1px solid #ddd; padding: 6px 10px; text-align: center;">Blizzard AI</th>
+                    <th style="border: 1px solid #ddd; padding: 6px 10px; text-align: left;">Custom Bots</th>
+                    <th style="border: 1px solid #ddd; padding: 6px 10px;"></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for suite in test_suites %}
+                <tr>
+                    <td style="border: 1px solid #ddd; padding: 6px 10px;">{{ suite.name }}</td>
+                    <td style="border: 1px solid #ddd; padding: 6px 10px; text-align: center;">{% if suite.include_blizzard_ai %}&#10003;{% else %}&#10007;{% endif %}</td>
+                    <td style="border: 1px solid #ddd; padding: 6px 10px;">
+                        {% for bot in suite.custom_bots.all %}{{ bot.name }}{% if not forloop.last %}, {% endif %}{% empty %}<em>None</em>{% endfor %}
+                    </td>
+                    <td style="border: 1px solid #ddd; padding: 6px 10px;">
+                        {% if suite.name != 'All' %}
+                        <form method="post" action="{% url 'delete_test_suite' suite.id %}" style="display: inline;">
+                            {% csrf_token %}
+                            <button type="submit" onclick="return confirm('Delete test suite &quot;{{ suite.name }}&quot;?')" style="background: #dc3545; color: white; border: none; padding: 4px 8px; border-radius: 3px; cursor: pointer; font-size: 12px;">Delete</button>
+                        </form>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+
+        <details>
+            <summary style="cursor: pointer; font-weight: bold; margin-bottom: 10px;">Create New Test Suite</summary>
+            <form method="post" action="{% url 'create_test_suite' %}" style="margin-top: 10px;">
+                {% csrf_token %}
+                <div style="margin-bottom: 10px;">
+                    <label for="suite_name">Name:</label><br>
+                    <input type="text" name="name" id="suite_name" required style="padding: 4px 8px; width: 250px;">
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <label>
+                        <input type="checkbox" name="include_blizzard_ai" checked>
+                        Blizzard AI <small style="color: #666;">(15 matches: 3 races &times; 5 builds)</small>
+                    </label>
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <label style="font-weight: bold;">Custom Bots:</label><br>
+                    {% for bot in custom_bots %}
+                    <label style="display: block; margin-left: 10px;">
+                        <input type="checkbox" name="custom_bot_ids" value="{{ bot.id }}">
+                        {{ bot.name }} ({{ bot.race }})
+                    </label>
+                    {% empty %}
+                    <em>No custom bots registered.</em>
+                    {% endfor %}
+                </div>
+                <button type="submit" class="utility-btn">Create Test Suite</button>
+            </form>
+        </details>
+    </div>
+
+    <div class="utility-section">
         <h3>Run Single Match</h3>
         <p>Launch a single match in Docker (not part of a test group).</p>
         <form method="post" action="{% url 'run_single_match' %}" style="display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap;">

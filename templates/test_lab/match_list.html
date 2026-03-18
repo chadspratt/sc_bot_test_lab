@@ -60,6 +60,7 @@
             </select>
             {% if selected_difficulty %}<input type="hidden" name="difficulty" value="{{ selected_difficulty }}">{% endif %}
             {% if selected_limit %}<input type="hidden" name="limit" value="{{ selected_limit }}">{% endif %}
+            {% if selected_test_suite %}<input type="hidden" name="test_suite" value="{{ selected_test_suite }}">{% endif %}
             <noscript><input type="submit" value="Filter"></noscript>
         </form>
 
@@ -80,6 +81,7 @@
             </select>
             {% if selected_test_bot %}<input type="hidden" name="test_bot" value="{{ selected_test_bot }}">{% endif %}
             {% if selected_limit %}<input type="hidden" name="limit" value="{{ selected_limit }}">{% endif %}
+            {% if selected_test_suite %}<input type="hidden" name="test_suite" value="{{ selected_test_suite }}">{% endif %}
             <noscript><input type="submit" value="Filter"></noscript>
         </form>
 
@@ -95,15 +97,32 @@
             </select>
             {% if selected_test_bot %}<input type="hidden" name="test_bot" value="{{ selected_test_bot }}">{% endif %}
             {% if selected_difficulty %}<input type="hidden" name="difficulty" value="{{ selected_difficulty }}">{% endif %}
+            {% if selected_test_suite %}<input type="hidden" name="test_suite" value="{{ selected_test_suite }}">{% endif %}
             <noscript><input type="submit" value="Filter"></noscript>
         </form>
 
-        <!-- Trigger: uses current filter state for test_bot & difficulty -->
+        <!-- Filter 4: Test Suite -->
+        <form method="get" action="" style="display: inline-block; margin-right: 20px;">
+            <label for="test_suite">Suite:</label>
+            <select name="test_suite" id="test_suite" onchange="this.form.submit()">
+                <option value="">All Suites</option>
+                {% for suite in test_suites %}
+                <option value="{{ suite.id }}" {% if selected_test_suite == suite.id|stringformat:"d" %}selected{% endif %}>{{ suite.name }}</option>
+                {% endfor %}
+            </select>
+            {% if selected_test_bot %}<input type="hidden" name="test_bot" value="{{ selected_test_bot }}">{% endif %}
+            {% if selected_difficulty %}<input type="hidden" name="difficulty" value="{{ selected_difficulty }}">{% endif %}
+            {% if selected_limit %}<input type="hidden" name="limit" value="{{ selected_limit }}">{% endif %}
+            <noscript><input type="submit" value="Filter"></noscript>
+        </form>
+
+        <!-- Trigger: uses current filter state for test_bot, difficulty & test_suite -->
         <form method="post" action="{% url 'trigger_tests' %}" style="display: inline-block;">
             {% csrf_token %}
             {% if selected_test_bot %}<input type="hidden" name="test_bot" value="{{ selected_test_bot }}">{% endif %}
             <input type="hidden" name="difficulty" value="{{ selected_difficulty|default:'CheatInsane' }}">
             {% if selected_limit %}<input type="hidden" name="limit" value="{{ selected_limit }}">{% endif %}
+            {% if selected_test_suite %}<input type="hidden" name="test_suite" value="{{ selected_test_suite }}">{% endif %}
             <input type="text" name="description" placeholder="Test group description" style="padding: 6px 10px; border: 1px solid #555; border-radius: 4px; background: #2a2a2a; color: #e0e0e0; margin-right: 6px; width: 250px;">
             <button type="submit" class="trigger-btn">
                 Start Test Suite

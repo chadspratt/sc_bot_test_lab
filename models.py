@@ -1,18 +1,6 @@
 from django.db import models
 
 
-class TestGroup(models.Model):
-    class Meta:
-        db_table = 'test_group'
-
-    id = models.AutoField(primary_key=True)
-    description = models.CharField(max_length=255, blank=True, default='')
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    def __str__(self):
-        return f"Group {self.id}: {self.description}" if self.description else f"Group {self.id}"
-
-
 class CustomBot(models.Model):
     class Meta:
         db_table = 'custom_bot'
@@ -96,6 +84,45 @@ class CustomBot(models.Model):
         if self.is_aiarena:
             return f"{self.name} ({self.race} - aiarena)"
         return f"{self.name} ({self.race} - {self.bot_class_name})"
+
+
+class TestSuite(models.Model):
+    class Meta:
+        db_table = 'test_suite'
+
+    id = models.AutoField(primary_key=True)
+    name = models.CharField(max_length=100, unique=True)
+    include_blizzard_ai = models.BooleanField(
+        default=True,
+        help_text="Include the 15 built-in AI matches (3 races x 5 builds)",
+    )
+    custom_bots = models.ManyToManyField(
+        CustomBot,
+        blank=True,
+        related_name='test_suites',
+        help_text="Custom bots to include in this test suite",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.name
+
+
+class TestGroup(models.Model):
+    class Meta:
+        db_table = 'test_group'
+
+    id = models.AutoField(primary_key=True)
+    description = models.CharField(max_length=255, blank=True, default='')
+    test_suite = models.ForeignKey(
+        TestSuite, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='test_groups',
+        help_text="The test suite configuration used for this test group",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Group {self.id}: {self.description}" if self.description else f"Group {self.id}"
 
 
 class Match(models.Model):

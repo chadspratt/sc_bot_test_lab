@@ -13,7 +13,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
 from . import aiarena_runner, bot_versions
-from .models import CustomBot, Match, MatchEvent, TestGroup
+from .models import CustomBot, Match, MatchEvent, TestGroup, TestSuite
 
 
 def match_list(request):
@@ -22,12 +22,17 @@ def match_list(request):
     selected_difficulty = request.GET.get('difficulty', '')
     selected_limit = request.GET.get('limit', '')
     selected_test_bot = request.GET.get('test_bot', '')
+    selected_test_suite = request.GET.get('test_suite', '')
 
-    matches = Match.objects.select_related('opponent_bot').exclude(test_group_id=-1)
+    matches = Match.objects.select_related('opponent_bot', 'test_group').exclude(test_group_id=-1)
 
     # Apply test bot filter
     if selected_test_bot and selected_test_bot.isdigit():
         matches = matches.filter(test_bot_id=int(selected_test_bot))
+
+    # Apply test suite filter
+    if selected_test_suite and selected_test_suite.isdigit():
+        matches = matches.filter(test_group__test_suite_id=int(selected_test_suite))
 
     # Difficulty filter applies only to computer opponents; custom-bot matches
     # are always included (they run regardless of difficulty).
@@ -234,6 +239,7 @@ def match_list(request):
     # Context
     # ------------------------------------------------------------------
     test_subject_bots = CustomBot.objects.all().order_by('name')
+    test_suites = TestSuite.objects.all().order_by('name')
     return render(request, 'test_lab/match_list.html', {
         'pivot_data': pivot_data,
         'opponents': sorted_opponents,
@@ -241,8 +247,10 @@ def match_list(request):
         'selected_difficulty': selected_difficulty,
         'selected_limit': selected_limit,
         'selected_test_bot': selected_test_bot,
+        'selected_test_suite': selected_test_suite,
         'test_groups': test_groups,
         'test_subject_bots': test_subject_bots,
+        'test_suites': test_suites,
     })
 
 def get_next_test_group_id() -> int:
@@ -356,11 +364,15 @@ def start_test_suite(
     description: str,
     difficulty: str = 'CheatInsane',
     test_bot: CustomBot | None = None,
+    test_suite: TestSuite | None = None,
 ) -> tuple[int, int]:
     """
-    Create a TestGroup and launch Docker match containers for every
+    Create a TestGroup and launch Docker match containers based on the
+    test suite configuration.
+
+    When *test_suite* is ``None`` or the default "All" suite, runs every
     race/build combination against the built-in AI as well as every
-    registered custom bot.
+    registered custom bot (original behaviour).
 
     Returns (test_group_id, number of matches started).
     Raises FileNotFoundError if docker-compose.yml is missing.
@@ -377,33 +389,50 @@ def start_test_suite(
     if test_bot is None:
         test_bot = CustomBot.objects.filter(id=5).first()
 
+    # Resolve the test suite — fall back to "All" if none specified
+    if test_suite is None:
+        test_suite = TestSuite.objects.filter(name='All').first()
+
+    include_blizzard = test_suite.include_blizzard_ai if test_suite else True
+    suite_custom_bots = list(test_suite.custom_bots.all()) if test_suite else None
+
     test_group = TestGroup.objects.create(
-        description=description[:255]  # Truncate to fit CharField max_length
+        description=description[:255],
+        test_suite=test_suite,
     )
     test_group_id = test_group.id
 
     count = 0
 
     # --- Computer AI matches (15 = 3 races x 5 builds) ---
-    for race in ('protoss', 'terran', 'zerg'):
-        for build in ('rush', 'timing', 'macro', 'power', 'air'):
-            match_id = create_pending_match(test_group_id, race, build, difficulty, test_bot=test_bot)
-            log_file = os.path.join(LOGS_DIR, f"{match_id}_{race}_{build}.log")
-            command = [
-                'docker', 'compose', 'run', '--rm',
-                '-e', f'RACE={race}',
-                '-e', f'BUILD={build}',
-                '-e', f'MATCH_ID={match_id}',
-                '-e', f'DIFFICULTY={difficulty}',
-                'bot',
-            ]
-            with open(log_file, 'w') as log:
-                subprocess.Popen(command, cwd=DOCKER_COMPOSE_PATH, stdout=log, stderr=log)
-            count += 1
+    if include_blizzard:
+        for race in ('protoss', 'terran', 'zerg'):
+            for build in ('rush', 'timing', 'macro', 'power', 'air'):
+                match_id = create_pending_match(test_group_id, race, build, difficulty, test_bot=test_bot)
+                log_file = os.path.join(LOGS_DIR, f"{match_id}_{race}_{build}.log")
+                command = [
+                    'docker', 'compose', 'run', '--rm',
+                    '-e', f'RACE={race}',
+                    '-e', f'BUILD={build}',
+                    '-e', f'MATCH_ID={match_id}',
+                    '-e', f'DIFFICULTY={difficulty}',
+                    'bot',
+                ]
+                with open(log_file, 'w') as log:
+                    subprocess.Popen(command, cwd=DOCKER_COMPOSE_PATH, stdout=log, stderr=log)
+                count += 1
 
-    # --- Custom bot matches (one per registered bot, excluding the test bot) ---
-    custom_bots = CustomBot.objects.exclude(id=test_bot.id) if test_bot else CustomBot.objects.all()
-    for bot in custom_bots:
+    # --- Custom bot matches ---
+    if suite_custom_bots is not None:
+        # Use only bots selected in the test suite (excluding the test bot)
+        bots_to_test = [b for b in suite_custom_bots if test_bot is None or b.id != test_bot.id]
+    else:
+        # Default: all custom bots except the test bot
+        bots_to_test = list(
+            CustomBot.objects.exclude(id=test_bot.id) if test_bot else CustomBot.objects.all()
+        )
+
+    for bot in bots_to_test:
         try:
             start_custom_bot_match(bot, test_bot=test_bot, test_group_id=test_group_id)
             count += 1
@@ -431,17 +460,25 @@ def trigger_tests(request):
         if test_bot_id:
             test_bot = CustomBot.objects.filter(id=test_bot_id).first()
 
+        # Resolve test suite
+        test_suite = None
+        test_suite_id = request.POST.get('test_suite')
+        if test_suite_id and test_suite_id.isdigit():
+            test_suite = TestSuite.objects.filter(id=int(test_suite_id)).first()
+
         try:
             _, count = start_test_suite(
                 description=description, difficulty=difficulty, test_bot=test_bot,
+                test_suite=test_suite,
             )
-            messages.success(request, f'Test suite started with difficulty {difficulty}! {count} tests running.')
+            suite_name = test_suite.name if test_suite else 'All'
+            messages.success(request, f'Test suite "{suite_name}" started with difficulty {difficulty}! {count} tests running.')
         except Exception as e:
             messages.error(request, f'Failed to start test suite: {str(e)}')
 
     # Redirect back preserving filter state
     params = []
-    for key in ('test_bot', 'difficulty', 'limit'):
+    for key in ('test_bot', 'difficulty', 'limit', 'test_suite'):
         val = request.POST.get(key, '')
         if val:
             params.append(f'{key}={val}')
@@ -503,9 +540,19 @@ def api_trigger_tests(request):
 
     # Standard test suite
     difficulty = body.get('difficulty', 'CheatInsane')
+    test_suite = None
+    test_suite_id = body.get('test_suite_id')
+    if test_suite_id is not None:
+        test_suite = TestSuite.objects.filter(id=test_suite_id).first()
+        if test_suite is None:
+            return JsonResponse(
+                {'status': 'error', 'message': f'Test suite with id {test_suite_id} not found'},
+                status=404,
+            )
     try:
         test_group_id, count = start_test_suite(
             description=description, difficulty=difficulty, test_bot=test_bot,
+            test_suite=test_suite,
         )
         return JsonResponse({
             'status': 'ok',
@@ -513,6 +560,7 @@ def api_trigger_tests(request):
             'matches_started': count,
             'difficulty': difficulty,
             'description': description,
+            'test_suite': test_suite.name if test_suite else 'All',
         })
     except Exception as e:
         return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
@@ -932,7 +980,50 @@ def utilities(request):
         'test_subject_bots': test_subject_bots,
         'recent_commits': recent_commits,
         'recent_commits_by_bot': recent_commits_by_bot,
+        'test_suites': TestSuite.objects.prefetch_related('custom_bots').order_by('name'),
     })
+
+
+@require_POST
+def create_test_suite(request):
+    """Create a new test suite from form data."""
+    name = request.POST.get('name', '').strip()
+    if not name:
+        messages.error(request, 'Test suite name is required.')
+        return redirect('utilities')
+
+    if TestSuite.objects.filter(name=name).exists():
+        messages.error(request, f'A test suite named "{name}" already exists.')
+        return redirect('utilities')
+
+    include_blizzard_ai = request.POST.get('include_blizzard_ai') == 'on'
+    selected_bot_ids = request.POST.getlist('custom_bot_ids')
+
+    suite = TestSuite.objects.create(
+        name=name,
+        include_blizzard_ai=include_blizzard_ai,
+    )
+    if selected_bot_ids:
+        suite.custom_bots.set(selected_bot_ids)
+
+    messages.success(request, f'Test suite "{name}" created.')
+    return redirect('utilities')
+
+
+@require_POST
+def delete_test_suite(request, suite_id):
+    """Delete a test suite. The default 'All' suite cannot be deleted."""
+    try:
+        suite = TestSuite.objects.get(id=suite_id)
+        if suite.name == 'All':
+            messages.error(request, 'Cannot delete the default "All" test suite.')
+            return redirect('utilities')
+        suite_name = suite.name
+        suite.delete()
+        messages.success(request, f'Test suite "{suite_name}" deleted.')
+    except TestSuite.DoesNotExist:
+        messages.error(request, 'Test suite not found.')
+    return redirect('utilities')
 
 
 def recompile_cython(request):
