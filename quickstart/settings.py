@@ -68,7 +68,7 @@ WSGI_APPLICATION = 'test_lab.quickstart.wsgi.application'
 # Database — override via environment variables
 # ---------------------------------------------------------------------------
 DB_HOST = os.environ.get('DB_HOST', 'localhost')
-DB_PORT = os.environ.get('DB_PORT', '3306')
+DB_PORT = os.environ.get('DB_PORT', '3307')
 DB_USER = os.environ.get('DB_USER', 'root')
 DB_PASSWORD = os.environ.get('DB_PASSWORD', 'testlab')
 DB_NAME = os.environ.get('DB_NAME', 'sc_bot')
