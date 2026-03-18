@@ -8,6 +8,7 @@ services:
     volumes:
       - ../../../python_sc2/sc2:/root/bot/sc2
       - ../../../bot:/root/bot
+      - ../../../other_bots:/root/external_bots
       - ./runner:/root/runner
       - C:\Program Files (x86)\StarCraft II\Maps:/root/StarCraftII/Maps
       - C:\Users\inter\Documents\StarCraft II\Replays\Multiplayer\docker:/root/replays

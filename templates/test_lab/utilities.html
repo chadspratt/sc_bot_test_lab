@@ -93,7 +93,11 @@
 
     <div class="utility-section">
         <h3>Run Custom Bot Match</h3>
-        <p>Launch BotTato vs a registered custom opponent bot (Bot vs Bot). <a href="{% url 'custom_bots' %}">Manage custom bots</a></p>
+        <p>Launch BotTato vs a registered custom opponent bot. <a href="{% url 'custom_bots' %}">Manage custom bots</a></p>
+        <p style="font-size: 12px; color: #666;">
+            AI Arena bots use the <a href="https://github.com/aiarena/local-play-bootstrap" target="_blank">local-play-bootstrap</a>
+            infrastructure (supports any language). Standard/External bots use the legacy single-container runner (Python only).
+        </p>
         {% if custom_bots %}
         <form method="post" action="{% url 'run_custom_match' %}" style="display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap;">
             {% csrf_token %}
@@ -101,7 +105,7 @@
                 <label for="custom_bot_id">Opponent Bot:</label><br>
                 <select name="custom_bot_id" id="custom_bot_id">
                     {% for bot in custom_bots %}
-                    <option value="{{ bot.id }}">{{ bot.name }} ({{ bot.race }} - {{ bot.bot_class_name }})</option>
+                    <option value="{{ bot.id }}">{{ bot.name }} ({{ bot.race }}{% if bot.is_aiarena %} - AI Arena{% endif %})</option>
                     {% endfor %}
                 </select>
             </div>

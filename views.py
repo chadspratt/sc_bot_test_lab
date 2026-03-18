@@ -12,6 +12,7 @@ from django.urls import reverse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
+from . import aiarena_runner
 from .models import CustomBot, Match, MatchEvent, TestGroup
 
 
@@ -226,13 +227,15 @@ def match_list(request):
             else:
                 race_group['builds'][i] = f"{build} -"
 
+    custom_bots_list = CustomBot.objects.all().order_by('name')
     return render(request, 'test_lab/match_list.html', {
         'pivot_data': pivot_data,
         'opponents': sorted_opponents,
         'header_structure': header_structure,
         'selected_difficulty': selected_difficulty,
         'selected_limit': selected_limit,
-        'test_groups': test_groups
+        'test_groups': test_groups,
+        'custom_bots': custom_bots_list,
     })
 
 def get_next_test_group_id() -> int:
@@ -261,6 +264,62 @@ def create_pending_match(test_group_id: int, race: str, build: str, difficulty: 
 
 DOCKER_COMPOSE_PATH = os.path.normpath(os.path.join(os.path.dirname(__file__)))
 LOGS_DIR = r'C:\Users\inter\Documents\StarCraft II\Replays\Multiplayer\docker'
+
+
+def start_custom_bot_match(custom_bot: CustomBot) -> int:
+    """Launch a single Docker match against a custom bot.
+    Returns the match ID.
+
+    For aiarena-type bots, uses the aiarena local-play-bootstrap infrastructure.
+    For python_sc2 / external_python bots, uses the existing single-container approach.
+    """
+    match = Match(
+        test_group_id=-1,
+        start_timestamp=datetime.now(),
+        map_name="TBD",
+        opponent_race=custom_bot.race,
+        opponent_difficulty='',
+        opponent_build='',
+        opponent_bot=custom_bot,
+        result="Pending",
+    )
+    match.save()
+    match_id = match.id
+
+    if custom_bot.is_aiarena:
+        # Use aiarena infrastructure (supports any language/framework)
+        aiarena_runner.start_aiarena_match(match, custom_bot)
+        return match_id
+
+    # Legacy path: python_sc2 / external_python bots
+    compose_file = os.path.join(DOCKER_COMPOSE_PATH, 'docker-compose.yml')
+    if not os.path.exists(compose_file):
+        raise FileNotFoundError(f'docker-compose.yml not found at: {compose_file}')
+
+    os.makedirs(LOGS_DIR, exist_ok=True)
+
+    log_file = os.path.join(LOGS_DIR, f"{match_id}_vs_{custom_bot.name}.log")
+
+    command = [
+        'docker', 'compose', 'run', '--rm',
+        '-e', f'OPPONENT_FILE={custom_bot.bot_file}',
+        '-e', f'OPPONENT_CLASS={custom_bot.bot_class_name}',
+        '-e', f'OPPONENT_RACE={custom_bot.race.lower()}',
+        '-e', f'MATCH_ID={match_id}',
+    ]
+
+    if custom_bot.is_external and custom_bot.bot_directory:
+        command += ['-e', f'EXTERNAL_BOT_DIR={custom_bot.bot_directory}']
+
+    command += [
+        'bot',
+        'bash', '/root/runner/run_docker_bot_vs_bot.sh',
+    ]
+
+    with open(log_file, 'w') as log:
+        subprocess.Popen(command, cwd=DOCKER_COMPOSE_PATH, stdout=log, stderr=log)
+
+    return match_id
 
 
 def start_test_suite(description: str, difficulty: str = 'CheatInsane') -> tuple[int, int]:
@@ -306,6 +365,22 @@ def trigger_tests(request):
         difficulty = request.POST.get('difficulty', '') or 'CheatInsane'
         description = request.POST.get('description', '').strip()
 
+        # Check if a custom bot was selected (value like "bot_<id>")
+        if difficulty.startswith('bot_'):
+            try:
+                bot_id = int(difficulty.removeprefix('bot_'))
+                custom_bot = CustomBot.objects.get(id=bot_id)
+                match_id = start_custom_bot_match(custom_bot)
+                messages.success(
+                    request,
+                    f'Custom match started: BotTato vs {custom_bot.name} (match #{match_id})'
+                )
+            except CustomBot.DoesNotExist:
+                messages.error(request, 'Selected custom bot not found.')
+            except Exception as e:
+                messages.error(request, f'Failed to start custom match: {str(e)}')
+            return redirect('match_list')
+
         try:
             _, count = start_test_suite(description=description, difficulty=difficulty)
             messages.success(request, f'Test suite started with difficulty {difficulty}! {count} tests running.')
@@ -321,16 +396,44 @@ def trigger_tests(request):
 @csrf_exempt
 @require_POST
 def api_trigger_tests(request):
-    """API endpoint to trigger test suite (called from git post-commit hook)."""
+    """API endpoint to trigger test suite or custom bot match.
+
+    JSON body:
+      - difficulty (str): AI difficulty level (default: CheatInsane)
+      - description (str): optional test group description
+      - custom_bot_id (int): when set, runs a single match against this
+        custom bot instead of the full 15-match test suite
+    """
     import json
     try:
         body = json.loads(request.body) if request.body else {}
     except json.JSONDecodeError:
         body = {}
 
-    difficulty = body.get('difficulty', 'CheatInsane')
+    custom_bot_id = body.get('custom_bot_id')
     description = body.get('description', '')
 
+    # Custom bot match
+    if custom_bot_id is not None:
+        try:
+            custom_bot = CustomBot.objects.get(id=custom_bot_id)
+        except CustomBot.DoesNotExist:
+            return JsonResponse(
+                {'status': 'error', 'message': f'Custom bot with id {custom_bot_id} not found'},
+                status=404,
+            )
+        try:
+            match_id = start_custom_bot_match(custom_bot)
+            return JsonResponse({
+                'status': 'ok',
+                'match_id': match_id,
+                'custom_bot': custom_bot.name,
+            })
+        except Exception as e:
+            return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
+
+    # Standard test suite
+    difficulty = body.get('difficulty', 'CheatInsane')
     try:
         test_group_id, count = start_test_suite(description=description, difficulty=difficulty)
         return JsonResponse({
@@ -362,13 +465,20 @@ def serve_replay(request, match_id):
     return HttpResponse(status=204)
 
 def serve_log(request, match_id):
-    """Serve log file for viewing."""
+    """Serve the main log file for a match.
+
+    For aiarena matches this is the docker compose output log.
+    For legacy matches this is the single-container log.
+    """
     from django.http import FileResponse
     replay_dir = r'C:\Users\inter\Documents\StarCraft II\Replays\Multiplayer\docker'
     
-    # Find log file matching the match_id pattern
+    # Find log file matching the match_id pattern (exclude _stderr bot logs)
     log_pattern = os.path.join(replay_dir, f"{match_id}*.log")
-    log_files = glob.glob(log_pattern)
+    log_files = [
+        f for f in glob.glob(log_pattern)
+        if '_stderr.log' not in f
+    ]
     
     if not log_files:
         raise Http404("Log file not found")
@@ -376,6 +486,14 @@ def serve_log(request, match_id):
     file_path = log_files[0]  # Take the first matching file
     
     return FileResponse(open(file_path, 'rb'), content_type='text/plain')
+
+def serve_aiarena_bot_log(request, match_id, bot_name):
+    """Serve a bot's stderr log from an aiarena match."""
+    from django.http import FileResponse
+    log_path = aiarena_runner.get_bot_log_path(match_id, bot_name)
+    if not log_path:
+        raise Http404(f"Bot log not found for {bot_name} in match {match_id}")
+    return FileResponse(open(log_path, 'rb'), content_type='text/plain')
 
 def map_breakdown(request):
     """View to display match data grouped by map in a pivot table."""
@@ -809,6 +927,9 @@ def position_is_between(request):
 OTHER_BOTS_DIR = os.path.normpath(
     os.path.join(os.path.dirname(__file__), '..', '..', '..', 'bot', 'other_bots')
 )
+EXTERNAL_BOTS_DIR = os.path.normpath(
+    os.path.join(os.path.dirname(__file__), '..', '..', '..', 'other_bots')
+)
 RUNNER_DIR = os.path.normpath(os.path.join(os.path.dirname(__file__), 'runner'))
 
 
@@ -822,13 +943,27 @@ def _scan_bot_files() -> list[str]:
     )
 
 
+def _scan_external_bots() -> list[str]:
+    """Return list of directory names under other_bots/ (top-level external bots)."""
+    if not os.path.isdir(EXTERNAL_BOTS_DIR):
+        return []
+    return sorted(
+        d for d in os.listdir(EXTERNAL_BOTS_DIR)
+        if os.path.isdir(os.path.join(EXTERNAL_BOTS_DIR, d))
+    )
+
+
 def custom_bots(request):
     """List all registered custom bots and available bot files."""
     bots = CustomBot.objects.all().order_by('-created_at')
     available_files = _scan_bot_files()
+    external_dirs = _scan_external_bots()
+    aiarena_bots = aiarena_runner.get_available_aiarena_bots()
     return render(request, 'test_lab/custom_bots.html', {
         'bots': bots,
         'available_files': available_files,
+        'external_dirs': external_dirs,
+        'aiarena_bots': aiarena_bots,
     })
 
 
@@ -840,9 +975,81 @@ def create_custom_bot(request):
     bot_file = request.POST.get('bot_file', '').strip()
     bot_class_name = request.POST.get('bot_class_name', '').strip()
     description = request.POST.get('description', '').strip()
+    bot_type_toggle = request.POST.get('bot_type_toggle', 'standard')
+    bot_directory = request.POST.get('bot_directory', '').strip()
+    aiarena_bot_type = request.POST.get('aiarena_bot_type', 'python').strip()
 
-    if not all([name, bot_file, bot_class_name]):
-        messages.error(request, 'Name, bot file, and class name are required.')
+    if not name:
+        messages.error(request, 'Bot name is required.')
+        return redirect('custom_bots')
+
+    # ---- AI Arena bot ----
+    if bot_type_toggle == 'aiarena':
+        if not bot_directory:
+            messages.error(request, 'Bot directory is required for AI Arena bots.')
+            return redirect('custom_bots')
+
+        error = aiarena_runner.validate_bot_directory(bot_directory)
+        if error:
+            messages.error(request, error)
+            return redirect('custom_bots')
+
+        try:
+            CustomBot.objects.create(
+                name=name,
+                race=race,
+                bot_type='aiarena',
+                bot_directory=bot_directory,
+                aiarena_bot_type=aiarena_bot_type,
+                description=description,
+            )
+            messages.success(request, f'AI Arena bot "{name}" registered successfully.')
+        except Exception as e:
+            messages.error(request, f'Failed to create custom bot: {e}')
+
+        return redirect('custom_bots')
+
+    # ---- External Python bot ----
+    if bot_type_toggle == 'external':
+        if not bot_class_name:
+            messages.error(request, 'Class name is required for external Python bots.')
+            return redirect('custom_bots')
+        if not bot_directory:
+            messages.error(request, 'Bot directory is required for external bots.')
+            return redirect('custom_bots')
+        if not bot_file:
+            messages.error(request, 'Module path is required for external bots (e.g. bot.main).')
+            return redirect('custom_bots')
+
+        ext_path = os.path.join(EXTERNAL_BOTS_DIR, bot_directory)
+        if not os.path.isdir(ext_path):
+            messages.error(request, f'External bot directory not found: {bot_directory}')
+            return redirect('custom_bots')
+
+        try:
+            CustomBot.objects.create(
+                name=name,
+                race=race,
+                bot_type='external_python',
+                bot_file=bot_file,
+                bot_class_name=bot_class_name,
+                is_external=True,
+                bot_directory=bot_directory,
+                description=description,
+            )
+            messages.success(request, f'External bot "{name}" registered successfully.')
+        except Exception as e:
+            messages.error(request, f'Failed to create custom bot: {e}')
+
+        return redirect('custom_bots')
+
+    # ---- Standard python_sc2 bot ----
+    if not bot_class_name:
+        messages.error(request, 'Class name is required.')
+        return redirect('custom_bots')
+
+    if not bot_file:
+        messages.error(request, 'Bot file is required.')
         return redirect('custom_bots')
 
     # Verify the file exists
@@ -873,6 +1080,7 @@ def create_custom_bot(request):
         CustomBot.objects.create(
             name=name,
             race=race,
+            bot_type='python_sc2',
             bot_file=bot_file,
             bot_class_name=bot_class_name,
             description=description,
@@ -912,40 +1120,8 @@ def run_custom_match(request):
         messages.error(request, 'Selected custom bot not found.')
         return redirect('utilities')
 
-    docker_compose_path = DOCKER_COMPOSE_PATH
-    logs_dir = LOGS_DIR
-    os.makedirs(logs_dir, exist_ok=True)
-
     try:
-        # Create a pending match with test_group_id = -1 and the custom bot linked
-        match = Match(
-            test_group_id=-1,
-            start_timestamp=datetime.now(),
-            map_name="TBD",
-            opponent_race=custom_bot.race,
-            opponent_difficulty='',
-            opponent_build='',
-            opponent_bot=custom_bot,
-            result="Pending",
-        )
-        match.save()
-        match_id = match.id
-
-        log_file = os.path.join(logs_dir, f"{match_id}_vs_{custom_bot.name}.log")
-
-        command = [
-            'docker', 'compose', 'run', '--rm',
-            '-e', f'OPPONENT_FILE={custom_bot.bot_file}',
-            '-e', f'OPPONENT_CLASS={custom_bot.bot_class_name}',
-            '-e', f'OPPONENT_RACE={custom_bot.race.lower()}',
-            '-e', f'MATCH_ID={match_id}',
-            'bot',
-            'bash', '/root/runner/run_docker_bot_vs_bot.sh',
-        ]
-
-        with open(log_file, 'w') as log:
-            subprocess.Popen(command, cwd=docker_compose_path, stdout=log, stderr=log)
-
+        match_id = start_custom_bot_match(custom_bot)
         messages.success(
             request,
             f'Custom match started: BotTato vs {custom_bot.name} (match #{match_id})'

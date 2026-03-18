@@ -1,0 +1,18 @@
+# Don't commit bot directories (they're large and often downloaded per-user)
+bots/*/
+
+# Keep the bots directory itself
+!bots/.gitkeep
+
+# Generated per-match compose override
+docker-compose.override.yml
+
+# Runtime artifacts
+logs/*/
+replays/*.SC2Replay
+results.json
+
+# Keep structure files
+!logs/.gitkeep
+!replays/.gitkeep
+!maps/.gitkeep

@@ -74,7 +74,15 @@
                 <td>
                     {% if match.result != 'Pending' %}
                         <a class="action-link" href="{% url 'serve_replay' match.id %}" title="Open replay in SC2">Replay</a>
-                        <a class="action-link" href="{% url 'serve_log' match.id %}" target="_blank" title="View log file">Log</a>
+                        <a class="action-link" href="{% url 'serve_log' match.id %}" target="_blank" title="View docker log">Log</a>
+                        {% if match.opponent_bot and match.opponent_bot.is_aiarena %}
+                            <a class="action-link" href="{% url 'serve_aiarena_bot_log' match.id 'BotTato' %}" target="_blank" title="BotTato stderr">BotTato</a>
+                            {% if match.opponent_bot.bot_directory == 'BotTato' %}
+                                <a class="action-link" href="{% url 'serve_aiarena_bot_log' match.id 'BotTato_p2' %}" target="_blank" title="BotTato_p2 stderr">BotTato_p2</a>
+                            {% else %}
+                                <a class="action-link" href="{% url 'serve_aiarena_bot_log' match.id match.opponent_bot.bot_directory %}" target="_blank" title="{{ match.opponent_bot.name }} stderr">{{ match.opponent_bot.name }}</a>
+                            {% endif %}
+                        {% endif %}
                     {% else %}
                         <em>In progress...</em>
                     {% endif %}

@@ -1,0 +1,21 @@
+# Custom bot controller image for BotTato.
+# Extends the stock aiarena bot controller with:
+# - gcc/libc6-dev for compiling Cython extensions
+# - Pre-installed Python dependencies
+#
+# Build: docker compose build bot_controller1
+# (or automatically built on first `docker compose up`)
+
+FROM aiarena/arenaclient-bot:v0.8.0
+
+USER root
+
+# Build tools for Cython extension compilation
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    libc6-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Pre-install BotTato's Python dependencies so run.py doesn't need pip
+RUN pip install --no-cache-dir \
+    loguru numpy scipy setuptools pymysql "sharepy>=2.0.0"

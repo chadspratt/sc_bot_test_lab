@@ -18,22 +18,62 @@ class CustomBot(models.Model):
         db_table = 'custom_bot'
 
     Race = models.TextChoices('Race', 'Protoss Terran Zerg Random')
+    BotType = models.TextChoices('BotType', 'python_sc2 external_python aiarena')
 
     id = models.AutoField(primary_key=True)
     name = models.CharField(max_length=100, unique=True)
     race = models.CharField(max_length=7, choices=Race)
+    bot_type = models.CharField(
+        max_length=20,
+        choices=BotType,
+        default='python_sc2',
+        help_text=(
+            "python_sc2: single .py file in bot/other_bots/; "
+            "external_python: third-party Python bot with own framework; "
+            "aiarena: ladder-packaged bot (any language) run via aiarena infrastructure"
+        ),
+    )
     bot_file = models.CharField(
         max_length=255,
-        help_text="Python filename in bot/other_bots/ (e.g. worker_rush.py)"
+        blank=True,
+        default='',
+        help_text="Python filename in bot/other_bots/ (python_sc2) or module path (external_python)",
     )
     bot_class_name = models.CharField(
         max_length=100,
-        help_text="Class name that inherits from BotAI (e.g. WorkerRushBot)"
+        blank=True,
+        default='',
+        help_text="Class name that inherits from BotAI (python_sc2 / external_python only)",
+    )
+    is_external = models.BooleanField(
+        default=False,
+        help_text="Deprecated: use bot_type instead. Kept for backward compatibility.",
+    )
+    bot_directory = models.CharField(
+        max_length=500,
+        blank=True,
+        default='',
+        help_text=(
+            "Directory name under other_bots/ (external_python) "
+            "or under aiarena/bots/ (aiarena type)"
+        ),
+    )
+    aiarena_bot_type = models.CharField(
+        max_length=20,
+        blank=True,
+        default='python',
+        help_text="Bot type for aiarena matches file: python, cppwin32, cpplinux, dotnetcore, java, nodejs, etc.",
     )
     description = models.TextField(blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True)
 
+    @property
+    def is_aiarena(self) -> bool:
+        return self.bot_type == 'aiarena'
+
     def __str__(self):
+        if self.is_aiarena:
+            return f"{self.name} ({self.race} - aiarena)"
         return f"{self.name} ({self.race} - {self.bot_class_name})"
 
 

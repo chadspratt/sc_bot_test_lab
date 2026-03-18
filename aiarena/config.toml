@@ -1,0 +1,41 @@
+ARENA_CLIENT_ID = "aiarenaclient_local"
+ROUNDS_PER_RUN = -1
+BASE_WEBSITE_URL = ""
+DEBUG_MODE = true
+PYTHON = "python"
+RUN_TYPE = "local"
+
+# Secure mode runs bots in their home directory (more realistic ladder behavior)
+SECURE_MODE = false
+
+# Logging
+LOGGING_LEVEL = "debug"
+LOG_ROOT = "/logs"
+
+# Directories
+REPLAYS_DIRECTORY = "/replays"
+BOTS_DIRECTORY = "/bots"
+
+# StarCraft II settings
+MAX_GAME_TIME = 80640
+MAX_REAL_TIME = 7200
+MAX_FRAME_TIME = 40
+STRIKES = 10
+REALTIME = false
+VISUALIZE = false
+
+# Match settings
+DISABLE_DEBUG = true
+VALIDATE_RACE = false
+
+# File-based match source (local mode)
+MATCHES_FILE = "matches"
+RESULTS_FILE = "results.json"
+
+# Controller ports (must match docker-compose.yml environment vars)
+BOT_CONT_1_HOST = "127.0.0.1"
+BOT_CONT_1_PORT = 8081
+BOT_CONT_2_HOST = "127.0.0.1"
+BOT_CONT_2_PORT = 8082
+SC2_CONT_HOST = "127.0.0.1"
+SC2_CONT_PORT = 8083

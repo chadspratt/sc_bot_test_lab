@@ -54,21 +54,76 @@
 
     <div class="section">
         <h3>Register New Custom Bot</h3>
-        <p>Bot files must be placed in <code>bot/other_bots/</code> and define a class inheriting from <code>BotAI</code>.</p>
 
-        {% if available_files %}
-        <div class="file-list">
-            <strong>Available bot files:</strong>
-            {% for f in available_files %}
-                <code>{{ f }}</code>
-            {% endfor %}
+        <div style="margin-bottom: 15px;">
+            <label style="font-weight: bold; margin-right: 20px;">
+                <input type="radio" name="bot_type_radio" value="standard" checked onclick="toggleBotType('standard')"> Standard Bot
+                <span style="font-weight: normal; color: #666;">(single file in bot/other_bots/)</span>
+            </label>
+            <label style="font-weight: bold; margin-right: 20px;">
+                <input type="radio" name="bot_type_radio" value="external" onclick="toggleBotType('external')"> External Bot
+                <span style="font-weight: normal; color: #666;">(third-party Python bot with its own framework)</span>
+            </label>
+            <label style="font-weight: bold;">
+                <input type="radio" name="bot_type_radio" value="aiarena" onclick="toggleBotType('aiarena')"> AI Arena Bot
+                <span style="font-weight: normal; color: #666;">(ladder-packaged bot, any language)</span>
+            </label>
         </div>
-        {% else %}
-        <p><em>No .py files found in bot/other_bots/. Add a bot file first.</em></p>
-        {% endif %}
+
+        <div id="standard-bot-info">
+            <p>Bot files must be placed in <code>bot/other_bots/</code> and define a class inheriting from <code>BotAI</code>.</p>
+            {% if available_files %}
+            <div class="file-list">
+                <strong>Available bot files:</strong>
+                {% for f in available_files %}
+                    <code>{{ f }}</code>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p><em>No .py files found in bot/other_bots/. Add a bot file first.</em></p>
+            {% endif %}
+        </div>
+
+        <div id="external-bot-info" style="display: none;">
+            <p>External bots live in <code>other_bots/</code> (top-level) and have their own framework and dependencies.</p>
+            {% if external_dirs %}
+            <div class="file-list">
+                <strong>Available external bot directories:</strong>
+                {% for d in external_dirs %}
+                    <code>{{ d }}</code>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p><em>No directories found in other_bots/. Add an external bot first.</em></p>
+            {% endif %}
+        </div>
+
+        <div id="aiarena-bot-info" style="display: none;">
+            <p>
+                AI Arena bots are ladder-packaged bots that run via the
+                <a href="https://github.com/aiarena/local-play-bootstrap" target="_blank">aiarena/local-play-bootstrap</a>
+                Docker infrastructure. They can be written in any language.
+            </p>
+            <p>
+                Place the bot directory (containing <code>ladderbots.json</code>) in
+                <code>test_lab/aiarena/bots/</code>. You can download bots from
+                <a href="https://aiarena.net" target="_blank">aiarena.net</a>.
+            </p>
+            {% if aiarena_bots %}
+            <div class="file-list">
+                <strong>Available AI Arena bot directories:</strong>
+                {% for d in aiarena_bots %}
+                    <code>{{ d }}</code>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p><em>No bot directories with ladderbots.json found in test_lab/aiarena/bots/.</em></p>
+            {% endif %}
+        </div>
 
         <form method="post" action="{% url 'create_custom_bot' %}" style="margin-top: 15px;">
             {% csrf_token %}
+            <input type="hidden" name="bot_type_toggle" id="bot_type_toggle" value="standard">
             <div class="form-group">
                 <label for="name">Bot Name:</label>
                 <input type="text" name="name" id="name" required placeholder="e.g. Worker Rush">
@@ -82,21 +137,79 @@
                     <option value="Zerg">Zerg</option>
                 </select>
             </div>
-            <div class="form-group">
-                <label for="bot_file">Bot File:</label>
-                {% if available_files %}
-                <select name="bot_file" id="bot_file">
-                    {% for f in available_files %}
-                    <option value="{{ f }}">{{ f }}</option>
-                    {% endfor %}
-                </select>
-                {% else %}
-                <input type="text" name="bot_file" id="bot_file" required placeholder="e.g. worker_rush.py">
-                {% endif %}
+
+            <!-- Standard bot fields -->
+            <div id="standard-fields">
+                <div class="form-group">
+                    <label for="bot_file">Bot File:</label>
+                    {% if available_files %}
+                    <select name="bot_file" id="bot_file">
+                        {% for f in available_files %}
+                        <option value="{{ f }}">{{ f }}</option>
+                        {% endfor %}
+                    </select>
+                    {% else %}
+                    <input type="text" name="bot_file" id="bot_file" placeholder="e.g. worker_rush.py">
+                    {% endif %}
+                </div>
             </div>
-            <div class="form-group">
+
+            <!-- External bot fields -->
+            <div id="external-fields" style="display: none;">
+                <div class="form-group">
+                    <label for="ext_bot_directory">Bot Directory:</label>
+                    {% if external_dirs %}
+                    <select name="bot_directory" id="ext_bot_directory">
+                        {% for d in external_dirs %}
+                        <option value="{{ d }}">{{ d }}</option>
+                        {% endfor %}
+                    </select>
+                    {% else %}
+                    <input type="text" name="bot_directory" id="ext_bot_directory" placeholder="e.g. who">
+                    {% endif %}
+                </div>
+                <div class="form-group">
+                    <label for="ext_module_path">Module Path:</label>
+                    <input type="text" name="bot_file" id="ext_module_path" placeholder="e.g. bot/main.py" disabled>
+                    <small style="color: #666;">File path relative to the bot directory</small>
+                </div>
+            </div>
+
+            <!-- AI Arena bot fields -->
+            <div id="aiarena-fields" style="display: none;">
+                <div class="form-group">
+                    <label for="aiarena_bot_directory">Bot Directory:</label>
+                    {% if aiarena_bots %}
+                    <select name="bot_directory" id="aiarena_bot_directory" disabled>
+                        {% for d in aiarena_bots %}
+                        <option value="{{ d }}">{{ d }}</option>
+                        {% endfor %}
+                    </select>
+                    {% else %}
+                    <input type="text" name="bot_directory" id="aiarena_bot_directory" placeholder="e.g. my_bot" disabled>
+                    {% endif %}
+                </div>
+                <div class="form-group">
+                    <label for="aiarena_bot_type">Bot Type:</label>
+                    <select name="aiarena_bot_type" id="aiarena_bot_type" disabled>
+                        <option value="python" selected>Python</option>
+                        <option value="cppwin32">C++ (Win32)</option>
+                        <option value="cpplinux">C++ (Linux)</option>
+                        <option value="dotnetcore">.NET Core</option>
+                        <option value="java">Java</option>
+                        <option value="nodejs">Node.js</option>
+                        <option value="commandcenter">CommandCenter</option>
+                        <option value="binaryi386">Binary (i386)</option>
+                        <option value="wine">Wine</option>
+                    </select>
+                    <small style="color: #666;">Runtime type as defined in the bot's ladderbots.json</small>
+                </div>
+            </div>
+
+            <!-- Class name (not needed for aiarena) -->
+            <div id="class-name-field" class="form-group">
                 <label for="bot_class_name">Class Name:</label>
-                <input type="text" name="bot_class_name" id="bot_class_name" required placeholder="e.g. WorkerRushBot">
+                <input type="text" name="bot_class_name" id="bot_class_name" placeholder="e.g. WorkerRushBot">
             </div>
             <div class="form-group">
                 <label for="description">Description (optional):</label>
@@ -106,6 +219,38 @@
         </form>
     </div>
 
+    <script>
+    function toggleBotType(type) {
+        document.getElementById('bot_type_toggle').value = type;
+
+        // Info sections
+        document.getElementById('standard-bot-info').style.display = type === 'standard' ? '' : 'none';
+        document.getElementById('external-bot-info').style.display = type === 'external' ? '' : 'none';
+        document.getElementById('aiarena-bot-info').style.display = type === 'aiarena' ? '' : 'none';
+
+        // Field sections
+        document.getElementById('standard-fields').style.display = type === 'standard' ? '' : 'none';
+        document.getElementById('external-fields').style.display = type === 'external' ? '' : 'none';
+        document.getElementById('aiarena-fields').style.display = type === 'aiarena' ? '' : 'none';
+
+        // Class name field: hide for aiarena
+        document.getElementById('class-name-field').style.display = type === 'aiarena' ? 'none' : '';
+
+        // Toggle disabled states to prevent duplicate name attributes from submitting
+        const stdFile = document.getElementById('bot_file');
+        const extModule = document.getElementById('ext_module_path');
+        const extDir = document.getElementById('ext_bot_directory');
+        const aiarenaDir = document.getElementById('aiarena_bot_directory');
+        const airenaBotType = document.getElementById('aiarena_bot_type');
+
+        if (stdFile) stdFile.disabled = type !== 'standard';
+        if (extModule) extModule.disabled = type !== 'external';
+        if (extDir) extDir.disabled = type !== 'external';
+        if (aiarenaDir) aiarenaDir.disabled = type !== 'aiarena';
+        if (airenaBotType) airenaBotType.disabled = type !== 'aiarena';
+    }
+    </script>
+
     <div class="section">
         <h3>Registered Custom Bots</h3>
         {% if bots %}
@@ -114,7 +259,8 @@
                 <tr>
                     <th>Name</th>
                     <th>Race</th>
-                    <th>File</th>
+                    <th>Type</th>
+                    <th>File / Module</th>
                     <th>Class</th>
                     <th>Description</th>
                     <th>Created</th>
@@ -126,8 +272,17 @@
                 <tr>
                     <td>{{ bot.name }}</td>
                     <td>{{ bot.race }}</td>
-                    <td><code>{{ bot.bot_file }}</code></td>
-                    <td><code>{{ bot.bot_class_name }}</code></td>
+                    <td>
+                        {% if bot.bot_type == 'aiarena' %}
+                            <span title="AI Arena ladder bot (any language)">AI Arena ({{ bot.bot_directory }})</span>
+                        {% elif bot.bot_type == 'external_python' or bot.is_external %}
+                            <span title="External bot with own framework">External ({{ bot.bot_directory }})</span>
+                        {% else %}
+                            Standard
+                        {% endif %}
+                    </td>
+                    <td><code>{% if bot.bot_type == 'aiarena' %}{{ bot.aiarena_bot_type }}{% else %}{{ bot.bot_file }}{% endif %}</code></td>
+                    <td><code>{{ bot.bot_class_name|default:"-" }}</code></td>
                     <td>{{ bot.description }}</td>
                     <td>{{ bot.created_at|date:"Y-m-d H:i" }}</td>
                     <td>

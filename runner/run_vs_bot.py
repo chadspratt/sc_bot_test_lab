@@ -6,6 +6,8 @@ Environment variables:
   OPPONENT_CLASS - Class name inheriting from BotAI (e.g. WorkerRushBot)
   OPPONENT_RACE  - Race name: protoss, terran, zerg, or random
   MATCH_ID       - (optional) existing match row to update
+  EXTERNAL_BOT_DIR - (optional) directory name under /root/external_bots/ for
+                     third-party bots with their own framework
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ import importlib.util
 import os
 import random
 import sys
+import types
 from loguru import logger
 
 from config import MAP_LIST, RACE_DICT
@@ -57,14 +60,94 @@ def load_opponent_class(file_name: str, class_name: str) -> type[BotAI]:
     return bot_cls
 
 
+def load_external_opponent(ext_dir: str, rel_file_path: str, class_name: str) -> type[BotAI]:
+    """Import an opponent bot class from an external bot directory.
+
+    External bots live under /root/external_bots/<ext_dir>/ inside Docker.
+    They may bundle their own frameworks (e.g. ares-sc2) which need to be
+    added to sys.path before importing.
+
+    Parameters
+    ----------
+    ext_dir : str
+        Directory name under /root/external_bots/ (e.g. 'who').
+    rel_file_path : str
+        File path relative to the external bot directory (e.g. 'bot/main.py').
+    class_name : str
+        Class name to import from that module (e.g. 'MyBot').
+    """
+    base = f'/root/external_bots/{ext_dir}'
+    if not os.path.isdir(base):
+        raise FileNotFoundError(f"External bot directory not found: {base}")
+
+    file_path = os.path.join(base, rel_file_path)
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"External bot file not found: {file_path}")
+
+    # Add the external bot root and common framework paths to sys.path so
+    # the external bot's internal imports resolve correctly.
+    paths_to_add = [
+        base,
+        os.path.join(base, 'ares-sc2', 'src', 'ares'),
+        os.path.join(base, 'ares-sc2', 'src'),
+        os.path.join(base, 'ares-sc2'),
+    ]
+    for p in paths_to_add:
+        if os.path.isdir(p) and p not in sys.path:
+            sys.path.insert(0, p)
+
+    # Pre-register the external bot's top-level package (e.g. 'bot/') in
+    # sys.modules so it shadows any same-named .py file elsewhere on sys.path.
+    # Without this, Python finds BotTato's bot.py (a module) before the
+    # external bot's bot/ directory (a namespace package) and fails with
+    # "'bot' is not a package".
+    rel_parts = rel_file_path.replace('\\', '/').split('/')
+    if len(rel_parts) > 1:
+        pkg_name = rel_parts[0]
+        pkg_dir = os.path.join(base, pkg_name)
+        if os.path.isdir(pkg_dir) and pkg_name not in sys.modules:
+            pkg = types.ModuleType(pkg_name)
+            pkg.__path__ = [pkg_dir]
+            pkg.__package__ = pkg_name
+            sys.modules[pkg_name] = pkg
+
+    # Change working directory so the external bot can find its config files
+    # (e.g. ares-sc2 config.yml). We leave it here — BotTato uses __file__
+    # relative paths, not cwd.
+    os.chdir(base)
+
+    try:
+        spec = importlib.util.spec_from_file_location("external_opponent_bot", file_path)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Could not load spec from {file_path}")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)  # type: ignore[union-attr]
+    except Exception:
+        raise
+
+    bot_cls = getattr(module, class_name, None)
+    if bot_cls is None:
+        raise AttributeError(
+            f"Class '{class_name}' not found in '{rel_file_path}'. "
+            f"Available: {[n for n in dir(module) if not n.startswith('_')]}"
+        )
+
+    return bot_cls
+
+
 def main():
     opponent_file = os.environ.get("OPPONENT_FILE")
     opponent_class = os.environ.get("OPPONENT_CLASS")
     opponent_race_str = os.environ.get("OPPONENT_RACE", "random")
     existing_match_id = os.environ.get("MATCH_ID")
+    external_bot_dir = os.environ.get("EXTERNAL_BOT_DIR", "")
 
-    if not opponent_file or not opponent_class:
-        logger.error("OPPONENT_FILE and OPPONENT_CLASS environment variables are required")
+    if not opponent_class:
+        logger.error("OPPONENT_CLASS environment variable is required")
+        sys.exit(1)
+
+    if not external_bot_dir and not opponent_file:
+        logger.error("OPPONENT_FILE is required for non-external bots")
         sys.exit(1)
 
     opponent_race = RACE_DICT.get(opponent_race_str.lower(), Race.Random)
@@ -74,8 +157,14 @@ def main():
 
     try:
         # Load opponent bot class
-        OpponentClass = load_opponent_class(opponent_file, opponent_class)
-        logger.info(f"Loaded opponent: {opponent_class} from {opponent_file} ({opponent_race})")
+        if external_bot_dir:
+            module_path = opponent_file or ''
+            OpponentClass = load_external_opponent(external_bot_dir, module_path, opponent_class)
+            logger.info(f"Loaded external opponent: {opponent_class} from {external_bot_dir}/{module_path}")
+        else:
+            assert opponent_file is not None  # guarded by sys.exit above
+            OpponentClass = load_opponent_class(opponent_file, opponent_class)
+            logger.info(f"Loaded opponent: {opponent_class} from {opponent_file} ({opponent_race})")
 
         # Choose map
         chosen_map_name = random.choice(MAP_LIST)

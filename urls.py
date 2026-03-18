@@ -7,6 +7,7 @@ urlpatterns = [
     path('trigger-tests/', views.trigger_tests, name='trigger_tests'),
     path('replay/<int:match_id>/', views.serve_replay, name='serve_replay'),
     path('log/<int:match_id>/', views.serve_log, name='serve_log'),
+    path('log/<int:match_id>/bot/<str:bot_name>/', views.serve_aiarena_bot_log, name='serve_aiarena_bot_log'),
     path('maps/', views.map_breakdown, name='map_breakdown'),
     path('buildings/', views.building_timing, name='building_timing'),
     path('utilities/', views.utilities, name='utilities'),

@@ -16,6 +16,23 @@ else
     echo "Cython extensions already built for Python ${PYTHON_VERSION}"
 fi
 
+# If this is an external bot match, install its dependencies
+if [ -n "$EXTERNAL_BOT_DIR" ]; then
+    EXT_BOT_PATH="/root/external_bots/$EXTERNAL_BOT_DIR"
+    if [ -d "$EXT_BOT_PATH" ]; then
+        echo "Installing dependencies for external bot: $EXTERNAL_BOT_DIR"
+        if [ -f "$EXT_BOT_PATH/requirements.txt" ]; then
+            uv pip install -r "$EXT_BOT_PATH/requirements.txt"
+        fi
+        # Install ares-sc2 if bundled
+        if [ -d "$EXT_BOT_PATH/ares-sc2" ]; then
+            uv pip install "$EXT_BOT_PATH/ares-sc2"
+        fi
+    else
+        echo "WARNING: External bot directory not found: $EXT_BOT_PATH"
+    fi
+fi
+
 cd /root/bot
 export PYTHONPATH="/root/bot:/root/runner:${PYTHONPATH}"
 exec uv run /root/runner/run_vs_bot.py "$@"

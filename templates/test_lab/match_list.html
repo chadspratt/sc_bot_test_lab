@@ -86,10 +86,29 @@
         
         <form method="post" action="{% url 'trigger_tests' %}" style="display: inline-block;">
             {% csrf_token %}
-            <input type="hidden" name="difficulty" value="{{ selected_difficulty }}">
+            <select name="difficulty" style="padding: 6px 10px; border: 1px solid #555; border-radius: 4px; background: #2a2a2a; color: #e0e0e0; margin-right: 6px;">
+                <optgroup label="Difficulty">
+                    <option value="Easy"{% if selected_difficulty == 'Easy' %} selected{% endif %}>Easy</option>
+                    <option value="Medium"{% if selected_difficulty == 'Medium' %} selected{% endif %}>Medium</option>
+                    <option value="MediumHard"{% if selected_difficulty == 'MediumHard' %} selected{% endif %}>MediumHard</option>
+                    <option value="Hard"{% if selected_difficulty == 'Hard' %} selected{% endif %}>Hard</option>
+                    <option value="Harder"{% if selected_difficulty == 'Harder' %} selected{% endif %}>Harder</option>
+                    <option value="VeryHard"{% if selected_difficulty == 'VeryHard' %} selected{% endif %}>VeryHard</option>
+                    <option value="CheatVision"{% if selected_difficulty == 'CheatVision' %} selected{% endif %}>CheatVision</option>
+                    <option value="CheatMoney"{% if selected_difficulty == 'CheatMoney' %} selected{% endif %}>CheatMoney</option>
+                    <option value="CheatInsane"{% if selected_difficulty == 'CheatInsane' or not selected_difficulty %} selected{% endif %}>CheatInsane</option>
+                </optgroup>
+                {% if custom_bots %}
+                <optgroup label="Custom Bots">
+                    {% for bot in custom_bots %}
+                    <option value="bot_{{ bot.id }}">{{ bot.name }} ({{ bot.race }})</option>
+                    {% endfor %}
+                </optgroup>
+                {% endif %}
+            </select>
             <input type="text" name="description" placeholder="Test group description" style="padding: 6px 10px; border: 1px solid #555; border-radius: 4px; background: #2a2a2a; color: #e0e0e0; margin-right: 6px; width: 250px;">
             <button type="submit" class="trigger-btn">
-                Start Test Suite ({% if selected_difficulty %} {{ selected_difficulty }} {% else %} CheatInsane {% endif %})
+                Start Test Suite
             </button>
         </form>
     </div>
