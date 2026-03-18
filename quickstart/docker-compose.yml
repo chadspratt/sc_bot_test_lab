@@ -1,0 +1,31 @@
+# MySQL database for test_lab quickstart.
+#
+# Start:  docker compose -f quickstart/docker-compose.yml up -d
+# Stop:   docker compose -f quickstart/docker-compose.yml down
+# Reset:  docker compose -f quickstart/docker-compose.yml down -v
+#
+# Default credentials (override via environment variables):
+#   host: localhost:3306
+#   user: root
+#   password: testlab
+#   database: sc_bot
+
+services:
+  db:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: testlab
+      MYSQL_DATABASE: sc_bot
+    ports:
+      - "3306:3306"
+    volumes:
+      - testlab_mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  testlab_mysql_data:
