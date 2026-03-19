@@ -162,6 +162,38 @@ tr:nth-child(even) { background-color: #f2f2f2; }
 
     <!-- From Replay -->
     <div id="from-replay" class="tab-panel">
+        {% if replay_tests %}
+        <div class="utility-section">
+            <h3>Run Saved Replay Test</h3>
+            <p>Run a previously configured replay test.</p>
+            <form method="post" action="{% url 'run_saved_replay_test' %}" style="display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap;">
+                {% csrf_token %}
+                <div>
+                    <label for="replay_test_id">Replay Test:</label><br>
+                    <select name="replay_test_id" id="replay_test_id" style="min-width: 300px;">
+                        {% for rt in replay_tests %}
+                        <option value="{{ rt.id }}">
+                            {{ rt.name }} ({{ rt.start_time }} +{{ rt.duration }}, P{{ rt.bot_player_id }}
+                            {% if rt.opponent_type == 'CustomBot' and rt.opponent_bot %}vs {{ rt.opponent_bot.name }}{% else %}vs {{ rt.opponent_difficulty }} {{ rt.opponent_build }}{% endif %})
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <label for="rt_test_bot">Test Bot:</label><br>
+                    <select name="test_bot_id" id="rt_test_bot">
+                        {% for bot in test_subject_bots %}
+                        <option value="{{ bot.id }}" {% if bot.is_test_subject %}selected{% endif %}>{{ bot.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <button type="submit" class="utility-btn">Run Replay Test</button>
+                </div>
+            </form>
+        </div>
+        {% endif %}
+
         <div class="utility-section">
             <h3>Continue from Replay</h3>
             <p>Upload a replay file and specify a time — BotTato takes over at that point and plays out the game vs a Computer opponent.</p>
@@ -187,6 +219,26 @@ tr:nth-child(even) { background-color: #f2f2f2; }
                         <option value="CheatVision">CheatVision</option>
                         <option value="CheatMoney">CheatMoney</option>
                         <option value="CheatInsane" selected>CheatInsane</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="replay_build">Opponent Build:</label><br>
+                    <select name="build" id="replay_build">
+                        <option value="Macro" selected>Macro</option>
+                        <option value="Rush">Rush</option>
+                        <option value="Timing">Timing</option>
+                        <option value="Power">Power</option>
+                        <option value="Air">Air</option>
+                        <option value="RandomBuild">Random</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="replay_race">Opponent Race:</label><br>
+                    <select name="race" id="replay_race">
+                        <option value="Random" selected>Random</option>
+                        <option value="Protoss">Protoss</option>
+                        <option value="Terran">Terran</option>
+                        <option value="Zerg">Zerg</option>
                     </select>
                 </div>
                 <div>

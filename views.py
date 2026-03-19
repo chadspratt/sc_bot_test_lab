@@ -583,64 +583,7 @@ def start_test_suite(
     replay_test_list = list(test_suite.replay_tests.all()) if test_suite else []
     for replay_test in replay_test_list:
         try:
-            game_loop = _parse_game_time(replay_test.start_time)
-            if game_loop is None or game_loop <= 0:
-                logging.getLogger('test_lab').warning(
-                    'Skipping replay test "%s": invalid start_time "%s"',
-                    replay_test.name, replay_test.start_time,
-                )
-                continue
-
-            match = Match(
-                test_group_id=test_group_id,
-                start_timestamp=datetime.now(),
-                map_name='TBD (from replay)',
-                opponent_race='',
-                opponent_difficulty=difficulty,
-                opponent_build='',
-                result='Pending',
-                replay_takeover_game_loop=game_loop,
-                test_bot=test_bot,
-                replay_test=replay_test,
-            )
-            match.save()
-            match_id = match.id
-
-            # Copy the replay file into the shared replays/logs directory
-            replay_filename = f'{match_id}_source.SC2Replay'
-            replay_dest = os.path.join(LOGS_DIR, replay_filename)
-            if replay_test.replay_file != replay_dest:
-                import shutil as _shutil
-                _shutil.copy2(replay_test.replay_file, replay_dest)
-
-            container_replay_path = f'/root/replays/{replay_filename}'
-            match.replay_file = container_replay_path
-            match.save()
-
-            log_file = os.path.join(LOGS_DIR, f'{match_id}_replay_test.log')
-
-            command = [
-                'docker', 'compose', '-p', f'match_{match_id}',
-                'run', '--rm', '--no-deps',
-                '-e', f'REPLAY_PATH={container_replay_path}',
-                '-e', f'TAKEOVER_GAME_LOOP={game_loop}',
-                '-e', 'BOT_PLAYER_ID=1',
-                '-e', f'DIFFICULTY={difficulty}',
-                '-e', f'MATCH_ID={match_id}',
-            ]
-
-            duration_loops = _parse_game_time(replay_test.duration)
-            if duration_loops and duration_loops > 0:
-                duration_seconds = duration_loops / 22.4
-                command += ['-e', f'REPLAY_DURATION={duration_seconds:.1f}']
-
-            command += [
-                'bot',
-                'bash', '/root/runner/run_docker_continue_replay.sh',
-            ]
-
-            with open(log_file, 'w') as log:
-                subprocess.Popen(command, cwd=DOCKER_COMPOSE_PATH, stdout=log, stderr=log)
+            _launch_replay_test_match(replay_test, test_group_id=test_group_id, test_bot=test_bot)
             count += 1
         except Exception as e:
             logging.getLogger('test_lab').exception(
@@ -1243,6 +1186,7 @@ def run_match_page(request):
         'recent_commits_by_bot': recent_commits_by_bot,
         'matches': matches,
         'selected_test_bot': selected_test_bot,
+        'replay_tests': ReplayTest.objects.order_by('name'),
     })
 
 
@@ -1630,6 +1574,8 @@ def run_replay_match(request):
     replay_file = request.FILES.get('replay_file')
     takeover_time = request.POST.get('takeover_time', '').strip()
     difficulty = request.POST.get('difficulty', 'CheatInsane')
+    build = request.POST.get('build', 'Macro')
+    race = request.POST.get('race', 'Random')
     bot_player_id = request.POST.get('bot_player_id', '1')
 
     # Validate inputs
@@ -1664,9 +1610,9 @@ def run_replay_match(request):
             test_group_id=-1,
             start_timestamp=datetime.now(),
             map_name="TBD (from replay)",
-            opponent_race='',
+            opponent_race=race,
             opponent_difficulty=difficulty,
-            opponent_build='',
+            opponent_build=build,
             result="Pending",
             replay_takeover_game_loop=game_loop,
         )
@@ -1694,6 +1640,8 @@ def run_replay_match(request):
             '-e', f'TAKEOVER_GAME_LOOP={game_loop}',
             '-e', f'BOT_PLAYER_ID={bot_player_id_int}',
             '-e', f'DIFFICULTY={difficulty}',
+            '-e', f'BUILD={build.lower()}',
+            '-e', f'RACE={race.lower()}',
             '-e', f'MATCH_ID={match_id}',
         ]
 
@@ -1724,6 +1672,107 @@ def run_replay_match(request):
     return redirect('run_match')
 
 
+def _launch_replay_test_match(replay_test: ReplayTest, test_group_id: int = -1, test_bot=None) -> int:
+    """Launch a single replay test match in Docker. Returns the match ID."""
+    import shutil as _shutil
+
+    game_loop = _parse_game_time(replay_test.start_time)
+    if game_loop is None or game_loop <= 0:
+        raise ValueError(f'Invalid start_time "{replay_test.start_time}"')
+
+    rt_difficulty = replay_test.opponent_difficulty or 'CheatInsane'
+    rt_build = replay_test.opponent_build or 'Macro'
+    rt_race = replay_test.opponent_race or 'Random'
+    rt_bot_player_id = replay_test.bot_player_id or 1
+
+    match = Match(
+        test_group_id=test_group_id,
+        start_timestamp=datetime.now(),
+        map_name='TBD (from replay)',
+        opponent_race=rt_race,
+        opponent_difficulty=rt_difficulty,
+        opponent_build=rt_build,
+        result='Pending',
+        replay_takeover_game_loop=game_loop,
+        test_bot=test_bot,
+        replay_test=replay_test,
+    )
+    match.save()
+    match_id = match.id
+
+    os.makedirs(LOGS_DIR, exist_ok=True)
+
+    replay_filename = f'{match_id}_source.SC2Replay'
+    replay_dest = os.path.join(LOGS_DIR, replay_filename)
+    if replay_test.replay_file != replay_dest:
+        _shutil.copy2(replay_test.replay_file, replay_dest)
+
+    container_replay_path = f'/root/replays/{replay_filename}'
+    match.replay_file = container_replay_path
+    match.save()
+
+    log_file = os.path.join(LOGS_DIR, f'{match_id}_replay_test.log')
+
+    command = [
+        'docker', 'compose', '-p', f'match_{match_id}',
+        'run', '--rm', '--no-deps',
+        '-e', f'REPLAY_PATH={container_replay_path}',
+        '-e', f'TAKEOVER_GAME_LOOP={game_loop}',
+        '-e', f'BOT_PLAYER_ID={rt_bot_player_id}',
+        '-e', f'DIFFICULTY={rt_difficulty}',
+        '-e', f'BUILD={rt_build.lower()}',
+        '-e', f'RACE={rt_race.lower()}',
+        '-e', f'MATCH_ID={match_id}',
+    ]
+
+    duration_loops = _parse_game_time(replay_test.duration)
+    if duration_loops and duration_loops > 0:
+        duration_seconds = duration_loops / 22.4
+        command += ['-e', f'REPLAY_DURATION={duration_seconds:.1f}']
+
+    command += [
+        'bot',
+        'bash', '/root/runner/run_docker_continue_replay.sh',
+    ]
+
+    with open(log_file, 'w') as log:
+        subprocess.Popen(command, cwd=DOCKER_COMPOSE_PATH, stdout=log, stderr=log)
+
+    return match_id
+
+
+@require_POST
+def run_saved_replay_test(request):
+    """Launch a single saved replay test from the Run Match page."""
+    replay_test_id = request.POST.get('replay_test_id', '')
+    test_bot_id = request.POST.get('test_bot_id', '')
+
+    if not replay_test_id or not replay_test_id.isdigit():
+        messages.error(request, 'Please select a replay test.')
+        return redirect('run_match')
+
+    try:
+        replay_test = ReplayTest.objects.get(id=int(replay_test_id))
+    except ReplayTest.DoesNotExist:
+        messages.error(request, 'Replay test not found.')
+        return redirect('run_match')
+
+    test_bot = None
+    if test_bot_id and test_bot_id.isdigit():
+        test_bot = CustomBot.objects.filter(id=int(test_bot_id)).first()
+
+    try:
+        match_id = _launch_replay_test_match(replay_test, test_bot=test_bot)
+        messages.success(
+            request,
+            f'Replay test "{replay_test.name}" started (match #{match_id})'
+        )
+    except Exception as e:
+        messages.error(request, f'Failed to start replay test: {e}')
+
+    return redirect('run_match')
+
+
 # ---------------------------------------------------------------------------
 # Replay Tests
 # ---------------------------------------------------------------------------
@@ -1740,12 +1789,21 @@ def create_replay_test(request):
     """Create one or more replay tests from form data.
 
     The form submits parallel lists: name[], start_time[], duration[] plus a
-    single replay_file.  Each tuple creates one ReplayTest row.
+    single replay_file and shared opponent/player settings.
+    Each tuple creates one ReplayTest row.
     """
     names = request.POST.getlist('name')
     start_times = request.POST.getlist('start_time')
     durations = request.POST.getlist('duration')
     replay_file = request.FILES.get('replay_file')
+
+    # Shared settings for all tests in this batch
+    bot_player_id = request.POST.get('bot_player_id', '1')
+    opponent_type = request.POST.get('opponent_type', 'BuiltInAI')
+    opponent_race = request.POST.get('opponent_race', 'Random')
+    opponent_difficulty = request.POST.get('opponent_difficulty', 'CheatInsane')
+    opponent_build = request.POST.get('opponent_build', 'Macro')
+    opponent_bot_id = request.POST.get('opponent_bot_id', '')
 
     config_tests_url = f"{reverse('config_page')}#test-suites"
 
@@ -1760,6 +1818,23 @@ def create_replay_test(request):
     if not names or not any(n.strip() for n in names):
         messages.error(request, 'At least one test name is required.')
         return redirect(config_tests_url)
+
+    try:
+        bot_player_id_int = int(bot_player_id)
+        if bot_player_id_int not in (1, 2):
+            raise ValueError
+    except ValueError:
+        messages.error(request, 'Bot player ID must be 1 or 2.')
+        return redirect(config_tests_url)
+
+    # Resolve custom bot if selected
+    opponent_bot = None
+    if opponent_type == 'CustomBot' and opponent_bot_id:
+        try:
+            opponent_bot = CustomBot.objects.get(id=int(opponent_bot_id))
+        except (CustomBot.DoesNotExist, ValueError):
+            messages.error(request, 'Selected custom bot not found.')
+            return redirect(config_tests_url)
 
     # Save the replay file once
     os.makedirs(REPLAY_UPLOAD_DIR, exist_ok=True)
@@ -1793,6 +1868,12 @@ def create_replay_test(request):
             replay_file=replay_path,
             start_time=start_time,
             duration=duration,
+            bot_player_id=bot_player_id_int,
+            opponent_type=opponent_type,
+            opponent_race=opponent_race if opponent_type == 'BuiltInAI' else '',
+            opponent_difficulty=opponent_difficulty if opponent_type == 'BuiltInAI' else '',
+            opponent_build=opponent_build if opponent_type == 'BuiltInAI' else '',
+            opponent_bot=opponent_bot if opponent_type == 'CustomBot' else None,
         )
         created += 1
 

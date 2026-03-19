@@ -281,6 +281,12 @@ td { text-align: left; }
         <div class="utility-section">
             <h3>Replay Tests</h3>
             <p>Select a replay file and define test parameters. You can add multiple tests from the same replay before submitting.</p>
+            <p style="font-size: 12px; color: #666; margin-top: 4px;">
+                Replay tests set two environment variables that bots can read at runtime:<br>
+                <code>REPLAY_TAKEOVER_TIME</code> — the game time (in seconds, float) at which the bot took over from the replay.
+                Bots should use this to offset <code>self.time</code> so game-time-dependent logic (e.g. build order timing) works correctly. Can be used as a flag for adjusting other logic to work with Replay Tests<br>
+                <code>REPLAY_DURATION</code> — how many seconds after takeover the test should run before the bot forfeits. This allows testing small chunks of gameplay
+            </p>
 
             <details>
                 <summary style="cursor: pointer; font-weight: bold; margin-bottom: 10px;">Create Replay Test</summary>
@@ -289,6 +295,68 @@ td { text-align: left; }
                     <div style="margin-bottom: 12px;">
                         <label for="replay_file_config" style="font-weight: bold; font-size: 13px;">Replay File (.SC2Replay):</label><br>
                         <input type="file" name="replay_file" id="replay_file_config" accept=".SC2Replay" required>
+                    </div>
+                    <div style="display: flex; gap: 15px; flex-wrap: wrap; margin-bottom: 12px;">
+                        <div>
+                            <label for="rt_bot_player_id" style="font-weight: bold; font-size: 13px;">Test Bot plays as:</label><br>
+                            <select name="bot_player_id" id="rt_bot_player_id">
+                                <option value="1" selected>Player 1</option>
+                                <option value="2">Player 2</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label for="rt_opponent_type" style="font-weight: bold; font-size: 13px;">Opponent Type:</label><br>
+                            <select name="opponent_type" id="rt_opponent_type" onchange="toggleReplayTestOpponentFields()">
+                                <option value="BuiltInAI" selected>Built-in AI</option>
+                                <option value="CustomBot">Custom Bot</option>
+                            </select>
+                        </div>
+                        <div id="rt_ai_fields" style="display: flex; gap: 10px;">
+                            <div>
+                                <label for="rt_opponent_race" style="font-weight: bold; font-size: 13px;">Race:</label><br>
+                                <select name="opponent_race" id="rt_opponent_race">
+                                    <option value="Random" selected>Random</option>
+                                    <option value="Protoss">Protoss</option>
+                                    <option value="Terran">Terran</option>
+                                    <option value="Zerg">Zerg</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label for="rt_opponent_difficulty" style="font-weight: bold; font-size: 13px;">Difficulty:</label><br>
+                                <select name="opponent_difficulty" id="rt_opponent_difficulty">
+                                    <option value="Easy">Easy</option>
+                                    <option value="Medium">Medium</option>
+                                    <option value="MediumHard">MediumHard</option>
+                                    <option value="Hard">Hard</option>
+                                    <option value="Harder">Harder</option>
+                                    <option value="VeryHard">VeryHard</option>
+                                    <option value="CheatVision">CheatVision</option>
+                                    <option value="CheatMoney">CheatMoney</option>
+                                    <option value="CheatInsane" selected>CheatInsane</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label for="rt_opponent_build" style="font-weight: bold; font-size: 13px;">Build:</label><br>
+                                <select name="opponent_build" id="rt_opponent_build">
+                                    <option value="Macro" selected>Macro</option>
+                                    <option value="Rush">Rush</option>
+                                    <option value="Timing">Timing</option>
+                                    <option value="Power">Power</option>
+                                    <option value="Air">Air</option>
+                                    <option value="RandomBuild">Random</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div id="rt_custom_bot_field" style="display: none;">
+                            <label for="rt_opponent_bot" style="font-weight: bold; font-size: 13px;">Custom Bot:</label><br>
+                            <select name="opponent_bot_id" id="rt_opponent_bot">
+                                {% for bot in custom_bots %}
+                                <option value="{{ bot.id }}">{{ bot.name }} ({{ bot.race }})</option>
+                                {% empty %}
+                                <option value="">No custom bots available</option>
+                                {% endfor %}
+                            </select>
+                        </div>
                     </div>
                     <div id="test-rows">
                         <div class="form-row test-row" style="margin-bottom: 6px;">
@@ -324,6 +392,8 @@ td { text-align: left; }
                         <th style="text-align: left;">Replay File</th>
                         <th>Start Time</th>
                         <th>Duration</th>
+                        <th>Player</th>
+                        <th>Opponent</th>
                         <th>Created</th>
                         <th>In Suites</th>
                         <th></th>
@@ -338,6 +408,14 @@ td { text-align: left; }
                         </td>
                         <td>{{ test.start_time }}</td>
                         <td>{{ test.duration }}</td>
+                        <td>P{{ test.bot_player_id }}</td>
+                        <td style="font-size: 12px;">
+                            {% if test.opponent_type == 'CustomBot' and test.opponent_bot %}
+                                {{ test.opponent_bot.name }}
+                            {% else %}
+                                {{ test.opponent_race }} {{ test.opponent_difficulty }} {{ test.opponent_build }}
+                            {% endif %}
+                        </td>
                         <td style="font-size: 12px;">{{ test.created_at|date:"M d, Y H:i" }}</td>
                         <td style="font-size: 12px;">
                             {% for suite in test.test_suites.all %}
@@ -397,6 +475,12 @@ td { text-align: left; }
             var btn = row.querySelector('.remove-row-btn');
             btn.style.visibility = rows.length === 1 ? 'hidden' : 'visible';
         });
+    }
+
+    function toggleReplayTestOpponentFields() {
+        var type = document.getElementById('rt_opponent_type').value;
+        document.getElementById('rt_ai_fields').style.display = type === 'BuiltInAI' ? 'flex' : 'none';
+        document.getElementById('rt_custom_bot_field').style.display = type === 'CustomBot' ? '' : 'none';
     }
 </script>
 {% endblock %}

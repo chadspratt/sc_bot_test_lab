@@ -22,6 +22,7 @@ urlpatterns = [
     path('run-match/custom/', views.run_custom_match, name='run_custom_match'),
     path('run-match/past-version/', views.run_past_version_match, name='run_past_version_match'),
     path('run-match/replay/', views.run_replay_match, name='run_replay_match'),
+    path('run-match/replay-test/', views.run_saved_replay_test, name='run_saved_replay_test'),
 
     # Config actions
     path('config/custom-bots/create/', views.create_custom_bot, name='create_custom_bot'),

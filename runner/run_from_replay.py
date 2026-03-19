@@ -6,6 +6,8 @@ Environment variables:
   TAKEOVER_GAME_LOOP       - Game loop at which the bot takes over
   BOT_PLAYER_ID            - Which player in the replay BotTato replaces (1 or 2, default: 1)
   DIFFICULTY               - Computer opponent difficulty (default: CheatInsane)
+  BUILD                    - Computer opponent build (default: Macro)
+  RACE                     - Computer opponent race (default: Random)
   MATCH_ID                 - (optional) existing match row to update in DB
   REPLAY_DURATION          - (optional) seconds after takeover before the bot forfeits
 """
@@ -16,7 +18,7 @@ import os
 import sys
 from loguru import logger
 
-from config import DIFFICULTY_DICT
+from config import BUILD_DICT, DIFFICULTY_DICT, RACE_DICT
 from db_helpers import update_match_map, update_match_result
 from replay_continuation import run_game_from_replay
 from sc2.data import Difficulty, Race, Result
@@ -30,6 +32,8 @@ def main():
     takeover_loop_str = os.environ.get("TAKEOVER_GAME_LOOP")
     bot_player_id = int(os.environ.get("BOT_PLAYER_ID", "1"))
     difficulty_env = os.environ.get("DIFFICULTY")
+    build_env = os.environ.get("BUILD")
+    race_env = os.environ.get("RACE")
     existing_match_id = os.environ.get("MATCH_ID")
 
     if not replay_path:
@@ -42,12 +46,14 @@ def main():
 
     takeover_game_loop = int(takeover_loop_str)
     difficulty: Difficulty = DIFFICULTY_DICT.get(difficulty_env, DIFFICULTY_DICT[None])
+    ai_build = BUILD_DICT.get(build_env, BUILD_DICT[None])
+    race = RACE_DICT.get(race_env, RACE_DICT[None])
 
     match_id: int | None = int(existing_match_id) if existing_match_id else None
 
     logger.info(f"Continue from replay: {replay_path}")
     logger.info(f"Takeover at game loop: {takeover_game_loop} (~{takeover_game_loop / 22.4:.0f}s)")
-    logger.info(f"Bot player ID: {bot_player_id}, Difficulty: {difficulty}")
+    logger.info(f"Bot player ID: {bot_player_id}, Difficulty: {difficulty}, Build: {ai_build}, Race: {race}")
 
     # Set match ID as environment variable for the bot
     if match_id:
@@ -74,7 +80,7 @@ def main():
             target_game_loop=takeover_game_loop,
             players=[
                 Bot(Race.Terran, BotTato(), "BotTato"),
-                Computer(Race.Random, difficulty),  # Race will be overridden from replay
+                Computer(race, difficulty, ai_build=ai_build),
             ],
             bot_player_id=bot_player_id,
             realtime=False,

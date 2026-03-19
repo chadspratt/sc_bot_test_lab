@@ -31,6 +31,7 @@ BUILD_DICT = {
     "macro": AIBuild.Macro,
     "power": AIBuild.Power,
     "air": AIBuild.Air,
+    "randombuild": AIBuild.RandomBuild,
 }
 
 DIFFICULTY_DICT = {

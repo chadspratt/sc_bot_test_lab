@@ -243,6 +243,8 @@ class ReplayTest(models.Model):
     class Meta:
         db_table = 'replay_test'
 
+    OpponentType = models.TextChoices('OpponentType', 'BuiltInAI CustomBot')
+
     id = models.AutoField(primary_key=True)
     name = models.CharField(max_length=200)
     replay_file = models.CharField(
@@ -256,6 +258,39 @@ class ReplayTest(models.Model):
     duration = models.CharField(
         max_length=20,
         help_text="How long to run before the bot forfeits, e.g. '3:00'",
+    )
+    bot_player_id = models.IntegerField(
+        default=1,
+        help_text="Which player in the replay the test bot takes over (1 or 2)",
+    )
+    opponent_type = models.CharField(
+        max_length=12,
+        choices=OpponentType,
+        default='BuiltInAI',
+        help_text="Whether the opponent is a built-in AI or a custom bot",
+    )
+    opponent_race = models.CharField(
+        max_length=7,
+        choices=Match.Race,
+        default='Random',
+        help_text="Opponent race for built-in AI matches",
+    )
+    opponent_difficulty = models.CharField(
+        max_length=11,
+        choices=Match.Difficulty,
+        default='CheatInsane',
+        help_text="Opponent difficulty for built-in AI matches",
+    )
+    opponent_build = models.CharField(
+        max_length=15,
+        choices=Match.Build,
+        default='Macro',
+        help_text="Opponent build for built-in AI matches",
+    )
+    opponent_bot = models.ForeignKey(
+        CustomBot, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='replay_tests',
+        help_text="Custom bot to use as the opponent (when opponent_type is CustomBot)",
     )
     created_at = models.DateTimeField(auto_now_add=True)
 
