@@ -7,6 +7,7 @@ Environment variables:
   BOT_PLAYER_ID            - Which player in the replay BotTato replaces (1 or 2, default: 1)
   DIFFICULTY               - Computer opponent difficulty (default: CheatInsane)
   MATCH_ID                 - (optional) existing match row to update in DB
+  REPLAY_DURATION          - (optional) seconds after takeover before the bot forfeits
 """
 
 from __future__ import annotations
@@ -56,6 +57,10 @@ def main():
     takeover_time_seconds = takeover_game_loop / 22.4
     os.environ["REPLAY_TAKEOVER_TIME"] = str(takeover_time_seconds)
     logger.info(f"Set REPLAY_TAKEOVER_TIME={takeover_time_seconds:.1f}s")
+
+    replay_duration = os.environ.get("REPLAY_DURATION")
+    if replay_duration:
+        logger.info(f"REPLAY_DURATION={replay_duration}s (bot will forfeit after this)")
 
     output_replay_path = None
     if match_id:

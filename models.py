@@ -1,3 +1,5 @@
+import os
+
 from django.db import models
 
 
@@ -62,6 +64,10 @@ class CustomBot(models.Model):
         default='',
         help_text="Absolute path to the bot's git repository (for past version support)",
     )
+    enable_version_history = models.BooleanField(
+        default=False,
+        help_text="Enable past-version matches for this bot (requires git_repo_path)",
+    )
     symlink_mounts = models.JSONField(
         default=list,
         blank=True,
@@ -102,7 +108,34 @@ class TestSuite(models.Model):
         related_name='test_suites',
         help_text="Custom bots to include in this test suite",
     )
+    previous_versions = models.CharField(
+        max_length=100,
+        blank=True,
+        default='',
+        help_text=(
+            "Comma-separated version offsets for past-version matches. "
+            "E.g. '1,3' runs against the 1st and 3rd most recent previous commits."
+        ),
+    )
+    replay_tests = models.ManyToManyField(
+        'ReplayTest',
+        blank=True,
+        related_name='test_suites',
+        help_text="Replay tests to include in this test suite",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
+
+    @property
+    def previous_version_offsets(self) -> list[int]:
+        """Parse previous_versions string into a sorted list of positive ints."""
+        if not self.previous_versions:
+            return []
+        offsets = []
+        for part in self.previous_versions.split(','):
+            part = part.strip()
+            if part.isdigit() and int(part) >= 1:
+                offsets.append(int(part))
+        return sorted(set(offsets))
 
     def __str__(self):
         return self.name
@@ -167,6 +200,11 @@ class Match(models.Model):
         max_length=40, blank=True, default='',
         help_text="Git commit hash of the bot version used as opponent (past-version matches)"
     )
+    replay_test = models.ForeignKey(
+        'ReplayTest', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='matches',
+        help_text="The replay test that generated this match (auto-set by test suite runner)",
+    )
 
     # Non-database attributes (computed dynamically in views)
     is_best_time: bool = False
@@ -200,6 +238,34 @@ class Match(models.Model):
         if self.opponent_bot:
             return f"Group {self.test_group.id} - {self.map_name} vs {self.opponent_bot.name} ({self.result})"
         return f"Group {self.test_group.id} - {self.map_name} vs {self.opponent_race}-{self.opponent_build} ({self.result})"
+
+class ReplayTest(models.Model):
+    class Meta:
+        db_table = 'replay_test'
+
+    id = models.AutoField(primary_key=True)
+    name = models.CharField(max_length=200)
+    replay_file = models.CharField(
+        max_length=500,
+        help_text="Path to the .SC2Replay file on the host",
+    )
+    start_time = models.CharField(
+        max_length=20,
+        help_text="Game clock time to start from, e.g. '2:41'",
+    )
+    duration = models.CharField(
+        max_length=20,
+        help_text="How long to run before the bot forfeits, e.g. '3:00'",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    @property
+    def replay_filename(self) -> str:
+        return os.path.basename(self.replay_file)
+
+    def __str__(self):
+        return f"{self.name} ({self.start_time} +{self.duration})"
+
 
 class MatchEvent(models.Model):
     class Meta:

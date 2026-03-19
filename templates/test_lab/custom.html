@@ -1,0 +1,16 @@
+{% extends "test_lab/base.html" %}
+
+{% block title %}Custom - Test Lab{% endblock %}
+
+{% block content %}
+<h1>Custom</h1>
+
+<div class="utility-section">
+    <h3>Recompile Cython Extensions</h3>
+    <p>Runs <code>python setup.py build_ext --inplace</code> in the cython_extensions directory to rebuild all .pyx modules.</p>
+    <form method="post" action="{% url 'recompile_cython' %}">
+        {% csrf_token %}
+        <button type="submit" class="utility-btn">Recompile Cython</button>
+    </form>
+</div>
+{% endblock %}

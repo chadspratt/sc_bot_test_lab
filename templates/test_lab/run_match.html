@@ -1,0 +1,310 @@
+{% extends "test_lab/base.html" %}
+{% load time_filters %}
+
+{% block title %}Run Match - Test Lab{% endblock %}
+
+{% block extra_css %}
+.result-victory { color: #28a745; font-weight: bold; }
+.result-defeat { color: #dc3545; font-weight: bold; }
+.result-pending { color: #ffc107; font-weight: bold; }
+.result-crash { color: #dc3545; font-weight: bold; font-style: italic; }
+.action-link { margin-right: 8px; padding: 4px 10px; background-color: #17a2b8; color: white; text-decoration: none; border-radius: 3px; font-size: 13px; }
+.action-link:hover { background-color: #138496; }
+th { background-color: #343a40; color: white; }
+tr:nth-child(even) { background-color: #f2f2f2; }
+{% endblock %}
+
+{% block content %}
+<h1>Run Match</h1>
+
+<!-- Match type tabs (client-side) -->
+<div id="match-type-tabs">
+    <div class="tab-bar">
+        <a data-tab="vs-computer">Vs Computer</a>
+        <a data-tab="vs-custom-bot">Vs Custom Bot</a>
+        <a data-tab="vs-past-version">Vs Past Version</a>
+        <a data-tab="from-replay">From Replay</a>
+    </div>
+
+    <!-- Vs Computer -->
+    <div id="vs-computer" class="tab-panel">
+        <div class="utility-section">
+            <h3>Run Single Match vs Computer</h3>
+            <p>Launch a single match in Docker (not part of a test group).</p>
+            <form method="post" action="{% url 'run_single_match' %}" style="display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap;">
+                {% csrf_token %}
+                <div>
+                    <label for="difficulty">Difficulty:</label><br>
+                    <select name="difficulty" id="difficulty">
+                        <option value="Easy">Easy</option>
+                        <option value="Medium">Medium</option>
+                        <option value="MediumHard">MediumHard</option>
+                        <option value="Hard">Hard</option>
+                        <option value="Harder">Harder</option>
+                        <option value="VeryHard">VeryHard</option>
+                        <option value="CheatVision">CheatVision</option>
+                        <option value="CheatMoney">CheatMoney</option>
+                        <option value="CheatInsane" selected>CheatInsane</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="race">Race:</label><br>
+                    <select name="race" id="race">
+                        <option value="random">Random</option>
+                        <option value="protoss">Protoss</option>
+                        <option value="terran">Terran</option>
+                        <option value="zerg">Zerg</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="build">Build:</label><br>
+                    <select name="build" id="build">
+                        <option value="randombuild">Random</option>
+                        <option value="rush">Rush</option>
+                        <option value="timing">Timing</option>
+                        <option value="macro">Macro</option>
+                        <option value="power">Power</option>
+                        <option value="air">Air</option>
+                    </select>
+                </div>
+                <div>
+                    <button type="submit" class="utility-btn">Run Match</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Vs Custom Bot -->
+    <div id="vs-custom-bot" class="tab-panel">
+        <div class="utility-section">
+            <h3>Run Custom Bot Match</h3>
+            <p>Launch a test-subject bot vs a registered custom opponent bot. <a href="{% url 'config_page' %}#custom-bots">Manage custom bots</a></p>
+            <p style="font-size: 12px; color: #666;">
+                AI Arena bots use the <a href="https://github.com/aiarena/local-play-bootstrap" target="_blank">local-play-bootstrap</a>
+                infrastructure (supports any language). Standard/External bots use the legacy single-container runner (Python only).
+            </p>
+            {% if custom_bots %}
+            <form method="post" action="{% url 'run_custom_match' %}" style="display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap;">
+                {% csrf_token %}
+                {% if test_subject_bots %}
+                <div>
+                    <label for="test_bot_id_custom">Test Bot (Player 1):</label><br>
+                    <select name="test_bot_id" id="test_bot_id_custom">
+                        <option value="">BotTato (default)</option>
+                        {% for bot in test_subject_bots %}
+                        <option value="{{ bot.id }}">{{ bot.name }} ({{ bot.race }})</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                {% endif %}
+                <div>
+                    <label for="custom_bot_id">Opponent Bot:</label><br>
+                    <select name="custom_bot_id" id="custom_bot_id">
+                        {% for bot in custom_bots %}
+                        <option value="{{ bot.id }}">{{ bot.name }} ({{ bot.race }}{% if bot.is_aiarena %} - AI Arena{% endif %})</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <button type="submit" class="utility-btn">Run Custom Match</button>
+                </div>
+            </form>
+            {% else %}
+            <p><em>No custom bots registered. <a href="{% url 'config_page' %}#custom-bots">Register one first.</a></em></p>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Vs Past Version -->
+    <div id="vs-past-version" class="tab-panel">
+        <div class="utility-section">
+            <h3>Run vs Past Version</h3>
+            <p>Launch the current version of a test-subject bot against a previous version of itself from git history.
+               Both players use the current <code>python_sc2</code> — only bot code differs.</p>
+            {% if recent_commits %}
+            <form method="post" action="{% url 'run_past_version_match' %}" style="display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap;">
+                {% csrf_token %}
+                {% if test_subject_bots %}
+                <div>
+                    <label for="test_bot_id_version">Test Bot:</label><br>
+                    <select name="test_bot_id" id="test_bot_id_version">
+                        <option value="">BotTato (default)</option>
+                        {% for bot in test_subject_bots %}
+                        <option value="{{ bot.id }}">{{ bot.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                {% endif %}
+                <div>
+                    <label for="commit_hash">Past Version:</label><br>
+                    <select name="commit_hash" id="commit_hash" style="min-width: 400px;">
+                        {% for commit in recent_commits %}
+                        <option value="{{ commit.hash }}">
+                            {{ commit.short_hash }} — {{ commit.subject|truncatechars:60 }}
+                            ({{ commit.date|truncatechars:10 }}){% if commit.is_cached %} [cached]{% endif %}
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <button type="submit" class="utility-btn">Run vs Past Version</button>
+                </div>
+            </form>
+            <p style="margin-top: 8px; font-size: 12px; color: #666;">
+                The first run for a commit extracts and caches the bot source (~5 seconds).
+                Subsequent runs reuse the cache. HEAD is excluded (use mirror match instead).
+            </p>
+            {% else %}
+            <p><em>No previous commits found in the bot repo git history.</em></p>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- From Replay -->
+    <div id="from-replay" class="tab-panel">
+        <div class="utility-section">
+            <h3>Continue from Replay</h3>
+            <p>Upload a replay file and specify a time — BotTato takes over at that point and plays out the game vs a Computer opponent.</p>
+            <form method="post" action="{% url 'run_replay_match' %}" enctype="multipart/form-data" style="display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap;">
+                {% csrf_token %}
+                <div>
+                    <label for="replay_file">Replay File (.SC2Replay):</label><br>
+                    <input type="file" name="replay_file" id="replay_file" accept=".SC2Replay" required>
+                </div>
+                <div>
+                    <label for="takeover_time">Takeover Time (mm:ss or seconds):</label><br>
+                    <input type="text" name="takeover_time" id="takeover_time" placeholder="5:30" required style="width: 100px; padding: 4px;">
+                </div>
+                <div>
+                    <label for="replay_difficulty">Opponent Difficulty:</label><br>
+                    <select name="difficulty" id="replay_difficulty">
+                        <option value="Easy">Easy</option>
+                        <option value="Medium">Medium</option>
+                        <option value="MediumHard">MediumHard</option>
+                        <option value="Hard">Hard</option>
+                        <option value="Harder">Harder</option>
+                        <option value="VeryHard">VeryHard</option>
+                        <option value="CheatVision">CheatVision</option>
+                        <option value="CheatMoney">CheatMoney</option>
+                        <option value="CheatInsane" selected>CheatInsane</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="bot_player_id">BotTato takes over as:</label><br>
+                    <select name="bot_player_id" id="bot_player_id">
+                        <option value="1">Player 1</option>
+                        <option value="2">Player 2</option>
+                    </select>
+                </div>
+                <div>
+                    <button type="submit" class="utility-btn">Run Replay Match</button>
+                </div>
+            </form>
+            <p style="margin-top: 8px; font-size: 12px; color: #666;">
+                The game state (units, buildings, resources on the map) is reconstructed at the specified time.
+                Limitations: upgrades are not restored; the Computer opponent resets its build logic;
+                hallucinated units become real. BotTato will have no memory of pre-takeover observations.
+            </p>
+        </div>
+    </div>
+</div>
+
+<!-- Custom match results table -->
+<h2>Custom Match Results</h2>
+<p>Matches against custom opponent bots, past versions, or continued from a replay. Most recent 50 shown.</p>
+
+<div style="margin-bottom: 15px;">
+    <form method="get" action="" style="display: inline-block;">
+        <label for="test_bot_filter">Test Bot:</label>
+        <select name="test_bot" id="test_bot_filter" onchange="this.form.submit()">
+            <option value="">All</option>
+            <option value="bottato" {% if selected_test_bot == 'bottato' %}selected{% endif %}>BotTato (legacy)</option>
+            {% for bot in test_subject_bots %}
+            <option value="{{ bot.id }}" {% if selected_test_bot == bot.id|stringformat:"d" %}selected{% endif %}>{{ bot.name }}</option>
+            {% endfor %}
+        </select>
+        <noscript><input type="submit" value="Filter"></noscript>
+    </form>
+</div>
+
+{% if matches %}
+<table>
+    <thead>
+        <tr>
+            <th>Match #</th>
+            <th>Type</th>
+            <th>Test Bot</th>
+            <th>Opponent</th>
+            <th>Race</th>
+            <th>Map</th>
+            <th>Result</th>
+            <th>Duration</th>
+            <th>Started</th>
+            <th>Replay / Log</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for match in matches %}
+        <tr>
+            <td>{{ match.id }}</td>
+            <td>
+                {% if match.opponent_commit_hash %}Past Version
+                {% elif match.opponent_bot %}Custom Bot
+                {% else %}Replay
+                {% endif %}
+            </td>
+            <td>{{ match.test_bot_name }}</td>
+            <td>
+                {% if match.opponent_commit_hash %}{{ match.test_bot_name }}@{{ match.opponent_short_hash }}
+                {% elif match.opponent_bot %}{{ match.opponent_bot.name }}
+                {% else %}-
+                {% endif %}
+            </td>
+            <td>{{ match.opponent_race }}</td>
+            <td>{{ match.map_name }}</td>
+            <td class="
+                {% if match.result == 'Victory' %}result-victory
+                {% elif match.result == 'Defeat' %}result-defeat
+                {% elif match.result == 'Pending' %}result-pending
+                {% elif match.result == 'Crash' %}result-crash
+                {% endif %}
+            ">{{ match.result }}</td>
+            <td>
+                {% if match.duration_in_game_time %}
+                    {{ match.duration_in_game_time }}s
+                {% else %}
+                    -
+                {% endif %}
+            </td>
+            <td>{{ match.start_timestamp|date:"Y-m-d H:i" }}</td>
+            <td>
+                {% if match.result != 'Pending' %}
+                    <a class="action-link" href="{% url 'serve_replay' match.id %}" title="Open replay in SC2">Replay</a>
+                    <a class="action-link" href="{% url 'serve_log' match.id %}" target="_blank" title="View docker log">Log</a>
+                    {% if match.opponent_commit_hash %}
+                        <a class="action-link" href="{% url 'serve_aiarena_bot_log' match.id match.test_bot_directory %}" target="_blank" title="{{ match.test_bot_name }} stderr">{{ match.test_bot_name }}</a>
+                        <a class="action-link" href="{% url 'serve_aiarena_bot_log' match.id match.opponent_version_bot_name %}" target="_blank" title="Past version stderr">Past Ver</a>
+                    {% elif match.opponent_bot and match.opponent_bot.is_aiarena %}
+                        <a class="action-link" href="{% url 'serve_aiarena_bot_log' match.id match.test_bot_directory %}" target="_blank" title="{{ match.test_bot_name }} stderr">{{ match.test_bot_name }}</a>
+                        {% if match.opponent_bot.bot_directory == match.test_bot_directory %}
+                            <a class="action-link" href="{% url 'serve_aiarena_bot_log' match.id match.test_bot_directory|add:'_p2' %}" target="_blank" title="Mirror stderr">{{ match.test_bot_name }}_p2</a>
+                        {% else %}
+                            <a class="action-link" href="{% url 'serve_aiarena_bot_log' match.id match.opponent_bot.bot_directory %}" target="_blank" title="{{ match.opponent_bot.name }} stderr">{{ match.opponent_bot.name }}</a>
+                        {% endif %}
+                    {% endif %}
+                {% else %}
+                    <em>In progress...</em>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p><em>No custom bot matches yet. Use the forms above to run one.</em></p>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>initTabs('match-type-tabs');</script>
+{% endblock %}

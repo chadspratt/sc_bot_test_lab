@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>{% block title %}Test Lab{% endblock %}</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+
+        /* Top-level navigation */
+        .top-nav { margin: 0 0 20px; display: flex; gap: 10px; }
+        .top-nav a {
+            padding: 10px 20px;
+            background-color: #6c757d;
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            font-size: 15px;
+        }
+        .top-nav a:hover { background-color: #5a6268; }
+        .top-nav a.active { background-color: #007bff; font-weight: bold; }
+
+        /* Flash messages */
+        .messages { margin: 10px 0; }
+        .success { color: green; padding: 10px; background-color: #d4edda; border: 1px solid #c3e6cb; margin-bottom: 10px; }
+        .error { color: red; padding: 10px; background-color: #f8d7da; border: 1px solid #f5c6cb; margin-bottom: 10px; white-space: pre-wrap; }
+        .info { color: #0c5460; padding: 10px; background-color: #d1ecf1; border: 1px solid #bee5eb; margin-bottom: 10px; }
+
+        /* Tab bar (reusable) */
+        .tab-bar { display: flex; gap: 0; border-bottom: 2px solid #dee2e6; margin-bottom: 15px; }
+        .tab-bar a {
+            padding: 10px 20px;
+            text-decoration: none;
+            color: #495057;
+            border: 1px solid transparent;
+            border-bottom: none;
+            border-radius: 5px 5px 0 0;
+            margin-bottom: -2px;
+            background-color: #e9ecef;
+            cursor: pointer;
+        }
+        .tab-bar a:hover { background-color: #dee2e6; }
+        .tab-bar a.active {
+            background-color: white;
+            border-color: #dee2e6;
+            border-bottom-color: white;
+            color: #212529;
+            font-weight: bold;
+        }
+        .tab-panel { display: none; }
+        .tab-panel.active { display: block; }
+
+        /* Common table styles */
+        table { border-collapse: collapse; width: 100%; margin-top: 10px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: center; }
+        th { background-color: #f2f2f2; font-weight: bold; }
+
+        /* Common buttons */
+        .utility-btn { background-color: #28a745; color: white; padding: 10px 20px; border: none; cursor: pointer; font-size: 14px; border-radius: 5px; }
+        .utility-btn:hover { background-color: #218838; }
+        .trigger-btn { background-color: #007bff; color: white; padding: 10px 20px; border: none; cursor: pointer; font-size: 16px; }
+        .trigger-btn:hover { background-color: #0056b3; }
+        .btn { padding: 8px 16px; border: none; cursor: pointer; font-size: 14px; border-radius: 5px; color: white; }
+        .btn-primary { background-color: #28a745; }
+        .btn-primary:hover { background-color: #218838; }
+        .btn-danger { background-color: #dc3545; color: white; border: none; padding: 4px 8px; border-radius: 3px; cursor: pointer; font-size: 12px; }
+        .btn-danger:hover { background-color: #c82333; }
+
+        /* Sections */
+        .utility-section { margin: 20px 0; padding: 20px; border: 1px solid #ddd; border-radius: 5px; background-color: #f8f9fa; }
+        .utility-section h3 { margin-top: 0; }
+        .form-group { margin-bottom: 12px; }
+        .form-group label { display: block; margin-bottom: 4px; font-weight: bold; }
+        .form-group input, .form-group select, .form-group textarea {
+            width: 100%; max-width: 400px; padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px;
+        }
+        .form-group textarea { height: 60px; resize: vertical; }
+
+        {% block extra_css %}{% endblock %}
+    </style>
+</head>
+<body>
+    <div class="top-nav">
+        <a href="{% url 'results' %}" {% if active_page == 'results' %}class="active"{% endif %}>Results</a>
+        <a href="{% url 'run_match' %}" {% if active_page == 'run_match' %}class="active"{% endif %}>Run Match</a>
+        <a href="{% url 'config_page' %}" {% if active_page == 'config' %}class="active"{% endif %}>Config</a>
+        <a href="{% url 'custom_page' %}" {% if active_page == 'custom' %}class="active"{% endif %}>Custom</a>
+    </div>
+
+    {% if messages %}
+    <div class="messages">
+        {% for message in messages %}
+        <div class="{{ message.tags }}">{{ message }}</div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    {% block content %}{% endblock %}
+
+    <script>
+    function initTabs(containerId) {
+        var container = document.getElementById(containerId);
+        if (!container) return;
+        var tabs = container.querySelectorAll('.tab-bar a');
+        var panels = container.querySelectorAll('.tab-panel');
+
+        tabs.forEach(function(tab) {
+            tab.addEventListener('click', function(e) {
+                e.preventDefault();
+                var target = tab.getAttribute('data-tab');
+                tabs.forEach(function(t) { t.classList.remove('active'); });
+                panels.forEach(function(p) { p.classList.remove('active'); });
+                tab.classList.add('active');
+                var panel = document.getElementById(target);
+                if (panel) panel.classList.add('active');
+                history.replaceState(null, '', '#' + target);
+            });
+        });
+
+        var hash = window.location.hash.substring(1);
+        var activeTab = hash ? container.querySelector('.tab-bar a[data-tab="' + hash + '"]') : null;
+        if (!activeTab) activeTab = tabs[0];
+        if (activeTab) activeTab.click();
+    }
+    </script>
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

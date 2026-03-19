@@ -1,4 +1,5 @@
 import glob
+import logging
 import os
 import subprocess
 from collections import defaultdict
@@ -13,18 +14,29 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
 from . import aiarena_runner, bot_versions
-from .models import CustomBot, Match, MatchEvent, TestGroup, TestSuite
+from .models import CustomBot, Match, MatchEvent, ReplayTest, TestGroup, TestSuite
+
+logger = logging.getLogger('test_lab')
 
 
-def match_list(request):
-    """View to display match data grouped by test_group_id in a pivot table."""
+def _get_match_list_context(request):
+    """Return context dict for the Test Groups tab."""
+    # Recover any stale pending matches whose docker process has finished
+    # but whose monitoring thread was killed (e.g. by a dev-server reload).
+    try:
+        recovered = aiarena_runner.check_stale_pending_matches()
+        if recovered:
+            logger.info('Recovered %d stale match(es): %s', len(recovered), recovered)
+    except Exception:
+        logger.exception('Error checking stale pending matches')
+
     # Get filters from request
     selected_difficulty = request.GET.get('difficulty', '')
     selected_limit = request.GET.get('limit', '')
     selected_test_bot = request.GET.get('test_bot', '')
     selected_test_suite = request.GET.get('test_suite', '')
 
-    matches = Match.objects.select_related('opponent_bot', 'test_group').exclude(test_group_id=-1)
+    matches = Match.objects.select_related('opponent_bot', 'test_group', 'test_bot', 'replay_test').exclude(test_group_id=-1)
 
     # Apply test bot filter
     if selected_test_bot and selected_test_bot.isdigit():
@@ -34,11 +46,14 @@ def match_list(request):
     if selected_test_suite and selected_test_suite.isdigit():
         matches = matches.filter(test_group__test_suite_id=int(selected_test_suite))
 
-    # Difficulty filter applies only to computer opponents; custom-bot matches
-    # are always included (they run regardless of difficulty).
+    # Difficulty filter applies only to computer opponents; custom-bot and
+    # past-version matches are always included (they run regardless of difficulty).
     if selected_difficulty:
         matches = matches.filter(
-            Q(opponent_difficulty=selected_difficulty) | Q(opponent_bot__isnull=False)
+            Q(opponent_difficulty=selected_difficulty)
+            | Q(opponent_bot__isnull=False)
+            | ~Q(opponent_commit_hash='')
+            | Q(replay_test__isnull=False)
         )
 
     # Apply test group limit if selected — only include matches from the N most recent test groups
@@ -57,6 +72,9 @@ def match_list(request):
     grouped_matches: dict[int, dict[str, Match]] = defaultdict(dict)
     race_groups: dict[str, list[str]] = defaultdict(list)  # race -> builds
     custom_bot_opponents: dict[int, CustomBot] = {}  # bot_id -> CustomBot
+    version_opponents: dict[str, str] = {}  # short_hash -> opponent_key
+    version_ordering: dict[str, tuple[int, int]] = {}  # short_hash -> (max_test_group_id, match_id)
+    replay_test_opponents: dict[int, str] = {}  # replay_test_id -> name
 
     # Track win/loss counts for each opponent column
     opponent_stats: dict[str, dict] = defaultdict(lambda: {'victories': 0, 'total_games': 0})
@@ -67,7 +85,22 @@ def match_list(request):
 
     for match in matches:
         opp_bot = match.opponent_bot
-        if opp_bot is not None:
+        if match.replay_test_id:
+            # Replay test match — key by replay test id
+            opponent_key = f"replay_{match.replay_test_id}"
+            replay_test_opponents[match.replay_test_id] = match.replay_test.name
+        elif match.opponent_commit_hash:
+            # Past-version opponent — key by short hash
+            short_hash = match.opponent_commit_hash[:7]
+            opponent_key = f"version_{short_hash}"
+            version_opponents[short_hash] = opponent_key
+            # Track ordering: prefer highest test_group_id, then lowest match_id
+            # (lower offset = more recent commit = created first in a group)
+            group_id = match.test_group_id
+            prev = version_ordering.get(short_hash)
+            if prev is None or group_id > prev[0] or (group_id == prev[0] and match.id < prev[1]):
+                version_ordering[short_hash] = (group_id, match.id)
+        elif opp_bot is not None:
             # Custom bot opponent — key by bot id
             opponent_key = f"bot_{opp_bot.id}"
             custom_bot_opponents[opp_bot.id] = opp_bot
@@ -133,6 +166,43 @@ def match_list(request):
             'builds': list(custom_bot_names),
         })
 
+    # 3) Past-version opponents (appended after custom bot columns)
+    #    Sort by most recent version first: highest test_group_id, then
+    #    lowest match_id within that group (lower offset = more recent commit).
+    version_keys: list[str] = []
+    version_labels: list[str] = []
+    for short_hash in sorted(
+        version_opponents.keys(),
+        key=lambda h: (-version_ordering[h][0], version_ordering[h][1]),
+    ):
+        key = version_opponents[short_hash]
+        version_keys.append(key)
+        version_labels.append(short_hash)
+        sorted_opponents.append(key)
+
+    if version_keys:
+        header_structure.append({
+            'name': 'Past Versions',
+            'span': len(version_keys),
+            'builds': list(version_labels),
+        })
+
+    # 4) Replay test opponents (appended after past-version columns)
+    replay_test_keys: list[str] = []
+    replay_test_labels: list[str] = []
+    for rt_id in sorted(replay_test_opponents.keys()):
+        key = f"replay_{rt_id}"
+        replay_test_keys.append(key)
+        replay_test_labels.append(replay_test_opponents[rt_id])
+        sorted_opponents.append(key)
+
+    if replay_test_keys:
+        header_structure.append({
+            'name': 'Replay Tests',
+            'span': len(replay_test_keys),
+            'builds': list(replay_test_labels),
+        })
+
     # ------------------------------------------------------------------
     # Compute per-race (and custom-bots group) win-rate labels
     # ------------------------------------------------------------------
@@ -144,6 +214,17 @@ def match_list(request):
         if race_name == 'Custom Bots':
             # Aggregate across all custom bot columns
             for key in custom_bot_keys:
+                stats = opponent_stats[key]
+                race_total_games += stats['total_games']
+                race_victories += stats['victories']
+        elif race_name == 'Past Versions':
+            # Aggregate across all past-version columns
+            for key in version_keys:
+                stats = opponent_stats[key]
+                race_total_games += stats['total_games']
+                race_victories += stats['victories']
+        elif race_name == 'Replay Tests':
+            for key in replay_test_keys:
                 stats = opponent_stats[key]
                 race_total_games += stats['total_games']
                 race_victories += stats['victories']
@@ -167,6 +248,22 @@ def match_list(request):
                     race_group['builds'][i] = f"{custom_bot_names[i]} {pct:.0f}%"
                 else:
                     race_group['builds'][i] = f"{custom_bot_names[i]} -"
+        elif race_name == 'Past Versions':
+            for i, key in enumerate(version_keys):
+                s = opponent_stats[key]
+                if s['total_games'] > 0:
+                    pct = (s['victories'] / s['total_games']) * 100
+                    race_group['builds'][i] = f"{version_labels[i]} {pct:.0f}%"
+                else:
+                    race_group['builds'][i] = f"{version_labels[i]} -"
+        elif race_name == 'Replay Tests':
+            for i, key in enumerate(replay_test_keys):
+                s = opponent_stats[key]
+                if s['total_games'] > 0:
+                    pct = (s['victories'] / s['total_games']) * 100
+                    race_group['builds'][i] = f"{replay_test_labels[i]} {pct:.0f}%"
+                else:
+                    race_group['builds'][i] = f"{replay_test_labels[i]} -"
         else:
             raw_builds = sorted(race_build_map.get(race_name, set()))
             for i, build in enumerate(raw_builds):
@@ -186,12 +283,15 @@ def match_list(request):
 
     pivot_data = []
     for group_id in sorted_groups:
-        row = {'test_group_id': group_id, 'results': [], 'difficulty': None}
+        row = {'test_group_id': group_id, 'results': [], 'difficulty': None, 'test_bot_name': ''}
 
-        # Get difficulty from first computer match in this group
+        # Get difficulty and test bot from first match in this group
         for m in grouped_matches[group_id].values():
+            if not row['test_bot_name'] and m.test_bot:
+                row['test_bot_name'] = m.test_bot.name
             if m.opponent_difficulty:
                 row['difficulty'] = m.opponent_difficulty
+            if row['test_bot_name'] and row['difficulty']:
                 break
 
         group_victories = 0
@@ -240,7 +340,7 @@ def match_list(request):
     # ------------------------------------------------------------------
     test_subject_bots = CustomBot.objects.all().order_by('name')
     test_suites = TestSuite.objects.all().order_by('name')
-    return render(request, 'test_lab/match_list.html', {
+    return {
         'pivot_data': pivot_data,
         'opponents': sorted_opponents,
         'header_structure': header_structure,
@@ -251,7 +351,7 @@ def match_list(request):
         'test_groups': test_groups,
         'test_subject_bots': test_subject_bots,
         'test_suites': test_suites,
-    })
+    }
 
 def get_next_test_group_id() -> int:
     """Get the next test group ID by incrementing the highest completed test group ID."""
@@ -339,7 +439,8 @@ def start_custom_bot_match(
     log_file = os.path.join(LOGS_DIR, f"{match_id}_vs_{custom_bot.name}.log")
 
     command = [
-        'docker', 'compose', 'run', '--rm',
+        'docker', 'compose', '-p', f'match_{match_id}',
+        'run', '--rm', '--no-deps',
         '-e', f'OPPONENT_FILE={custom_bot.bot_file}',
         '-e', f'OPPONENT_CLASS={custom_bot.bot_class_name}',
         '-e', f'OPPONENT_RACE={custom_bot.race.lower()}',
@@ -411,7 +512,8 @@ def start_test_suite(
                 match_id = create_pending_match(test_group_id, race, build, difficulty, test_bot=test_bot)
                 log_file = os.path.join(LOGS_DIR, f"{match_id}_{race}_{build}.log")
                 command = [
-                    'docker', 'compose', 'run', '--rm',
+                    'docker', 'compose', '-p', f'match_{match_id}',
+                    'run', '--rm', '--no-deps',
                     '-e', f'RACE={race}',
                     '-e', f'BUILD={build}',
                     '-e', f'MATCH_ID={match_id}',
@@ -439,6 +541,112 @@ def start_test_suite(
         except Exception:
             # Don't let a single custom-bot failure abort the whole suite
             pass
+
+    # --- Past-version matches ---
+    version_offsets = test_suite.previous_version_offsets if test_suite else []
+    if version_offsets and test_bot:
+        max_offset = max(version_offsets)
+        repo_path = test_bot.git_repo_path or None
+        commits = bot_versions.get_recent_bot_commits(
+            count=max_offset, repo_path=repo_path,
+        )
+        test_race = test_bot.race if test_bot else 'Terran'
+        for offset in version_offsets:
+            # offsets are 1-based: offset 1 = commits[0] (HEAD~1)
+            idx = offset - 1
+            if idx < len(commits):
+                commit = commits[idx]
+                try:
+                    match = Match(
+                        test_group_id=test_group_id,
+                        start_timestamp=datetime.now(),
+                        map_name='TBD',
+                        opponent_race=test_race,
+                        opponent_difficulty='',
+                        opponent_build='',
+                        result='Pending',
+                        opponent_commit_hash=commit.hash,
+                        test_bot=test_bot,
+                    )
+                    match.save()
+                    aiarena_runner.start_past_version_match(
+                        match, commit.hash, commit.short_hash, test_bot=test_bot,
+                    )
+                    count += 1
+                except Exception as e:
+                    logging.getLogger('test_lab').exception(
+                        'Failed to start past-version match for offset %d (commit %s): %s',
+                        offset, commit.short_hash, e,
+                    )
+
+    # --- Replay test matches ---
+    replay_test_list = list(test_suite.replay_tests.all()) if test_suite else []
+    for replay_test in replay_test_list:
+        try:
+            game_loop = _parse_game_time(replay_test.start_time)
+            if game_loop is None or game_loop <= 0:
+                logging.getLogger('test_lab').warning(
+                    'Skipping replay test "%s": invalid start_time "%s"',
+                    replay_test.name, replay_test.start_time,
+                )
+                continue
+
+            match = Match(
+                test_group_id=test_group_id,
+                start_timestamp=datetime.now(),
+                map_name='TBD (from replay)',
+                opponent_race='',
+                opponent_difficulty=difficulty,
+                opponent_build='',
+                result='Pending',
+                replay_takeover_game_loop=game_loop,
+                test_bot=test_bot,
+                replay_test=replay_test,
+            )
+            match.save()
+            match_id = match.id
+
+            # Copy the replay file into the shared replays/logs directory
+            replay_filename = f'{match_id}_source.SC2Replay'
+            replay_dest = os.path.join(LOGS_DIR, replay_filename)
+            if replay_test.replay_file != replay_dest:
+                import shutil as _shutil
+                _shutil.copy2(replay_test.replay_file, replay_dest)
+
+            container_replay_path = f'/root/replays/{replay_filename}'
+            match.replay_file = container_replay_path
+            match.save()
+
+            log_file = os.path.join(LOGS_DIR, f'{match_id}_replay_test.log')
+
+            command = [
+                'docker', 'compose', '-p', f'match_{match_id}',
+                'run', '--rm', '--no-deps',
+                '-e', f'REPLAY_PATH={container_replay_path}',
+                '-e', f'TAKEOVER_GAME_LOOP={game_loop}',
+                '-e', 'BOT_PLAYER_ID=1',
+                '-e', f'DIFFICULTY={difficulty}',
+                '-e', f'MATCH_ID={match_id}',
+            ]
+
+            duration_loops = _parse_game_time(replay_test.duration)
+            if duration_loops and duration_loops > 0:
+                duration_seconds = duration_loops / 22.4
+                command += ['-e', f'REPLAY_DURATION={duration_seconds:.1f}']
+
+            command += [
+                'bot',
+                'bash', '/root/runner/run_docker_continue_replay.sh',
+            ]
+
+            with open(log_file, 'w') as log:
+                subprocess.Popen(command, cwd=DOCKER_COMPOSE_PATH, stdout=log, stderr=log)
+            count += 1
+        except Exception as e:
+            logging.getLogger('test_lab').exception(
+                'Failed to start replay test match for "%s": %s',
+                replay_test.name, e,
+            )
 
     return test_group_id, count
 
@@ -477,13 +685,13 @@ def trigger_tests(request):
             messages.error(request, f'Failed to start test suite: {str(e)}')
 
     # Redirect back preserving filter state
-    params = []
+    params = ['tab=test-groups']
     for key in ('test_bot', 'difficulty', 'limit', 'test_suite'):
         val = request.POST.get(key, '')
         if val:
             params.append(f'{key}={val}')
-    qs = '?' + '&'.join(params) if params else ''
-    return redirect(f"{reverse('match_list')}{qs}")
+    qs = '?' + '&'.join(params)
+    return redirect(f"{reverse('results')}{qs}")
 
 
 @csrf_exempt
@@ -614,15 +822,22 @@ def serve_log(request, match_id):
     return FileResponse(open(file_path, 'rb'), content_type='text/plain')
 
 def serve_aiarena_bot_log(request, match_id, bot_name):
-    """Serve a bot's stderr log from an aiarena match."""
+    """Serve a bot's stderr log from an aiarena match.
+
+    Falls back to the docker compose output log when the bot-specific
+    stderr log is not available (e.g. match never ran or is still running).
+    """
     from django.http import FileResponse
     log_path = aiarena_runner.get_bot_log_path(match_id, bot_name)
     if not log_path:
-        raise Http404(f"Bot log not found for {bot_name} in match {match_id}")
+        # Fall back to compose output log
+        log_path = aiarena_runner.get_match_log_path(match_id)
+    if not log_path:
+        raise Http404(f"No log found for match {match_id}")
     return FileResponse(open(log_path, 'rb'), content_type='text/plain')
 
-def map_breakdown(request):
-    """View to display match data grouped by map in a pivot table."""
+def _get_map_breakdown_context(request):
+    """Return context dict for the Maps tab."""
     # Define difficulty order to match the filter dropdown
     difficulty_order = [
         'Easy', 'Medium', 'MediumHard', 'Hard', 'Harder', 'VeryHard',
@@ -832,16 +1047,16 @@ def map_breakdown(request):
     for difficulty_group in header_structure:
         difficulty_group['win_rate'] = difficulty_win_rates.get(difficulty_group['difficulty'], "-")
     
-    return render(request, 'test_lab/map_breakdown.html', {
+    return {
         'pivot_data': pivot_data,
         'opponents': sorted_opponents,
         'header_structure': header_structure,
         'selected_difficulty': selected_difficulty,
         'selected_limit': selected_limit
-    })
+    }
 
 
-def building_timing(request):
+def _get_building_timing_context():
     """View to display earliest building construction times per test group."""
     from collections import defaultdict
 
@@ -949,81 +1164,164 @@ def building_timing(request):
         pivot_data.append(row)
     
     
-    return render(request, 'test_lab/building_timing.html', {
+    return {
         'pivot_data': pivot_data,
         'building_types': sorted_building_types,
         'avg_timings': avg_timings,
-    })
+    }
 
 
-def utilities(request):
-    """Page for triggering various utility actions."""
+def results_page(request):
+    """Combined Results page with tabs for Test Groups, Maps, Building Timing."""
+    active_tab = request.GET.get('tab', 'test-groups')
+
+    context = {
+        'active_page': 'results',
+        'active_tab': active_tab,
+    }
+
+    if active_tab == 'maps':
+        context.update(_get_map_breakdown_context(request))
+    elif active_tab == 'building-timing':
+        context.update(_get_building_timing_context())
+    else:
+        active_tab = 'test-groups'
+        context['active_tab'] = active_tab
+        context.update(_get_match_list_context(request))
+
+    # Build filter query string for tab links (preserves filters across tabs)
+    filter_params = []
+    for key in ('difficulty', 'limit', 'test_bot', 'test_suite'):
+        val = request.GET.get(key, '')
+        if val:
+            filter_params.append(f'{key}={val}')
+    context['filter_qs'] = '&' + '&'.join(filter_params) if filter_params else ''
+
+    return render(request, 'test_lab/results.html', context)
+
+
+def run_match_page(request):
+    """Run Match page with match type tabs and custom match results table."""
     custom_bots_list = CustomBot.objects.all().order_by('name')
     test_subject_bots = CustomBot.objects.all().order_by('name')
 
-    # Collect recent commits for each test-subject bot that has a git repo,
-    # plus the default BotTato repo.
+    # Collect recent commits for each test-subject bot that has a git repo
     recent_commits_by_bot: dict[int | None, list] = {
-        None: bot_versions.get_recent_bot_commits(count=5),  # legacy BotTato
+        None: bot_versions.get_recent_bot_commits(count=5),
     }
     for bot in test_subject_bots:
         if bot.git_repo_path:
             recent_commits_by_bot[bot.id] = bot_versions.get_recent_bot_commits(
-                count=5, repo_path=bot.git_repo_path
+                count=5, repo_path=bot.git_repo_path,
             )
-
-    # Flatten for the default (backwards-compat) template variable
     recent_commits = recent_commits_by_bot.get(None, [])
 
-    return render(request, 'test_lab/utilities.html', {
+    # Custom match list data
+    matches = (
+        Match.objects
+        .filter(
+            Q(opponent_bot__isnull=False)
+            | Q(replay_file__gt='')
+            | Q(opponent_commit_hash__gt='')
+        )
+        .select_related('opponent_bot', 'test_bot')
+        .order_by('-start_timestamp')[:50]
+    )
+
+    selected_test_bot = request.GET.get('test_bot', '')
+    if selected_test_bot:
+        if selected_test_bot == 'bottato':
+            matches = matches.filter(test_bot__isnull=True)
+        elif selected_test_bot.isdigit():
+            matches = matches.filter(test_bot_id=int(selected_test_bot))
+
+    return render(request, 'test_lab/run_match.html', {
+        'active_page': 'run_match',
         'custom_bots': custom_bots_list,
         'test_subject_bots': test_subject_bots,
         'recent_commits': recent_commits,
         'recent_commits_by_bot': recent_commits_by_bot,
-        'test_suites': TestSuite.objects.prefetch_related('custom_bots').order_by('name'),
+        'matches': matches,
+        'selected_test_bot': selected_test_bot,
     })
+
+
+def config_page(request):
+    """Config page with Custom Bots and Test Suites tabs."""
+    bots = CustomBot.objects.all().order_by('-created_at')
+    aiarena_bots = aiarena_runner.get_available_aiarena_bots()
+    custom_bots_list = CustomBot.objects.all().order_by('name')
+    test_suites = TestSuite.objects.prefetch_related('custom_bots', 'replay_tests').order_by('name')
+    replay_tests_list = ReplayTest.objects.prefetch_related('test_suites').order_by('-created_at')
+    all_replay_tests = ReplayTest.objects.order_by('name')
+
+    return render(request, 'test_lab/config.html', {
+        'active_page': 'config',
+        'bots': bots,
+        'aiarena_bots': aiarena_bots,
+        'custom_bots': custom_bots_list,
+        'test_suites': test_suites,
+        'replay_tests': replay_tests_list,
+        'all_replay_tests': all_replay_tests,
+    })
+
+
+def custom_page(request):
+    """Custom page with Recompile Cython."""
+    return render(request, 'test_lab/custom.html', {
+        'active_page': 'custom',
+    })
+
+
 
 
 @require_POST
 def create_test_suite(request):
     """Create a new test suite from form data."""
+    config_url = f"{reverse('config_page')}#test-suites"
     name = request.POST.get('name', '').strip()
     if not name:
         messages.error(request, 'Test suite name is required.')
-        return redirect('utilities')
+        return redirect(config_url)
 
     if TestSuite.objects.filter(name=name).exists():
         messages.error(request, f'A test suite named "{name}" already exists.')
-        return redirect('utilities')
+        return redirect(config_url)
 
     include_blizzard_ai = request.POST.get('include_blizzard_ai') == 'on'
     selected_bot_ids = request.POST.getlist('custom_bot_ids')
+    selected_replay_test_ids = request.POST.getlist('replay_test_ids')
+    previous_versions = request.POST.get('previous_versions', '').strip()
 
     suite = TestSuite.objects.create(
         name=name,
         include_blizzard_ai=include_blizzard_ai,
+        previous_versions=previous_versions,
     )
     if selected_bot_ids:
         suite.custom_bots.set(selected_bot_ids)
+    if selected_replay_test_ids:
+        suite.replay_tests.set(selected_replay_test_ids)
 
     messages.success(request, f'Test suite "{name}" created.')
-    return redirect('utilities')
+    return redirect(config_url)
 
 
 @require_POST
 def delete_test_suite(request, suite_id):
     """Delete a test suite. The default 'All' suite cannot be deleted."""
+    config_url = f"{reverse('config_page')}#test-suites"
     try:
         suite = TestSuite.objects.get(id=suite_id)
         if suite.name == 'All':
             messages.error(request, 'Cannot delete the default "All" test suite.')
-            return redirect('utilities')
+            return redirect(config_url)
         suite_name = suite.name
         suite.delete()
         messages.success(request, f'Test suite "{suite_name}" deleted.')
     except TestSuite.DoesNotExist:
         messages.error(request, 'Test suite not found.')
-    return redirect('utilities')
+    return redirect(config_url)
 
 
 def recompile_cython(request):
@@ -1036,7 +1334,7 @@ def recompile_cython(request):
 
         if not os.path.exists(setup_py):
             messages.error(request, f'setup.py not found at: {setup_py}')
-            return redirect('utilities')
+            return redirect('custom_page')
 
         try:
             result = subprocess.run(
@@ -1055,7 +1353,7 @@ def recompile_cython(request):
         except Exception as e:
             messages.error(request, f'Failed to recompile Cython extensions: {str(e)}')
 
-    return redirect('utilities')
+    return redirect('custom_page')
 
 
 def run_single_match(request):
@@ -1076,7 +1374,8 @@ def run_single_match(request):
             log_file = os.path.join(logs_dir, f"{match_id}_{race}_{build}.log")
 
             command = [
-                'docker', 'compose', 'run', '--rm',
+                'docker', 'compose', '-p', f'match_{match_id}',
+                'run', '--rm', '--no-deps',
                 '-e', f'RACE={race}',
                 '-e', f'BUILD={build}',
                 '-e', f'DIFFICULTY={difficulty}',
@@ -1094,7 +1393,7 @@ def run_single_match(request):
         except Exception as e:
             messages.error(request, f'Failed to start match: {str(e)}')
 
-    return redirect('utilities')
+    return redirect('run_match')
 
 
 def position_is_between(request):
@@ -1115,19 +1414,12 @@ def position_is_between(request):
 RUNNER_DIR = os.path.normpath(os.path.join(os.path.dirname(__file__), 'runner'))
 
 
-def custom_bots(request):
-    """List all registered custom bots and available AI Arena bot directories."""
-    bots = CustomBot.objects.all().order_by('-created_at')
-    aiarena_bots = aiarena_runner.get_available_aiarena_bots()
-    return render(request, 'test_lab/custom_bots.html', {
-        'bots': bots,
-        'aiarena_bots': aiarena_bots,
-    })
 
 
 @require_POST
 def create_custom_bot(request):
     """Register a new AI Arena bot from form data."""
+    config_bots_url = f"{reverse('config_page')}#custom-bots"
     name = request.POST.get('name', '').strip()
     race = request.POST.get('race', 'Random')
     description = request.POST.get('description', '').strip()
@@ -1136,28 +1428,29 @@ def create_custom_bot(request):
     is_test_subject = request.POST.get('is_test_subject') == 'on'
     source_path = request.POST.get('source_path', '').strip()
     git_repo_path = request.POST.get('git_repo_path', '').strip()
+    enable_version_history = request.POST.get('enable_version_history') == 'on'
     dockerfile = request.POST.get('dockerfile', '').strip()
 
     if not name:
         messages.error(request, 'Bot name is required.')
-        return redirect('custom_bots')
+        return redirect(config_bots_url)
 
     if not bot_directory:
         messages.error(request, 'Bot directory is required.')
-        return redirect('custom_bots')
+        return redirect(config_bots_url)
 
     error = aiarena_runner.validate_bot_directory(bot_directory)
     if error:
         messages.error(request, error)
-        return redirect('custom_bots')
+        return redirect(config_bots_url)
 
     if is_test_subject and not source_path:
         messages.error(request, 'Source path is required for test subject bots.')
-        return redirect('custom_bots')
+        return redirect(config_bots_url)
 
     if is_test_subject and source_path and not os.path.isdir(source_path):
         messages.error(request, f'Source path not found: {source_path}')
-        return redirect('custom_bots')
+        return redirect(config_bots_url)
 
     # Auto-detect symlinks/junctions in the source directory
     symlink_mounts: list[dict[str, str]] = []
@@ -1174,6 +1467,7 @@ def create_custom_bot(request):
             is_test_subject=is_test_subject,
             source_path=source_path,
             git_repo_path=git_repo_path,
+            enable_version_history=enable_version_history,
             symlink_mounts=symlink_mounts,
             dockerfile=dockerfile,
             description=description,
@@ -1186,12 +1480,13 @@ def create_custom_bot(request):
     except Exception as e:
         messages.error(request, f'Failed to create bot: {e}')
 
-    return redirect('custom_bots')
+    return redirect(config_bots_url)
 
 
 @require_POST
 def delete_custom_bot(request, bot_id):
     """Delete a registered custom bot."""
+    config_bots_url = f"{reverse('config_page')}#custom-bots"
     try:
         bot = CustomBot.objects.get(id=bot_id)
         bot_name = bot.name
@@ -1200,7 +1495,7 @@ def delete_custom_bot(request, bot_id):
     except CustomBot.DoesNotExist:
         messages.error(request, 'Custom bot not found.')
 
-    return redirect('custom_bots')
+    return redirect(config_bots_url)
 
 
 @require_POST
@@ -1209,13 +1504,13 @@ def run_custom_match(request):
     bot_id = request.POST.get('custom_bot_id')
     if not bot_id:
         messages.error(request, 'No custom bot selected.')
-        return redirect('utilities')
+        return redirect('run_match')
 
     try:
         custom_bot = CustomBot.objects.get(id=bot_id)
     except CustomBot.DoesNotExist:
         messages.error(request, 'Selected custom bot not found.')
-        return redirect('utilities')
+        return redirect('run_match')
 
     # Resolve test subject bot
     test_bot = None
@@ -1233,7 +1528,7 @@ def run_custom_match(request):
     except Exception as e:
         messages.error(request, f'Failed to start custom match: {e}')
 
-    return redirect('utilities')
+    return redirect('run_match')
 
 
 @require_POST
@@ -1242,12 +1537,12 @@ def run_past_version_match(request):
     commit_hash = request.POST.get('commit_hash', '').strip()
     if not commit_hash:
         messages.error(request, 'No commit selected.')
-        return redirect('utilities')
+        return redirect('run_match')
 
     # Validate commit hash format (full 40-char SHA)
     if len(commit_hash) != 40 or not all(c in '0123456789abcdef' for c in commit_hash):
         messages.error(request, 'Invalid commit hash.')
-        return redirect('utilities')
+        return redirect('run_match')
 
     short_hash = commit_hash[:7]
 
@@ -1288,44 +1583,14 @@ def run_past_version_match(request):
     except Exception as e:
         messages.error(request, f'Failed to start past version match: {e}')
 
-    return redirect('utilities')
+    return redirect('run_match')
 
 
-def custom_match_list(request):
-    """List matches against custom bots, past versions, or continued from replay."""
-    matches = (
-        Match.objects
-        .filter(
-            Q(opponent_bot__isnull=False)
-            | Q(replay_file__gt='')
-            | Q(opponent_commit_hash__gt='')
-        )
-        .select_related('opponent_bot', 'test_bot')
-        .order_by('-start_timestamp')[:50]
-    )
-
-    # Optional filter by test subject bot
-    selected_test_bot = request.GET.get('test_bot', '')
-    if selected_test_bot:
-        if selected_test_bot == 'bottato':
-            matches = matches.filter(test_bot__isnull=True)
-        elif selected_test_bot.isdigit():
-            matches = matches.filter(test_bot_id=int(selected_test_bot))
-
-    test_subject_bots = CustomBot.objects.all().order_by('name')
-
-    return render(request, 'test_lab/custom_match_list.html', {
-        'matches': matches,
-        'test_subject_bots': test_subject_bots,
-        'selected_test_bot': selected_test_bot,
-    })
 
 
 # ---------------------------------------------------------------------------
 # Continue from Replay
 # ---------------------------------------------------------------------------
-
-REPLAY_UPLOAD_DIR = os.path.join(LOGS_DIR)  # Same dir as logs/replays
 
 
 def _parse_game_time(time_str: str) -> int | None:
@@ -1370,16 +1635,16 @@ def run_replay_match(request):
     # Validate inputs
     if not replay_file:
         messages.error(request, 'Please upload a replay file.')
-        return redirect('utilities')
+        return redirect('run_match')
 
     if not replay_file.name.endswith('.SC2Replay'):
         messages.error(request, 'File must be a .SC2Replay file.')
-        return redirect('utilities')
+        return redirect('run_match')
 
     game_loop = _parse_game_time(takeover_time)
     if game_loop is None or game_loop <= 0:
         messages.error(request, 'Invalid takeover time. Use mm:ss (e.g. 5:30) or seconds (e.g. 330).')
-        return redirect('utilities')
+        return redirect('run_match')
 
     try:
         bot_player_id_int = int(bot_player_id)
@@ -1387,7 +1652,7 @@ def run_replay_match(request):
             raise ValueError
     except ValueError:
         messages.error(request, 'Bot player ID must be 1 or 2.')
-        return redirect('utilities')
+        return redirect('run_match')
 
     docker_compose_path = DOCKER_COMPOSE_PATH
     logs_dir = LOGS_DIR
@@ -1423,12 +1688,23 @@ def run_replay_match(request):
         log_file = os.path.join(logs_dir, f"{match_id}_continue_replay.log")
 
         command = [
-            'docker', 'compose', 'run', '--rm',
+            'docker', 'compose', '-p', f'match_{match_id}',
+            'run', '--rm', '--no-deps',
             '-e', f'REPLAY_PATH={container_replay_path}',
             '-e', f'TAKEOVER_GAME_LOOP={game_loop}',
             '-e', f'BOT_PLAYER_ID={bot_player_id_int}',
             '-e', f'DIFFICULTY={difficulty}',
             '-e', f'MATCH_ID={match_id}',
+        ]
+
+        # Pass duration limit if provided (seconds after takeover before forfeit)
+        replay_duration = request.POST.get('replay_duration', '').strip()
+        if replay_duration:
+            duration_seconds = _parse_game_time(replay_duration)
+            if duration_seconds and duration_seconds > 0:
+                command += ['-e', f'REPLAY_DURATION={duration_seconds / 22.4:.1f}']
+
+        command += [
             'bot',
             'bash', '/root/runner/run_docker_continue_replay.sh',
         ]
@@ -1445,4 +1721,96 @@ def run_replay_match(request):
     except Exception as e:
         messages.error(request, f'Failed to start continue-from-replay match: {e}')
 
-    return redirect('utilities')
+    return redirect('run_match')
+
+
+# ---------------------------------------------------------------------------
+# Replay Tests
+# ---------------------------------------------------------------------------
+
+REPLAY_UPLOAD_DIR = os.path.join(
+    os.path.dirname(__file__), 'replay_test_files',
+)
+
+
+
+
+@require_POST
+def create_replay_test(request):
+    """Create one or more replay tests from form data.
+
+    The form submits parallel lists: name[], start_time[], duration[] plus a
+    single replay_file.  Each tuple creates one ReplayTest row.
+    """
+    names = request.POST.getlist('name')
+    start_times = request.POST.getlist('start_time')
+    durations = request.POST.getlist('duration')
+    replay_file = request.FILES.get('replay_file')
+
+    config_tests_url = f"{reverse('config_page')}#test-suites"
+
+    if not replay_file:
+        messages.error(request, 'Please upload a replay file.')
+        return redirect(config_tests_url)
+
+    if not replay_file.name.endswith('.SC2Replay'):
+        messages.error(request, 'File must be a .SC2Replay file.')
+        return redirect(config_tests_url)
+
+    if not names or not any(n.strip() for n in names):
+        messages.error(request, 'At least one test name is required.')
+        return redirect(config_tests_url)
+
+    # Save the replay file once
+    os.makedirs(REPLAY_UPLOAD_DIR, exist_ok=True)
+    safe_name = replay_file.name.replace(' ', '_')
+    replay_path = os.path.join(REPLAY_UPLOAD_DIR, safe_name)
+
+    if not os.path.exists(replay_path):
+        with open(replay_path, 'wb') as dest:
+            for chunk in replay_file.chunks():
+                dest.write(chunk)
+
+    created = 0
+    for i, name in enumerate(names):
+        name = name.strip()
+        start_time = start_times[i].strip() if i < len(start_times) else ''
+        duration = durations[i].strip() if i < len(durations) else ''
+
+        if not name or not start_time or not duration:
+            continue
+
+        if _parse_game_time(start_time) is None:
+            messages.error(request, f'Row {i + 1}: Invalid start time "{start_time}". Use mm:ss or seconds.')
+            continue
+
+        if _parse_game_time(duration) is None:
+            messages.error(request, f'Row {i + 1}: Invalid duration "{duration}". Use mm:ss or seconds.')
+            continue
+
+        ReplayTest.objects.create(
+            name=name,
+            replay_file=replay_path,
+            start_time=start_time,
+            duration=duration,
+        )
+        created += 1
+
+    if created:
+        label = 'test' if created == 1 else 'tests'
+        messages.success(request, f'Created {created} replay {label}.')
+    return redirect(config_tests_url)
+
+
+@require_POST
+def delete_replay_test(request, test_id):
+    """Delete a replay test."""
+    config_tests_url = f"{reverse('config_page')}#test-suites"
+    try:
+        test = ReplayTest.objects.get(id=test_id)
+        test_name = test.name
+        test.delete()
+        messages.success(request, f'Replay test "{test_name}" deleted.')
+    except ReplayTest.DoesNotExist:
+        messages.error(request, 'Replay test not found.')
+    return redirect(config_tests_url)

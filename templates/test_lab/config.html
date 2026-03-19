@@ -1,0 +1,402 @@
+{% extends "test_lab/base.html" %}
+
+{% block title %}Config - Test Lab{% endblock %}
+
+{% block extra_css %}
+th { background-color: #343a40; color: white; }
+tr:nth-child(even) { background-color: #f2f2f2; }
+td { text-align: left; }
+.file-list { margin-top: 10px; }
+.file-list code { background: #e9ecef; padding: 2px 6px; border-radius: 3px; }
+.form-row { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+.form-row > div > label { display: block; margin-bottom: 4px; font-weight: bold; font-size: 13px; }
+.form-row input[type="text"],
+.form-row input[type="file"] { padding: 6px 8px; border: 1px solid #ccc; border-radius: 3px; }
+{% endblock %}
+
+{% block content %}
+<h1>Config</h1>
+
+<div id="config-tabs">
+    <div class="tab-bar">
+        <a data-tab="custom-bots">Custom Bots</a>
+        <a data-tab="test-suites">Test Suites</a>
+    </div>
+
+    {# ==================== CUSTOM BOTS TAB ==================== #}
+    <div id="custom-bots" class="tab-panel">
+        <div class="utility-section">
+            <h3>Register New Bot</h3>
+            <p>
+                AI Arena bots are ladder-packaged bots that run via the
+                <a href="https://github.com/aiarena/local-play-bootstrap" target="_blank">aiarena/local-play-bootstrap</a>
+                Docker infrastructure. They can be written in any language.
+            </p>
+            <p>
+                Place the bot directory (containing <code>ladderbots.json</code>) in
+                <code>test_lab/aiarena/bots/</code>. You can download bots from
+                <a href="https://aiarena.net" target="_blank">aiarena.net</a>.
+            </p>
+            {% if aiarena_bots %}
+            <div class="file-list">
+                <strong>Available bot directories:</strong>
+                {% for d in aiarena_bots %}
+                    <code>{{ d }}</code>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p><em>No bot directories with ladderbots.json found in test_lab/aiarena/bots/.</em></p>
+            {% endif %}
+
+            <form method="post" action="{% url 'create_custom_bot' %}" style="margin-top: 15px;">
+                {% csrf_token %}
+                <div class="form-group">
+                    <label for="name">Bot Name:</label>
+                    <input type="text" name="name" id="name" required placeholder="e.g. Worker Rush">
+                </div>
+                <div class="form-group">
+                    <label for="race">Race:</label>
+                    <select name="race" id="race">
+                        <option value="Random">Random</option>
+                        <option value="Protoss">Protoss</option>
+                        <option value="Terran">Terran</option>
+                        <option value="Zerg">Zerg</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="aiarena_bot_directory">Bot Directory:</label>
+                    {% if aiarena_bots %}
+                    <select name="bot_directory" id="aiarena_bot_directory">
+                        {% for d in aiarena_bots %}
+                        <option value="{{ d }}">{{ d }}</option>
+                        {% endfor %}
+                    </select>
+                    {% else %}
+                    <input type="text" name="bot_directory" id="aiarena_bot_directory" placeholder="e.g. my_bot">
+                    {% endif %}
+                </div>
+                <div class="form-group">
+                    <label for="aiarena_bot_type">Bot Type:</label>
+                    <select name="aiarena_bot_type" id="aiarena_bot_type">
+                        <option value="python" selected>Python</option>
+                        <option value="cppwin32">C++ (Win32)</option>
+                        <option value="cpplinux">C++ (Linux)</option>
+                        <option value="dotnetcore">.NET Core</option>
+                        <option value="java">Java</option>
+                        <option value="nodejs">Node.js</option>
+                        <option value="commandcenter">CommandCenter</option>
+                        <option value="binaryi386">Binary (i386)</option>
+                        <option value="wine">Wine</option>
+                    </select>
+                    <small style="color: #666;">Runtime type as defined in the bot's ladderbots.json</small>
+                </div>
+                <div class="form-group">
+                    <label for="description">Description (optional):</label>
+                    <textarea name="description" id="description" placeholder="What does this bot do?"></textarea>
+                </div>
+                <hr style="margin: 16px 0;">
+                <h4 style="margin-top: 0;">Test Subject Settings</h4>
+                <p style="font-size: 12px; color: #666;">
+                    Mark a bot as a <strong>test subject</strong> to enable running it as Player 1
+                    against opponents and past versions of itself.
+                </p>
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" name="is_test_subject" id="is_test_subject" onchange="document.getElementById('test-subject-fields').style.display = this.checked ? 'block' : 'none';">
+                        This bot is a test subject (Player 1)
+                    </label>
+                </div>
+                <div id="test-subject-fields" style="display: none;">
+                    <div class="form-group">
+                        <label for="source_path">Source Path:</label>
+                        <input type="text" name="source_path" id="source_path" placeholder="e.g. C:\Users\me\mybot">
+                        <small style="color: #666;">Absolute path to the bot source on the host. Mounted into Docker at runtime.</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="git_repo_path">Git Repo Path (optional):</label>
+                        <input type="text" name="git_repo_path" id="git_repo_path" placeholder="e.g. C:\Users\me\mybot">
+                        <small style="color: #666;">Path to git repo for past-version matches. Leave blank to disable.</small>
+                    </div>
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" name="enable_version_history" id="enable_version_history">
+                            Enable version history matches
+                        </label>
+                        <small style="color: #666;">Allow running matches against past versions of this bot (requires Git Repo Path).</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="dockerfile">Custom Dockerfile (optional):</label>
+                        <input type="text" name="dockerfile" id="dockerfile" placeholder="e.g. Dockerfile.mybot">
+                        <small style="color: #666;">Dockerfile name (relative to test_lab/aiarena/) for custom build steps. Leave blank for vanilla image.</small>
+                    </div>
+                </div>
+                <button type="submit" class="btn btn-primary" style="padding: 8px 16px;">Register Bot</button>
+            </form>
+        </div>
+
+        <div class="utility-section">
+            <h3>Registered Bots</h3>
+            {% if bots %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Race</th>
+                        <th>Directory</th>
+                        <th>Bot Type</th>
+                        <th>Test Subject</th>
+                        <th>Description</th>
+                        <th>Created</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for bot in bots %}
+                    <tr>
+                        <td>{{ bot.name }}</td>
+                        <td>{{ bot.race }}</td>
+                        <td><code>{{ bot.bot_directory }}</code></td>
+                        <td><code>{{ bot.aiarena_bot_type }}</code></td>
+                        <td>
+                            {% if bot.is_test_subject %}
+                                <span style="color: #28a745; font-weight: bold;">Yes</span>
+                                {% if bot.source_path %}<br><small>src: <code>{{ bot.source_path }}</code></small>{% endif %}
+                                {% if bot.git_repo_path %}<br><small>git: <code>{{ bot.git_repo_path }}</code></small>{% endif %}
+                                {% if bot.enable_version_history %}<br><small style="color: #17a2b8;">version history: enabled</small>{% endif %}
+                                {% if bot.dockerfile %}<br><small>dockerfile: <code>{{ bot.dockerfile }}</code></small>{% endif %}
+                                {% if bot.symlink_mounts %}<br><small>symlinks: {{ bot.symlink_mounts|length }}</small>{% endif %}
+                            {% else %}
+                                <span style="color: #999;">No</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ bot.description }}</td>
+                        <td>{{ bot.created_at|date:"Y-m-d H:i" }}</td>
+                        <td>
+                            <form method="post" action="{% url 'delete_custom_bot' bot.id %}" style="display: inline;" onsubmit="return confirm('Delete {{ bot.name }}?');">
+                                {% csrf_token %}
+                                <button type="submit" class="btn-danger">Delete</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p><em>No bots registered yet.</em></p>
+            {% endif %}
+        </div>
+    </div>
+
+    {# ==================== TEST SUITES TAB ==================== #}
+    <div id="test-suites" class="tab-panel">
+        <div class="utility-section">
+            <h3>Test Suites</h3>
+            <p>Define which opponents are included when starting a test suite. The default "All" suite runs all 15 Blizzard AI matches plus every custom bot.</p>
+
+            {% if test_suites %}
+            <table style="width: auto; border-collapse: collapse; margin-bottom: 15px;">
+                <thead>
+                    <tr>
+                        <th style="border: 1px solid #ddd; padding: 6px 10px; text-align: left;">Name</th>
+                        <th style="border: 1px solid #ddd; padding: 6px 10px; text-align: center;">Blizzard AI</th>
+                        <th style="border: 1px solid #ddd; padding: 6px 10px; text-align: left;">Custom Bots</th>
+                        <th style="border: 1px solid #ddd; padding: 6px 10px; text-align: left;">Replay Tests</th>
+                        <th style="border: 1px solid #ddd; padding: 6px 10px; text-align: left;">Previous Versions</th>
+                        <th style="border: 1px solid #ddd; padding: 6px 10px;"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for suite in test_suites %}
+                    <tr>
+                        <td style="border: 1px solid #ddd; padding: 6px 10px;">{{ suite.name }}</td>
+                        <td style="border: 1px solid #ddd; padding: 6px 10px; text-align: center;">{% if suite.include_blizzard_ai %}&#10003;{% else %}&#10007;{% endif %}</td>
+                        <td style="border: 1px solid #ddd; padding: 6px 10px;">
+                            {% for bot in suite.custom_bots.all %}{{ bot.name }}{% if not forloop.last %}, {% endif %}{% empty %}<em>None</em>{% endfor %}
+                        </td>
+                        <td style="border: 1px solid #ddd; padding: 6px 10px;">
+                            {% for rt in suite.replay_tests.all %}{{ rt.name }}{% if not forloop.last %}, {% endif %}{% empty %}<em>None</em>{% endfor %}
+                        </td>
+                        <td style="border: 1px solid #ddd; padding: 6px 10px;">{{ suite.previous_versions|default:"-" }}</td>
+                        <td style="border: 1px solid #ddd; padding: 6px 10px;">
+                            {% if suite.name != 'All' %}
+                            <form method="post" action="{% url 'delete_test_suite' suite.id %}" style="display: inline;">
+                                {% csrf_token %}
+                                <button type="submit" onclick="return confirm('Delete test suite &quot;{{ suite.name }}&quot;?')" style="background: #dc3545; color: white; border: none; padding: 4px 8px; border-radius: 3px; cursor: pointer; font-size: 12px;">Delete</button>
+                            </form>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% endif %}
+
+            <details>
+                <summary style="cursor: pointer; font-weight: bold; margin-bottom: 10px;">Create New Test Suite</summary>
+                <form method="post" action="{% url 'create_test_suite' %}" style="margin-top: 10px;">
+                    {% csrf_token %}
+                    <div style="margin-bottom: 10px;">
+                        <label for="suite_name">Name:</label><br>
+                        <input type="text" name="name" id="suite_name" required style="padding: 4px 8px; width: 250px;">
+                    </div>
+                    <div style="margin-bottom: 10px;">
+                        <label>
+                            <input type="checkbox" name="include_blizzard_ai" checked>
+                            Blizzard AI <small style="color: #666;">(15 matches: 3 races &times; 5 builds)</small>
+                        </label>
+                    </div>
+                    <div style="margin-bottom: 10px;">
+                        <label for="previous_versions">Previous Versions:</label><br>
+                        <input type="text" name="previous_versions" id="previous_versions" placeholder="e.g. 1,3" style="padding: 4px 8px; width: 250px;">
+                        <small style="color: #666;">Comma-separated offsets from HEAD (1 = most recent previous commit)</small>
+                    </div>
+                    <div style="margin-bottom: 10px;">
+                        <label style="font-weight: bold;">Custom Bots:</label><br>
+                        {% for bot in custom_bots %}
+                        <label style="display: block; margin-left: 10px;">
+                            <input type="checkbox" name="custom_bot_ids" value="{{ bot.id }}">
+                            {{ bot.name }} ({{ bot.race }})
+                        </label>
+                        {% empty %}
+                        <em>No custom bots registered.</em>
+                        {% endfor %}
+                    </div>
+                    <div style="margin-bottom: 10px;">
+                        <label style="font-weight: bold;">Replay Tests:</label><br>
+                        {% for rt in all_replay_tests %}
+                        <label style="display: block; margin-left: 10px;">
+                            <input type="checkbox" name="replay_test_ids" value="{{ rt.id }}">
+                            {{ rt.name }} <small style="color: #666;">({{ rt.start_time }} +{{ rt.duration }})</small>
+                        </label>
+                        {% empty %}
+                        <em>No replay tests created yet. Create one below.</em>
+                        {% endfor %}
+                    </div>
+                    <button type="submit" class="utility-btn">Create Test Suite</button>
+                </form>
+            </details>
+        </div>
+
+        {# ---------- Replay Tests section (within Test Suites tab) ---------- #}
+        <div class="utility-section">
+            <h3>Replay Tests</h3>
+            <p>Select a replay file and define test parameters. You can add multiple tests from the same replay before submitting.</p>
+
+            <details>
+                <summary style="cursor: pointer; font-weight: bold; margin-bottom: 10px;">Create Replay Test</summary>
+                <form method="post" action="{% url 'create_replay_test' %}" enctype="multipart/form-data" style="margin-top: 10px;">
+                    {% csrf_token %}
+                    <div style="margin-bottom: 12px;">
+                        <label for="replay_file_config" style="font-weight: bold; font-size: 13px;">Replay File (.SC2Replay):</label><br>
+                        <input type="file" name="replay_file" id="replay_file_config" accept=".SC2Replay" required>
+                    </div>
+                    <div id="test-rows">
+                        <div class="form-row test-row" style="margin-bottom: 6px;">
+                            <div>
+                                <label>Test Name</label>
+                                <input type="text" name="name" placeholder="e.g. Hold early ling rush" required style="width: 220px;">
+                            </div>
+                            <div>
+                                <label>Start Time</label>
+                                <input type="text" name="start_time" placeholder="2:41" required style="width: 80px;">
+                            </div>
+                            <div>
+                                <label>Duration</label>
+                                <input type="text" name="duration" placeholder="3:00" required style="width: 80px;">
+                            </div>
+                            <div style="align-self: flex-end;">
+                                <button type="button" class="btn-danger remove-row-btn" onclick="removeTestRow(this)" style="padding: 6px 10px; font-size: 16px; visibility: hidden;" title="Remove row">&times;</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div style="display: flex; gap: 10px; margin-top: 8px;">
+                        <button type="button" class="utility-btn" onclick="addTestRow()" style="padding: 6px 14px; font-size: 18px; line-height: 1;" title="Add another test">+</button>
+                        <button type="submit" class="utility-btn">Add Tests</button>
+                    </div>
+                </form>
+            </details>
+
+            {% if replay_tests %}
+            <table style="margin-top: 15px;">
+                <thead>
+                    <tr>
+                        <th style="text-align: left;">Name</th>
+                        <th style="text-align: left;">Replay File</th>
+                        <th>Start Time</th>
+                        <th>Duration</th>
+                        <th>Created</th>
+                        <th>In Suites</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for test in replay_tests %}
+                    <tr>
+                        <td style="text-align: left;">{{ test.name }}</td>
+                        <td style="font-size: 12px; color: #666; text-align: left;" title="{{ test.replay_file }}">
+                            {{ test.replay_filename }}
+                        </td>
+                        <td>{{ test.start_time }}</td>
+                        <td>{{ test.duration }}</td>
+                        <td style="font-size: 12px;">{{ test.created_at|date:"M d, Y H:i" }}</td>
+                        <td style="font-size: 12px;">
+                            {% for suite in test.test_suites.all %}
+                                <span style="display: inline-block; background: #e2e3e5; padding: 2px 6px; border-radius: 3px; margin: 1px;">
+                                    {{ suite.name }}
+                                </span>
+                            {% empty %}
+                                <em style="color: #999;">None</em>
+                            {% endfor %}
+                        </td>
+                        <td>
+                            <form method="post" action="{% url 'delete_replay_test' test.id %}" style="display: inline;">
+                                {% csrf_token %}
+                                <button type="submit" class="btn-danger" onclick="return confirm('Delete replay test &quot;{{ test.name }}&quot;?')">Delete</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p><em>No replay tests created yet.</em></p>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    initTabs('config-tabs');
+
+    function addTestRow() {
+        var container = document.getElementById('test-rows');
+        var rows = container.querySelectorAll('.test-row');
+        var newRow = rows[0].cloneNode(true);
+        newRow.querySelectorAll('input[type="text"]').forEach(function(input) {
+            input.value = '';
+        });
+        newRow.querySelector('.remove-row-btn').style.visibility = 'visible';
+        newRow.querySelectorAll('label').forEach(function(label) {
+            label.style.display = 'none';
+        });
+        container.appendChild(newRow);
+        updateRemoveButtons();
+    }
+
+    function removeTestRow(btn) {
+        var row = btn.closest('.test-row');
+        row.remove();
+        updateRemoveButtons();
+    }
+
+    function updateRemoveButtons() {
+        var rows = document.querySelectorAll('#test-rows .test-row');
+        rows.forEach(function(row) {
+            var btn = row.querySelector('.remove-row-btn');
+            btn.style.visibility = rows.length === 1 ? 'hidden' : 'visible';
+        });
+    }
+</script>
+{% endblock %}

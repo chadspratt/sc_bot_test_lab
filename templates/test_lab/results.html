@@ -1,0 +1,411 @@
+{% extends "test_lab/base.html" %}
+{% load time_filters %}
+{% load test_lab_filters %}
+
+{% block title %}Results - Test Lab{% endblock %}
+
+{% block extra_css %}
+/* Match list (Test Groups tab) */
+.victory { background-color: #d4edda; color: #155724; }
+.defeat { background-color: #f8d7da; color: #721c24; }
+.crash { background-color: #fff3cd; color: #856404; }
+.pending { background-color: #e2e3e5; color: #383d41; }
+.trigger-section { margin-bottom: 20px; }
+.difficulty-border-right { border-right: 3px solid #333 !important; }
+.race-border-right { border-right: 2px solid #666 !important; }
+.difficulty-header { background-color: #e9ecef; font-weight: bold; }
+.race-header { background-color: #f8f9fa; font-weight: bold; }
+.win-percentage-row { background-color: #f8f9fa; font-weight: bold; border-top: 2px solid #333; }
+.narrow-column { width: 80px; min-width: 80px; padding: 4px; }
+.test-group-column { width: 90px; min-width: 90px; padding: 4px; }
+th { position: sticky; z-index: 10; }
+thead tr:first-child th { top: 0; }
+thead tr:nth-child(2) th { top: 41px; }
+
+/* Map breakdown (Maps tab) */
+.very-high-winrate { background-color: #a6ccaf; color: #0a3915; }
+.high-winrate { background-color: #d4edda; color: #155724; }
+.medium-winrate { background-color: #fff3cd; color: #856404; }
+.low-winrate { background-color: #f8d7da; color: #721c24; }
+.very-low-winrate { background-color: #c49296; color: #541118; }
+.no-data { background-color: #e2e3e5; color: #383d41; }
+.map-column { width: 150px; min-width: 150px; padding: 4px; text-align: left; }
+
+/* Building timing */
+.header-row th {
+    writing-mode: vertical-rl;
+    text-orientation: mixed;
+    height: 150px;
+    white-space: nowrap;
+}
+.avg-row { background-color: #e9ecef; font-weight: bold; border-top: 2px solid #333; }
+.timing-cell {
+    font-family: monospace;
+    font-size: 11px;
+    line-height: 1.3;
+    padding: 4px;
+}
+.result-V { color: #28a745; font-weight: bold; }
+.result-D { color: #dc3545; }
+.much-faster { background-color: #d4edda; }
+.faster { background-color: #e9f5ec; }
+.slightly-faster { background-color: #f1f9f3; }
+.average { background-color: #ffffff; }
+.slightly-slower { background-color: #fff9f0; }
+.slower { background-color: #fff3e0; }
+.much-slower { background-color: #ffebee; }
+{% endblock %}
+
+{% block content %}
+<!-- Results page tabs (server-side: each tab reloads with different data) -->
+<div class="tab-bar">
+    <a href="?tab=test-groups{{ filter_qs }}" {% if active_tab == 'test-groups' %}class="active"{% endif %}>Test Groups</a>
+    <a href="?tab=maps{{ filter_qs }}" {% if active_tab == 'maps' %}class="active"{% endif %}>Maps</a>
+    <a href="?tab=building-timing{{ filter_qs }}" {% if active_tab == 'building-timing' %}class="active"{% endif %}>Building Timing</a>
+</div>
+
+{% if active_tab == 'test-groups' %}
+{# ==================== TEST GROUPS TAB ==================== #}
+
+<div class="trigger-section">
+    <!-- Filter 1: Test Bot -->
+    <form method="get" action="" style="display: inline-block; margin-right: 20px;">
+        <input type="hidden" name="tab" value="test-groups">
+        <label for="test_bot">Test Bot:</label>
+        <select name="test_bot" id="test_bot" onchange="this.form.submit()">
+            <option value="">All Bots</option>
+            {% for bot in test_subject_bots %}
+            <option value="{{ bot.id }}" {% if selected_test_bot == bot.id|stringformat:"d" %}selected{% endif %}>{{ bot.name }}</option>
+            {% endfor %}
+        </select>
+        {% if selected_difficulty %}<input type="hidden" name="difficulty" value="{{ selected_difficulty }}">{% endif %}
+        {% if selected_limit %}<input type="hidden" name="limit" value="{{ selected_limit }}">{% endif %}
+        {% if selected_test_suite %}<input type="hidden" name="test_suite" value="{{ selected_test_suite }}">{% endif %}
+        <noscript><input type="submit" value="Filter"></noscript>
+    </form>
+
+    <!-- Filter 2: Difficulty -->
+    <form method="get" action="" style="display: inline-block; margin-right: 20px;">
+        <input type="hidden" name="tab" value="test-groups">
+        <label for="difficulty">Difficulty:</label>
+        <select name="difficulty" id="difficulty" onchange="this.form.submit()">
+            <option value="">All Difficulties</option>
+            <option value="Easy" {% if selected_difficulty == 'Easy' %}selected{% endif %}>Easy</option>
+            <option value="Medium" {% if selected_difficulty == 'Medium' %}selected{% endif %}>Medium</option>
+            <option value="MediumHard" {% if selected_difficulty == 'MediumHard' %}selected{% endif %}>MediumHard</option>
+            <option value="Hard" {% if selected_difficulty == 'Hard' %}selected{% endif %}>Hard</option>
+            <option value="Harder" {% if selected_difficulty == 'Harder' %}selected{% endif %}>Harder</option>
+            <option value="VeryHard" {% if selected_difficulty == 'VeryHard' %}selected{% endif %}>VeryHard</option>
+            <option value="CheatVision" {% if selected_difficulty == 'CheatVision' %}selected{% endif %}>CheatVision</option>
+            <option value="CheatMoney" {% if selected_difficulty == 'CheatMoney' %}selected{% endif %}>CheatMoney</option>
+            <option value="CheatInsane" {% if selected_difficulty == 'CheatInsane' %}selected{% endif %}>CheatInsane</option>
+        </select>
+        {% if selected_test_bot %}<input type="hidden" name="test_bot" value="{{ selected_test_bot }}">{% endif %}
+        {% if selected_limit %}<input type="hidden" name="limit" value="{{ selected_limit }}">{% endif %}
+        {% if selected_test_suite %}<input type="hidden" name="test_suite" value="{{ selected_test_suite }}">{% endif %}
+        <noscript><input type="submit" value="Filter"></noscript>
+    </form>
+
+    <!-- Filter 3: Limit -->
+    <form method="get" action="" style="display: inline-block; margin-right: 20px;">
+        <input type="hidden" name="tab" value="test-groups">
+        <label for="limit">Show:</label>
+        <select name="limit" id="limit" onchange="this.form.submit()">
+            <option value="">All Test Groups</option>
+            <option value="10" {% if selected_limit == '10' %}selected{% endif %}>Last 10</option>
+            <option value="25" {% if selected_limit == '25' %}selected{% endif %}>Last 25</option>
+            <option value="50" {% if selected_limit == '50' %}selected{% endif %}>Last 50</option>
+            <option value="100" {% if selected_limit == '100' %}selected{% endif %}>Last 100</option>
+        </select>
+        {% if selected_test_bot %}<input type="hidden" name="test_bot" value="{{ selected_test_bot }}">{% endif %}
+        {% if selected_difficulty %}<input type="hidden" name="difficulty" value="{{ selected_difficulty }}">{% endif %}
+        {% if selected_test_suite %}<input type="hidden" name="test_suite" value="{{ selected_test_suite }}">{% endif %}
+        <noscript><input type="submit" value="Filter"></noscript>
+    </form>
+
+    <!-- Filter 4: Test Suite -->
+    <form method="get" action="" style="display: inline-block; margin-right: 20px;">
+        <input type="hidden" name="tab" value="test-groups">
+        <label for="test_suite">Suite:</label>
+        <select name="test_suite" id="test_suite" onchange="this.form.submit()">
+            <option value="">All Suites</option>
+            {% for suite in test_suites %}
+            <option value="{{ suite.id }}" {% if selected_test_suite == suite.id|stringformat:"d" %}selected{% endif %}>{{ suite.name }}</option>
+            {% endfor %}
+        </select>
+        {% if selected_test_bot %}<input type="hidden" name="test_bot" value="{{ selected_test_bot }}">{% endif %}
+        {% if selected_difficulty %}<input type="hidden" name="difficulty" value="{{ selected_difficulty }}">{% endif %}
+        {% if selected_limit %}<input type="hidden" name="limit" value="{{ selected_limit }}">{% endif %}
+        <noscript><input type="submit" value="Filter"></noscript>
+    </form>
+
+    <!-- Trigger: uses current filter state for test_bot, difficulty & test_suite -->
+    <form method="post" action="{% url 'trigger_tests' %}" style="display: inline-block;">
+        {% csrf_token %}
+        {% if selected_test_bot %}<input type="hidden" name="test_bot" value="{{ selected_test_bot }}">{% endif %}
+        <input type="hidden" name="difficulty" value="{{ selected_difficulty|default:'CheatInsane' }}">
+        {% if selected_limit %}<input type="hidden" name="limit" value="{{ selected_limit }}">{% endif %}
+        {% if selected_test_suite %}<input type="hidden" name="test_suite" value="{{ selected_test_suite }}">{% endif %}
+        <input type="text" name="description" placeholder="Test group description" style="padding: 6px 10px; border: 1px solid #555; border-radius: 4px; background: #2a2a2a; color: #e0e0e0; margin-right: 6px; width: 250px;">
+        <button type="submit" class="trigger-btn">Start Test Suite</button>
+    </form>
+</div>
+
+{% if pivot_data %}
+    <table>
+        <thead>
+            <tr>
+                <th rowspan="2" class="test-group-column">Test Bot</th>
+                <th rowspan="2" class="test-group-column">Test Group</th>
+                <th rowspan="2" class="narrow-column">Win %</th>
+                <th rowspan="2" class="narrow-column">Avg Length</th>
+                <th rowspan="2" class="narrow-column">Difficulty</th>
+                {% for race_group in header_structure %}
+                    <th colspan="{{ race_group.span }}" class="race-header {% if not forloop.last %}race-border-right{% elif not forloop.parentloop.last %}difficulty-border-right{% endif %}">{{ race_group.name }} {{ race_group.win_rate }}</th>
+                {% endfor %}
+            </tr>
+            <tr>
+                {% for race_group in header_structure %}
+                    {% for build in race_group.builds %}
+                    <th class="opponent-header {% if forloop.last and not forloop.parentloop.last %}race-border-right{% elif forloop.last and forloop.parentloop.last and not forloop.parentloop.parentloop.last %}difficulty-border-right{% endif %}">
+                        {{ build }}
+                    </th>
+                    {% endfor %}
+                {% endfor %}
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in pivot_data %}
+            <tr>
+                <td class="test-group-column"><strong>{{ row.test_bot_name }}</strong></td>
+                <td class="test-group-column" title="{{ test_groups|lookup:row.test_group_id }}"><strong>{{ row.test_group_id }}</strong></td>
+                <td class="narrow-column"><strong>{{ row.group_win_percentage }}</strong></td>
+                <td class="narrow-column"><strong>{{ row.avg_duration|format_duration }}</strong></td>
+                <td class="narrow-column"><strong>{{ row.difficulty }}</strong></td>
+                {% for match_data in row.results %}
+                    {% if match_data %}
+                    <td class="{% if match_data.result == 'Victory' %}victory{% elif match_data.result == 'Defeat' %}defeat{% elif match_data.result == 'Crash' %}crash{% elif match_data.result == 'Pending' %}pending{% endif %}">
+                        {% if match_data.result == 'Pending' %}
+                            <span title="Match in progress or stuck — no replay yet">{{ match_data.id }}</span>
+                            {% if match_data.opponent_bot or match_data.opponent_commit_hash %}<a href="{% url 'serve_aiarena_bot_log' match_id=match_data.id bot_name=match_data.test_bot_directory %}" target="_blank" class="checkmark-link" title="View log (may be empty if match hasn't started)">⏳</a>{% else %}<a href="{% url 'serve_log' match_id=match_data.id %}" target="_blank" class="checkmark-link" title="View log">⏳</a>{% endif %}
+                        {% else %}
+                            <a href="{% url 'serve_replay' match_id=match_data.id %}" class="checkmark-link">{{ match_data.id }}</a>
+                            {% if match_data.opponent_bot or match_data.opponent_commit_hash %}<a href="{% url 'serve_aiarena_bot_log' match_id=match_data.id bot_name=match_data.test_bot_directory %}" target="_blank" class="checkmark-link">{{ match_data.duration_in_game_time|format_duration }}</a>{% else %}<a href="{% url 'serve_log' match_id=match_data.id %}" target="_blank" class="checkmark-link">{{ match_data.duration_in_game_time|format_duration }}</a>{% endif %}{% if match_data.is_best_time %} <span title="Fastest win or slowest loss on map">⭐</span>{% endif %}
+                        {% endif %}<br>
+                        <small>{{ match_data.map_name }}</small>
+                    </td>
+                    {% else %}
+                    <td>-</td>
+                    {% endif %}
+                {% endfor %}
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+{% else %}
+    <p>No match data available.</p>
+{% endif %}
+
+{% elif active_tab == 'maps' %}
+{# ==================== MAPS TAB ==================== #}
+
+<div class="trigger-section">
+    <form method="get" action="" style="display: inline-block;">
+        <input type="hidden" name="tab" value="maps">
+        <label for="map_difficulty">Filter by Difficulty:</label>
+        <select name="difficulty" id="map_difficulty" onchange="this.form.submit()">
+            <option value="">All Difficulties</option>
+            <option value="Easy" {% if selected_difficulty == 'Easy' %}selected{% endif %}>Easy</option>
+            <option value="Medium" {% if selected_difficulty == 'Medium' %}selected{% endif %}>Medium</option>
+            <option value="MediumHard" {% if selected_difficulty == 'MediumHard' %}selected{% endif %}>MediumHard</option>
+            <option value="Hard" {% if selected_difficulty == 'Hard' %}selected{% endif %}>Hard</option>
+            <option value="Harder" {% if selected_difficulty == 'Harder' %}selected{% endif %}>Harder</option>
+            <option value="VeryHard" {% if selected_difficulty == 'VeryHard' %}selected{% endif %}>VeryHard</option>
+            <option value="CheatVision" {% if selected_difficulty == 'CheatVision' %}selected{% endif %}>CheatVision</option>
+            <option value="CheatMoney" {% if selected_difficulty == 'CheatMoney' %}selected{% endif %}>CheatMoney</option>
+            <option value="CheatInsane" {% if selected_difficulty == 'CheatInsane' %}selected{% endif %}>CheatInsane</option>
+        </select>
+        {% if selected_limit %}<input type="hidden" name="limit" value="{{ selected_limit }}">{% endif %}
+        <noscript><input type="submit" value="Filter"></noscript>
+    </form>
+
+    <form method="get" action="" style="display: inline-block; margin-left: 10px;">
+        <input type="hidden" name="tab" value="maps">
+        <label for="map_limit">Show:</label>
+        <select name="limit" id="map_limit" onchange="this.form.submit()">
+            <option value="">All Test Groups</option>
+            <option value="10" {% if selected_limit == '10' %}selected{% endif %}>Last 10</option>
+            <option value="25" {% if selected_limit == '25' %}selected{% endif %}>Last 25</option>
+            <option value="50" {% if selected_limit == '50' %}selected{% endif %}>Last 50</option>
+            <option value="100" {% if selected_limit == '100' %}selected{% endif %}>Last 100</option>
+        </select>
+        Divide by 5 to get approximate number of matches per map
+        {% if selected_difficulty %}<input type="hidden" name="difficulty" value="{{ selected_difficulty }}">{% endif %}
+        <noscript><input type="submit" value="Filter"></noscript>
+    </form>
+</div>
+
+{% if pivot_data %}
+    <table>
+        <thead>
+            <tr>
+                <th rowspan="3" class="map-column">Map</th>
+                <th rowspan="3" class="narrow-column">Win Rate</th>
+                <th rowspan="3" class="narrow-column">Avg Game Length</th>
+                {% for difficulty_group in header_structure %}
+                <th colspan="{{ difficulty_group.span }}" class="difficulty-header {% if not forloop.last %}difficulty-border-right{% endif %}">{{ difficulty_group.difficulty }} {{ difficulty_group.win_rate }}</th>
+                {% endfor %}
+            </tr>
+            <tr>
+                {% for difficulty_group in header_structure %}
+                    {% for race_group in difficulty_group.races %}
+                    <th colspan="{{ race_group.span }}" class="race-header {% if not forloop.last %}race-border-right{% elif not forloop.parentloop.last %}difficulty-border-right{% endif %}">{{ race_group.name }} {{ race_group.win_rate }}</th>
+                    {% endfor %}
+                {% endfor %}
+            </tr>
+            <tr>
+                {% for difficulty_group in header_structure %}
+                    {% for race_group in difficulty_group.races %}
+                        {% for build in race_group.builds %}
+                        <th class="{% if forloop.last and not forloop.parentloop.last %}race-border-right{% elif forloop.last and forloop.parentloop.last and not forloop.parentloop.parentloop.last %}difficulty-border-right{% endif %}">{{ build }}</th>
+                        {% endfor %}
+                    {% endfor %}
+                {% endfor %}
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in pivot_data %}
+            <tr>
+                <td class="map-column"><strong>{{ row.map_name }}</strong></td>
+                <td>
+                    {% if row.overall_win_rate %}
+                        {% with win_pct=row.overall_win_rate|slice:':-1'|add:'0' %}
+                        <span class="{% if win_pct >= 80 %}very-high-winrate{% elif win_pct >= 60 %}high-winrate{% elif win_pct >= 40 %}medium-winrate{% elif win_pct >= 20 %}low-winrate{% else %}very-low-winrate{% endif %}" style="padding: 4px; border-radius: 3px;">
+                            {{ row.overall_win_rate }} ({{ row.overall_wins }}/{{ row.overall_games }})
+                        </span>
+                        {% endwith %}
+                    {% else %}
+                        <span class="no-data" style="padding: 4px; border-radius: 3px;">-</span>
+                    {% endif %}
+                </td>
+                <td>{{ row.overall_avg_duration|format_duration|default:"-" }}</td>
+                {% for cell_data in row.results %}
+                    {% if cell_data.win_rate %}
+                        {% with win_pct=cell_data.win_rate|slice:':-1'|add:'0' %}
+                        <td class="{% if win_pct >= 80 %}very-high-winrate{% elif win_pct >= 60 %}high-winrate{% elif win_pct >= 40 %}medium-winrate{% elif win_pct >= 20 %}low-winrate{% else %}very-low-winrate{% endif %}">
+                            {{ cell_data.win_rate }} ({{ cell_data.wins }}/{{ cell_data.games_played }})<br>
+                            <small>{{ cell_data.avg_duration|format_duration }}</small>
+                        </td>
+                        {% endwith %}
+                    {% else %}
+                    <td class="no-data">-</td>
+                    {% endif %}
+                {% endfor %}
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+{% else %}
+    <p>No match data available.</p>
+{% endif %}
+
+{% elif active_tab == 'building-timing' %}
+{# ==================== BUILDING TIMING TAB ==================== #}
+
+<p>Shows the earliest time (in game seconds) each building type was completed in each test group.</p>
+
+<table>
+    <thead>
+        <tr class="header-row">
+            <th>Test Group</th>
+            {% for building_type in building_types %}
+            <th>{{ building_type }}</th>
+            {% endfor %}
+        </tr>
+    </thead>
+    <tbody>
+        <tr class="avg-row">
+            <td>Average</td>
+            {% for avg in avg_timings %}
+            <td class="timing-cell">
+                {% if avg is not None %}
+                    {{ avg|format_duration }}
+                {% else %}
+                    -
+                {% endif %}
+            </td>
+            {% endfor %}
+        </tr>
+
+        {% for row in pivot_data %}
+        <tr>
+            <td class="test-group-column">{{ row.test_group_id }}</td>
+            {% for timing in row.timings %}
+            <td class="timing-cell {% if timing.performance_class %}{{ timing.performance_class }}{% endif %}">
+                {% if timing %}
+                    <div class="result-{{ timing.min_result }}">{{ timing.min|format_duration }} ({{ timing.min_result }})</div>
+                    <div>{{ timing.avg|format_duration }}</div>
+                    <div class="result-{{ timing.max_result }}">{{ timing.max|format_duration }} ({{ timing.max_result }})</div>
+                {% else %}
+                    -
+                {% endif %}
+            </td>
+            {% endfor %}
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+{% if active_tab == 'test-groups' %}
+<script>
+    const STORAGE_KEY = 'visited_match_urls';
+
+    function getVisited() {
+        try {
+            return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+        } catch (e) {
+            console.warn('Failed to parse visited match URLs from localStorage:', e);
+            return [];
+        }
+    }
+
+    function markVisited(url) {
+        const visited = getVisited();
+        if (!visited.includes(url)) {
+            visited.push(url);
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(visited));
+        }
+    }
+
+    function applyCheckmarks() {
+        const visited = getVisited();
+        document.querySelectorAll('a.checkmark-link').forEach(link => {
+            if (visited.includes(link.href)) {
+                if (!link.nextElementSibling || !link.nextElementSibling.classList.contains('link-visited-check')) {
+                    const span = document.createElement('span');
+                    span.className = 'link-visited-check';
+                    span.title = 'Visited';
+                    span.textContent = ' ✓';
+                    span.style.color = '#155724';
+                    link.after(span);
+                }
+            }
+        });
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        document.querySelectorAll('a.checkmark-link').forEach(link => {
+            link.addEventListener('click', () => {
+                markVisited(link.href);
+                setTimeout(applyCheckmarks, 50);
+            });
+        });
+        applyCheckmarks();
+    });
+</script>
+{% endif %}
+{% endblock %}

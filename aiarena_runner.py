@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import glob
 import json
+import logging
 import os
 import random
 import shutil
@@ -27,6 +28,8 @@ import threading
 from typing import TYPE_CHECKING
 
 from django.utils import timezone
+
+logger = logging.getLogger('test_lab')
 
 if TYPE_CHECKING:
     from .models import CustomBot, Match
@@ -880,7 +883,13 @@ def _write_compose_override_legacy(
 
 
 def _run_docker_match(run_dir: str, match_id: int, log_file_path: str) -> None:
-    """Run a Docker match in the current thread.  Shared by both start functions."""
+    """Run a Docker match in the current thread.  Shared by both start functions.
+
+    Docker compose is launched via ``Popen`` so the child process persists
+    even if the Django dev-server auto-reloads (which kills daemon threads).
+    A PID file is written so that ``collect_match_result`` can reconcile
+    matches whose monitoring thread was lost.
+    """
     compose_down_cmd = [
         'docker', 'compose',
         '-f', 'docker-compose.yml',
@@ -889,43 +898,60 @@ def _run_docker_match(run_dir: str, match_id: int, log_file_path: str) -> None:
         '--rmi', 'local',
     ]
 
+    pid_file = os.path.join(run_dir, 'docker.pid')
+    proc: subprocess.Popen | None = None
+    log_file = None
+
+    logger.info('Match %d: starting docker compose in %s', match_id, run_dir)
+
     try:
-        with open(log_file_path, 'w') as log_file:
-            subprocess.run(
-                [
-                    'docker', 'compose',
-                    '-f', 'docker-compose.yml',
-                    '-f', 'docker-compose.override.yml',
-                    '-p', f'aiarena_{match_id}',
-                    'up', '--abort-on-container-exit',
-                ],
-                cwd=run_dir,
-                stdout=log_file,
-                stderr=subprocess.STDOUT,
-                timeout=7200,
-            )
+        log_file = open(log_file_path, 'w')
+        # Use CREATE_NEW_PROCESS_GROUP so docker compose is not killed when
+        # the parent Python process exits (e.g. Django dev-server reload).
+        creation_flags = 0
+        if os.name == 'nt':
+            creation_flags = subprocess.CREATE_NEW_PROCESS_GROUP
 
-        aiarena_result = _parse_results(run_dir)
+        proc = subprocess.Popen(
+            [
+                'docker', 'compose',
+                '-f', 'docker-compose.yml',
+                '-f', 'docker-compose.override.yml',
+                '-p', f'aiarena_{match_id}',
+                'up', '--abort-on-container-exit',
+            ],
+            cwd=run_dir,
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
+            creationflags=creation_flags,
+        )
 
-        from .models import Match as MatchModel
-        try:
-            match_obj = MatchModel.objects.get(id=match_id)
-        except MatchModel.DoesNotExist:
-            return
+        # Persist PID so recovery can find the process later.
+        with open(pid_file, 'w') as f:
+            f.write(str(proc.pid))
 
-        if aiarena_result:
-            result_type = aiarena_result.get('type', 'Error')
-            game_steps = aiarena_result.get('game_steps', 0)
-            match_obj.result = _map_result_to_match(result_type)
-            if game_steps > 0:
-                match_obj.duration_in_game_time = _game_steps_to_seconds(game_steps)
-        else:
-            match_obj.result = 'Crash'
+        logger.info('Match %d: docker compose started (pid %d)', match_id, proc.pid)
 
-        match_obj.end_timestamp = timezone.now()
-        match_obj.save()
+        # Block until the process finishes (or the thread is killed).
+        proc.wait(timeout=7200)
+        log_file.close()
+
+        logger.info('Match %d: docker compose exited with code %d', match_id, proc.returncode)
+
+        _collect_and_save_result(run_dir, match_id)
 
     except subprocess.TimeoutExpired:
+        logger.warning('Match %d: docker compose timed out after 2h', match_id)
+        if proc is not None:
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+        if log_file is not None:
+            try:
+                log_file.close()
+            except Exception:
+                pass
         from .models import Match as MatchModel
         try:
             match_obj = MatchModel.objects.get(id=match_id)
@@ -936,6 +962,12 @@ def _run_docker_match(run_dir: str, match_id: int, log_file_path: str) -> None:
             pass
 
     except Exception:
+        logger.exception('Match %d: unexpected error in _run_docker_match', match_id)
+        if log_file is not None:
+            try:
+                log_file.close()
+            except Exception:
+                pass
         from .models import Match as MatchModel
         try:
             match_obj = MatchModel.objects.get(id=match_id)
@@ -945,13 +977,163 @@ def _run_docker_match(run_dir: str, match_id: int, log_file_path: str) -> None:
         except MatchModel.DoesNotExist:
             pass
 
-    # Always attempt cleanup, but never let it affect match results.
+    finally:
+        # Always attempt cleanup, but never let it affect match results.
+        try:
+            subprocess.run(
+                compose_down_cmd,
+                cwd=run_dir,
+                capture_output=True,
+                timeout=120,
+            )
+        except Exception:
+            pass
+        # Remove PID file after cleanup.
+        try:
+            os.remove(pid_file)
+        except OSError:
+            pass
+
+
+def _collect_and_save_result(run_dir: str, match_id: int) -> None:
+    """Parse results.json and update the Match record in the database.
+
+    Extracted from ``_run_docker_match`` so it can also be called by the
+    stale-match recovery path (``collect_match_result``).
+    """
+    aiarena_result = _parse_results(run_dir)
+    logger.info('Match %d: parsed results: %s', match_id, aiarena_result)
+
+    from .models import Match as MatchModel
+    try:
+        match_obj = MatchModel.objects.get(id=match_id)
+    except MatchModel.DoesNotExist:
+        logger.error('Match %d: Match record not found in DB after game finished', match_id)
+        return
+
+    if aiarena_result:
+        result_type = aiarena_result.get('type', 'Error')
+        game_steps = aiarena_result.get('game_steps', 0)
+        match_obj.result = _map_result_to_match(result_type)
+        if game_steps > 0:
+            match_obj.duration_in_game_time = _game_steps_to_seconds(game_steps)
+    else:
+        match_obj.result = 'Crash'
+
+    match_obj.end_timestamp = timezone.now()
+    match_obj.save()
+    logger.info(
+        'Match %d: saved result=%s duration=%s',
+        match_id, match_obj.result, match_obj.duration_in_game_time,
+    )
+
+
+def _is_process_running(pid: int) -> bool:
+    """Check whether a process with the given PID is still alive."""
+    if os.name == 'nt':
+        # On Windows, use tasklist to check.
+        try:
+            result = subprocess.run(
+                ['tasklist', '/FI', f'PID eq {pid}', '/NH'],
+                capture_output=True, text=True, timeout=10,
+            )
+            return str(pid) in result.stdout
+        except Exception:
+            return False
+    else:
+        try:
+            os.kill(pid, 0)
+            return True
+        except OSError:
+            return False
+
+
+def collect_match_result(match_id: int) -> str | None:
+    """Check a pending match and collect its result if docker has finished.
+
+    Returns the new result string, or ``None`` if the match is still
+    running or has no run directory.
+
+    This is the recovery path for matches whose monitoring daemon thread
+    was killed (e.g. by a Django dev-server reload).
+    """
+    run_dir = get_run_dir(match_id)
+    if not os.path.isdir(run_dir):
+        return None
+
+    pid_file = os.path.join(run_dir, 'docker.pid')
+
+    # If a PID file exists, check whether the process is still running.
+    if os.path.isfile(pid_file):
+        try:
+            with open(pid_file) as f:
+                pid = int(f.read().strip())
+            if _is_process_running(pid):
+                return None  # still running
+        except (ValueError, OSError):
+            pass
+
+    # Process is no longer running (or never started).  Try to collect results.
+    results_path = os.path.join(run_dir, 'results.json')
+    log_path = os.path.join(run_dir, 'compose_output.log')
+
+    # If the log file is empty and results are empty, docker never ran.
+    log_size = 0
+    try:
+        log_size = os.path.getsize(log_path)
+    except OSError:
+        pass
+
+    _collect_and_save_result(run_dir, match_id)
+
+    # Clean up: docker compose down
     try:
         subprocess.run(
-            compose_down_cmd,
+            [
+                'docker', 'compose',
+                '-f', 'docker-compose.yml',
+                '-f', 'docker-compose.override.yml',
+                '-p', f'aiarena_{match_id}', 'down',
+                '--rmi', 'local',
+            ],
             cwd=run_dir,
             capture_output=True,
             timeout=120,
         )
     except Exception:
         pass
+
+    # Remove PID file.
+    try:
+        os.remove(pid_file)
+    except OSError:
+        pass
+
+    from .models import Match as MatchModel
+    try:
+        return MatchModel.objects.get(id=match_id).result
+    except MatchModel.DoesNotExist:
+        return None
+
+
+def check_stale_pending_matches() -> dict[int, str]:
+    """Scan for pending aiarena matches whose docker process has finished.
+
+    Returns a dict of ``{match_id: new_result}`` for matches that were
+    recovered.  Matches still running are left alone.
+    """
+    from .models import Match as MatchModel
+
+    recovered: dict[int, str] = {}
+    pending = MatchModel.objects.filter(result='Pending')
+
+    for match_obj in pending:
+        run_dir = get_run_dir(match_obj.id)
+        if not os.path.isdir(run_dir):
+            continue  # not an aiarena match, or run dir was cleaned up
+
+        result = collect_match_result(match_obj.id)
+        if result is not None:
+            recovered[match_obj.id] = result
+
+    return recovered
