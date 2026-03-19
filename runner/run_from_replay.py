@@ -75,7 +75,7 @@ def main():
     try:
         # The opponent race will be determined from the replay automatically
         # by run_game_from_replay (it overrides Computer race to match replay)
-        result: Result = run_game_from_replay(
+        result, map_name = run_game_from_replay(
             replay_path=replay_path,
             target_game_loop=takeover_game_loop,
             players=[
@@ -91,10 +91,12 @@ def main():
         logger.info(
             f"\n================================\n"
             f"Result (continued from replay): {result}\n"
+            f"Map: {map_name}\n"
             f"================================"
         )
 
         if match_id:
+            update_match_map(match_id, map_name)
             update_match_result(match_id, result.name)
 
     except Exception as e:

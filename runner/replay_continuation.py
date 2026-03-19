@@ -267,9 +267,10 @@ async def _reconstruct_game_state(
     """
     Use debug commands to reconstruct the captured game state in the new game.
 
-    Reconstructs immediately at game start (no fast-forward) to avoid the SC2
-    engine ending the game during stepping. The bot uses REPLAY_TAKEOVER_TIME
-    env var to offset self.time so game-time-dependent logic works correctly.
+    Called after the bot has initialized and run a few frames so that
+    on_start / _prepare_first_step see a normal starting state. The bot uses
+    REPLAY_TAKEOVER_TIME env var to offset self.time so game-time-dependent
+    logic works correctly.
 
     Steps:
     1. Reveal the map so we can see all units
@@ -433,7 +434,7 @@ async def _host_game_from_replay(
     realtime: bool = False,
     save_replay_as: str | None = None,
     game_time_limit: int | None = None,
-) -> Result:
+) -> tuple[Result, str]:
     """
     Full orchestration: load replay, capture state, create new game, and play.
 
@@ -444,7 +445,7 @@ async def _host_game_from_replay(
     :param realtime: Whether to run the game in realtime
     :param save_replay_as: Path to save the replay of the continued game
     :param game_time_limit: Maximum game time in seconds
-    :return: Result of the game for the bot player
+    :return: (Result for the bot player, map name from the replay)
     """
     base_build, data_version = get_replay_version(replay_path)
 
@@ -517,16 +518,21 @@ async def _host_game_from_replay(
             )
 
         player_id = join_result.join_game.player_id
+        client._player_id = player_id
         logger.info(f"Joined game as player {player_id}")
 
-        # Phase 3: Reconstruct game state
-        await _reconstruct_game_state(client, state, bot_player_id)
+        # Phase 3: Let bot initialize normally, then reconstruct game state
+        # after a few frames so on_start / _prepare_first_step see a clean
+        # starting game state instead of debug-spawned replay units.
+        async def apply_replay_state():
+            await _reconstruct_game_state(client, state, bot_player_id)
 
         # Phase 4: Play the game normally using the standard AI game loop
         assert isinstance(players[0], Bot), "First player must be a Bot"
         ai = players[0].ai
         result = await _play_game_ai(
-            client, player_id, ai, realtime, game_time_limit
+            client, player_id, ai, realtime, game_time_limit,
+            post_init_fn=apply_replay_state, post_init_delay=2,
         )
 
         logger.info(f"Game result: {result}")
@@ -540,7 +546,7 @@ async def _host_game_from_replay(
             logger.error("Connection was closed before the game ended")
         await client.quit()
 
-        return result
+        return result, state.map_name
 
 
 def run_game_from_replay(
@@ -551,7 +557,7 @@ def run_game_from_replay(
     realtime: bool = False,
     save_replay_as: str | None = None,
     game_time_limit: int | None = None,
-) -> Result:
+) -> tuple[Result, str]:
     """
     Continue a game from a replay at a specified game loop.
 
@@ -568,7 +574,7 @@ def run_game_from_replay(
     :param realtime: Whether to run in realtime mode
     :param save_replay_as: Path to save the replay of the continued game
     :param game_time_limit: Maximum game time in seconds (from the start, not from takeover)
-    :return: Result for the bot player
+    :return: (Result for the bot player, map name from the replay)
 
     Example::
 
@@ -576,7 +582,7 @@ def run_game_from_replay(
         from sc2.player import Bot, Computer
         from sc2.replay_continuation import run_game_from_replay
 
-        result = run_game_from_replay(
+        result, map_name = run_game_from_replay(
             replay_path="/path/to/replay.SC2Replay",
             target_game_loop=5000,  # ~3:43 in game time
             players=[
@@ -592,7 +598,7 @@ def run_game_from_replay(
         f"Replay does not exist at the given path: {replay_path}"
     )
 
-    result = asyncio.run(
+    result, map_name = asyncio.run(
         _host_game_from_replay(
             replay_path=replay_path,
             target_game_loop=target_game_loop,
@@ -604,4 +610,4 @@ def run_game_from_replay(
         )
     )
     assert isinstance(result, Result), f"Unexpected result type: {type(result)}"
-    return result
+    return result, map_name
