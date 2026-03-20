@@ -145,6 +145,7 @@ td { text-align: left; }
                         <th>Directory</th>
                         <th>Bot Type</th>
                         <th>Test Subject</th>
+                        <th>Test Suite</th>
                         <th>Description</th>
                         <th>Created</th>
                         <th>Actions</th>
@@ -168,6 +169,14 @@ td { text-align: left; }
                             {% else %}
                                 <span style="color: #999;">No</span>
                             {% endif %}
+                        </td>
+                        <td>
+                            <select onchange="updateBotTestSuite({{ bot.id }}, this.value)" style="padding: 4px; font-size: 12px;">
+                                <option value="">— None —</option>
+                                {% for suite in test_suites %}
+                                <option value="{{ suite.id }}" {% if bot.default_test_suite_id == suite.id %}selected{% endif %}>{{ suite.name }}</option>
+                                {% endfor %}
+                            </select>
                         </td>
                         <td>{{ bot.description }}</td>
                         <td>{{ bot.created_at|date:"Y-m-d H:i" }}</td>
@@ -447,6 +456,19 @@ td { text-align: left; }
 {% block extra_js %}
 <script>
     initTabs('config-tabs');
+
+    function updateBotTestSuite(botId, suiteId) {
+        fetch(`/test-lab/config/custom-bots/${botId}/test-suite/`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+            },
+            body: 'test_suite_id=' + suiteId
+        }).then(r => r.json()).then(data => {
+            if (data.status !== 'ok') alert('Failed to update: ' + (data.message || 'Unknown error'));
+        }).catch(() => alert('Failed to update test suite.'));
+    }
 
     function addTestRow() {
         var container = document.getElementById('test-rows');

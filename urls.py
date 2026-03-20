@@ -27,6 +27,7 @@ urlpatterns = [
     # Config actions
     path('config/custom-bots/create/', views.create_custom_bot, name='create_custom_bot'),
     path('config/custom-bots/<int:bot_id>/delete/', views.delete_custom_bot, name='delete_custom_bot'),
+    path('config/custom-bots/<int:bot_id>/test-suite/', views.update_custom_bot_test_suite, name='update_custom_bot_test_suite'),
     path('config/test-suites/create/', views.create_test_suite, name='create_test_suite'),
     path('config/test-suites/<int:suite_id>/delete/', views.delete_test_suite, name='delete_test_suite'),
     path('config/replay-tests/create/', views.create_replay_test, name='create_replay_test'),

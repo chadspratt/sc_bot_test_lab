@@ -79,6 +79,14 @@ class CustomBot(models.Model):
         default='',
         help_text="Custom Dockerfile name in aiarena/ for mirror/past-version matches (e.g. Dockerfile.bottato)",
     )
+    default_test_suite = models.ForeignKey(
+        'TestSuite',
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='default_for_bots',
+        help_text="Default test suite used when triggering tests for this bot without specifying a suite",
+    )
     description = models.TextField(blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True)
 

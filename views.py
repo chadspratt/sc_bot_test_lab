@@ -544,7 +544,7 @@ def start_test_suite(
 
     # --- Past-version matches ---
     version_offsets = test_suite.previous_version_offsets if test_suite else []
-    if version_offsets and test_bot:
+    if version_offsets and test_bot and test_bot.git_repo_path:
         max_offset = max(version_offsets)
         repo_path = test_bot.git_repo_path or None
         commits = bot_versions.get_recent_bot_commits(
@@ -700,6 +700,8 @@ def api_trigger_tests(request):
                 {'status': 'error', 'message': f'Test suite with id {test_suite_id} not found'},
                 status=404,
             )
+    elif test_bot and test_bot.default_test_suite:
+        test_suite = test_bot.default_test_suite
     try:
         test_group_id, count = start_test_suite(
             description=description, difficulty=difficulty, test_bot=test_bot,
@@ -1147,17 +1149,33 @@ def run_match_page(request):
     """Run Match page with match type tabs and custom match results table."""
     custom_bots_list = CustomBot.objects.all().order_by('name')
     test_subject_bots = CustomBot.objects.all().order_by('name')
+    version_test_bots = CustomBot.objects.filter(git_repo_path__gt='').order_by('name')
 
     # Collect recent commits for each test-subject bot that has a git repo
-    recent_commits_by_bot: dict[int | None, list] = {
-        None: bot_versions.get_recent_bot_commits(count=5),
+    recent_commits_by_bot: dict[int, list] = {}
+    for bot in version_test_bots:
+        recent_commits_by_bot[bot.id] = bot_versions.get_recent_bot_commits(
+            count=5, repo_path=bot.git_repo_path,
+        )
+
+    # Default commits shown in the Past Version dropdown (first version bot)
+    first_version_bot = version_test_bots.first()
+    recent_commits = recent_commits_by_bot.get(first_version_bot.id, []) if first_version_bot else []
+
+    # JSON-serializable version for the commit-switcher JS
+    commits_by_bot_json = {
+        str(bot_id): [
+            {
+                'hash': c.hash,
+                'short_hash': c.short_hash,
+                'subject': c.subject[:60],
+                'date': c.date[:10],
+                'is_cached': c.is_cached,
+            }
+            for c in commits
+        ]
+        for bot_id, commits in recent_commits_by_bot.items()
     }
-    for bot in test_subject_bots:
-        if bot.git_repo_path:
-            recent_commits_by_bot[bot.id] = bot_versions.get_recent_bot_commits(
-                count=5, repo_path=bot.git_repo_path,
-            )
-    recent_commits = recent_commits_by_bot.get(None, [])
 
     # Custom match list data
     matches = (
@@ -1182,8 +1200,10 @@ def run_match_page(request):
         'active_page': 'run_match',
         'custom_bots': custom_bots_list,
         'test_subject_bots': test_subject_bots,
+        'version_test_bots': version_test_bots,
         'recent_commits': recent_commits,
         'recent_commits_by_bot': recent_commits_by_bot,
+        'commits_by_bot_json': commits_by_bot_json,
         'matches': matches,
         'selected_test_bot': selected_test_bot,
         'replay_tests': ReplayTest.objects.order_by('name'),
@@ -1427,6 +1447,29 @@ def create_custom_bot(request):
     return redirect(config_bots_url)
 
 
+@csrf_exempt
+@require_POST
+def update_custom_bot_test_suite(request, bot_id):
+    """Update a bot's default test suite."""
+    try:
+        bot = CustomBot.objects.get(id=bot_id)
+    except CustomBot.DoesNotExist:
+        return JsonResponse({'status': 'error', 'message': 'Bot not found'}, status=404)
+
+    test_suite_id = request.POST.get('test_suite_id', '').strip()
+    if test_suite_id:
+        try:
+            suite = TestSuite.objects.get(id=int(test_suite_id))
+            bot.default_test_suite = suite
+        except (TestSuite.DoesNotExist, ValueError):
+            return JsonResponse({'status': 'error', 'message': 'Test suite not found'}, status=404)
+    else:
+        bot.default_test_suite = None
+
+    bot.save(update_fields=['default_test_suite'])
+    return JsonResponse({'status': 'ok'})
+
+
 @require_POST
 def delete_custom_bot(request, bot_id):
     """Delete a registered custom bot."""
@@ -1490,16 +1533,17 @@ def run_past_version_match(request):
 
     short_hash = commit_hash[:7]
 
-    # Resolve test subject bot (defaults to BotTato id=5)
+    # Resolve test subject bot — must have a git repo for past-version matches
     test_bot = None
     test_bot_id = request.POST.get('test_bot_id')
     if test_bot_id:
         test_bot = CustomBot.objects.filter(id=test_bot_id, is_test_subject=True).first()
-    if test_bot is None:
-        test_bot = CustomBot.objects.filter(id=5).first()
+    if test_bot is None or not test_bot.git_repo_path:
+        messages.error(request, 'Selected bot does not have a git repository configured.')
+        return redirect('run_match')
 
-    test_name = test_bot.name if test_bot else 'BotTato'
-    test_race = test_bot.race if test_bot else 'Terran'
+    test_name = test_bot.name
+    test_race = test_bot.race
 
     try:
         # Create the match record

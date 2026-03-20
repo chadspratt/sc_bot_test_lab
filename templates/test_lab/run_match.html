@@ -121,20 +121,17 @@ tr:nth-child(even) { background-color: #f2f2f2; }
             <h3>Run vs Past Version</h3>
             <p>Launch the current version of a test-subject bot against a previous version of itself from git history.
                Both players use the current <code>python_sc2</code> — only bot code differs.</p>
-            {% if recent_commits %}
+            {% if version_test_bots %}
             <form method="post" action="{% url 'run_past_version_match' %}" style="display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap;">
                 {% csrf_token %}
-                {% if test_subject_bots %}
                 <div>
                     <label for="test_bot_id_version">Test Bot:</label><br>
                     <select name="test_bot_id" id="test_bot_id_version">
-                        <option value="">BotTato (default)</option>
-                        {% for bot in test_subject_bots %}
+                        {% for bot in version_test_bots %}
                         <option value="{{ bot.id }}">{{ bot.name }}</option>
                         {% endfor %}
                     </select>
                 </div>
-                {% endif %}
                 <div>
                     <label for="commit_hash">Past Version:</label><br>
                     <select name="commit_hash" id="commit_hash" style="min-width: 400px;">
@@ -155,7 +152,7 @@ tr:nth-child(even) { background-color: #f2f2f2; }
                 Subsequent runs reuse the cache. HEAD is excluded (use mirror match instead).
             </p>
             {% else %}
-            <p><em>No previous commits found in the bot repo git history.</em></p>
+            <p><em>No bots with a git repository configured. <a href="{% url 'config_page' %}#custom-bots">Configure a bot</a> with a git repo path to enable past-version matches.</em></p>
             {% endif %}
         </div>
     </div>
@@ -358,5 +355,26 @@ tr:nth-child(even) { background-color: #f2f2f2; }
 {% endblock %}
 
 {% block extra_js %}
-<script>initTabs('match-type-tabs');</script>
+{{ commits_by_bot_json|json_script:"commits-by-bot" }}
+<script>
+initTabs('match-type-tabs');
+(function() {
+    var sel = document.getElementById('test_bot_id_version');
+    var commitSel = document.getElementById('commit_hash');
+    if (!sel || !commitSel) return;
+    var data = JSON.parse(document.getElementById('commits-by-bot').textContent);
+    sel.addEventListener('change', function() {
+        var commits = data[this.value] || [];
+        commitSel.innerHTML = '';
+        commits.forEach(function(c) {
+            var opt = document.createElement('option');
+            opt.value = c.hash;
+            var label = c.short_hash + ' \u2014 ' + c.subject +
+                ' (' + c.date + ')' + (c.is_cached ? ' [cached]' : '');
+            opt.textContent = label;
+            commitSel.appendChild(opt);
+        });
+    });
+})();
+</script>
 {% endblock %}
