@@ -27,10 +27,12 @@ from loguru import logger
 from pathlib import Path
 from typing import Any
 
+from sc2.bot_ai import BotAI
 from sc2.client import Client
 from sc2.controller import Controller
 from sc2.data import AIBuild, Race, Result
-from sc2.main import _play_game_ai, get_replay_version
+from sc2.game_state import GameState
+from sc2.main import get_replay_version
 from sc2.player import AbstractPlayer, Bot, Computer
 from sc2.portconfig import Portconfig
 from sc2.protocol import ConnectionAlreadyClosedError, ProtocolError
@@ -110,6 +112,13 @@ _ZERG_BUILDINGS = {
     # UltraliskCavern=93
 }
 _ALL_BUILDING_TYPE_IDS = _TERRAN_BUILDINGS | _PROTOSS_BUILDINGS | _ZERG_BUILDINGS
+
+# Townhall unit type IDs (all races, including upgraded forms)
+_TOWNHALL_TYPE_IDS = {
+    18, 130, 132,  # CommandCenter, PlanetaryFortress, OrbitalCommand
+    59,            # Nexus
+    86, 100, 101,  # Hatchery, Lair, Hive
+}
 
 
 def _is_building_type(unit_type: int) -> bool:
@@ -292,10 +301,13 @@ async def _reconstruct_game_state(
     obs = await client._execute(observation=sc_pb.RequestObservation())
     desired_units = state.units
     old_player_tags: list[int] = []
+    old_townhall_positions: list[tuple[float, float]] = []
     resource_tags_to_kill: list[int] = []
     for unit in obs.observation.observation.raw_data.units:
         if unit.owner in (1, 2):
             old_player_tags.append(unit.tag)
+            if unit.unit_type in _TOWNHALL_TYPE_IDS:
+                old_townhall_positions.append((unit.pos.x, unit.pos.y))
         elif not _is_resource_in_desired_state(desired_units, unit):
             resource_tags_to_kill.append(unit.tag)
 
@@ -305,12 +317,27 @@ async def _reconstruct_game_state(
     )
 
     # 2. Spawn buildings first (must exist before killing old units to prevent defeat)
+    #    Townhalls that overlap a starting townhall position are deferred until
+    #    after the kill step — spawning them on top of the existing one causes
+    #    Terran CCs to fly and Zerg Hatcheries to land off-position.
     buildings_to_spawn = [
         u for u in desired_units
         if _is_player_unit(u) and u.is_building and u.build_progress > 0
     ]
-    # Batch all building spawn debug commands, then step once
-    if buildings_to_spawn:
+
+    def _overlaps_old_townhall(unit: CapturedUnit) -> bool:
+        if unit.unit_type not in _TOWNHALL_TYPE_IDS:
+            return False
+        return any(
+            abs(unit.pos_x - ox) < 1.0 and abs(unit.pos_y - oy) < 1.0
+            for ox, oy in old_townhall_positions
+        )
+
+    deferred_townhalls = [u for u in buildings_to_spawn if _overlaps_old_townhall(u)]
+    immediate_buildings = [u for u in buildings_to_spawn if not _overlaps_old_townhall(u)]
+
+    # Batch all non-deferred building spawn debug commands, then step once
+    if immediate_buildings:
         spawn_cmds = [
             debug_pb.DebugCommand(
                 create_unit=debug_pb.DebugCreateUnit(
@@ -320,13 +347,13 @@ async def _reconstruct_game_state(
                     quantity=1,
                 )
             )
-            for unit in buildings_to_spawn
+            for unit in immediate_buildings
         ]
         await client._execute(
             debug=sc_pb.RequestDebug(debug=spawn_cmds)
         )
         await client._execute(step=sc_pb.RequestStep(count=1))
-        logger.info(f"  Spawned {len(buildings_to_spawn)} buildings")
+        logger.info(f"  Spawned {len(immediate_buildings)} buildings")
 
     # 3. Kill starting player units and mismatched resources
     tags_to_kill = old_player_tags + resource_tags_to_kill
@@ -343,6 +370,25 @@ async def _reconstruct_game_state(
             )
         await client._execute(step=sc_pb.RequestStep(count=1))
         logger.info(f"  Killed {len(tags_to_kill)} old units")
+
+    # 3b. Now spawn the deferred townhalls (old ones are gone, position is clear)
+    if deferred_townhalls:
+        spawn_cmds = [
+            debug_pb.DebugCommand(
+                create_unit=debug_pb.DebugCreateUnit(
+                    unit_type=unit.unit_type,
+                    owner=unit.owner,
+                    pos=common_pb.Point2D(x=unit.pos_x, y=unit.pos_y),
+                    quantity=1,
+                )
+            )
+            for unit in deferred_townhalls
+        ]
+        await client._execute(
+            debug=sc_pb.RequestDebug(debug=spawn_cmds)
+        )
+        await client._execute(step=sc_pb.RequestStep(count=1))
+        logger.info(f"  Spawned {len(deferred_townhalls)} deferred townhalls")
 
     # 4. Spawn non-building player units
     units_to_spawn = [
@@ -420,6 +466,99 @@ def _is_resource_in_desired_state(desired_units: list[CapturedUnit], current_uni
             for u in desired_units
         )
     return True  # Not a resource; keep it
+
+
+# ---------------------------------------------------------------------------
+# Self-contained game loop with replay-state reconstruction hook
+# ---------------------------------------------------------------------------
+
+async def _play_game_with_reconstruction(
+    client: Client,
+    player_id: int,
+    ai: BotAI,
+    realtime: bool,
+    game_time_limit: int | None,
+    replay_state: CapturedReplayState,
+    bot_player_id: int,
+    reconstruct_after: int = 2,
+) -> Result:
+    """
+    Run the bot game loop with replay state reconstruction injected after
+    *reconstruct_after* iterations.  This is a self-contained version of the
+    standard python-sc2 ``_play_game_ai`` loop so that the upstream library
+    does not need any modification.
+    """
+    gs: GameState | None = None
+
+    # -- Bot initialisation (mirrors _play_game_ai.initialize_first_step) --
+    ai._initialize_variables()
+
+    game_data = await client.get_game_data()
+    game_info = await client.get_game_info()
+    ping_response = await client.ping()
+
+    ai._prepare_start(
+        client, player_id, game_info, game_data,
+        realtime=realtime, base_build=ping_response.ping.base_build,
+    )
+    state = await client.observation()
+    if client._game_result:
+        await ai.on_end(client._game_result[player_id])
+        return client._game_result[player_id]
+    gs = GameState(state.observation)
+    proto_game_info = await client._execute(game_info=sc_pb.RequestGameInfo())
+    try:
+        ai._prepare_step(gs, proto_game_info)
+        await ai.on_before_start()
+        ai._prepare_first_step()
+        await ai.on_start()
+    except Exception as e:
+        logger.exception(f"Caught unknown exception in AI on_start: {e}")
+        logger.error("Resigning due to previous error")
+        await ai.on_end(Result.Defeat)
+        return Result.Defeat
+
+    # -- Main game loop --
+    reconstructed = False
+    for iteration in range(10**10):
+        # Inject replay state reconstruction once after a few warm-up frames
+        if not reconstructed and iteration == reconstruct_after:
+            await _reconstruct_game_state(client, replay_state, bot_player_id)
+            reconstructed = True
+
+        state = await client.observation()
+
+        if client._game_result:
+            await ai.on_end(client._game_result[player_id])
+            return client._game_result[player_id]
+        gs = GameState(state.observation)
+
+        if game_time_limit and gs.game_loop / 22.4 > game_time_limit:
+            await ai.on_end(Result.Tie)
+            return Result.Tie
+
+        proto_game_info = await client._execute(game_info=sc_pb.RequestGameInfo())
+        ai._prepare_step(gs, proto_game_info)
+
+        logger.debug(f"Running AI step, it={iteration} {gs.game_loop / 22.4:.2f}s")
+        await ai.issue_events()
+        try:
+            await ai.on_step(iteration)
+        except (AttributeError,) as e:
+            logger.exception(f"Caught exception: {e}")
+            raise
+        except Exception as e:
+            logger.exception(f"Caught unknown exception: {e}")
+            raise
+        if not client.in_game:
+            return client._game_result.get(player_id, Result.Defeat)
+        await ai._after_step()
+
+        if not client.in_game and client._game_result:
+            await ai.on_end(client._game_result[player_id])
+            return client._game_result[player_id]
+        await client.step()
+    return Result.Undecided
 
 
 # ---------------------------------------------------------------------------
@@ -524,15 +663,15 @@ async def _host_game_from_replay(
         # Phase 3: Let bot initialize normally, then reconstruct game state
         # after a few frames so on_start / _prepare_first_step see a clean
         # starting game state instead of debug-spawned replay units.
-        async def apply_replay_state():
-            await _reconstruct_game_state(client, state, bot_player_id)
 
-        # Phase 4: Play the game normally using the standard AI game loop
+        # Phase 4: Play the game using our self-contained loop that injects
+        # the replay state reconstruction after warm-up iterations.
         assert isinstance(players[0], Bot), "First player must be a Bot"
         ai = players[0].ai
-        result = await _play_game_ai(
+        result = await _play_game_with_reconstruction(
             client, player_id, ai, realtime, game_time_limit,
-            post_init_fn=apply_replay_state, post_init_delay=2,
+            replay_state=state, bot_player_id=bot_player_id,
+            reconstruct_after=2,
         )
 
         logger.info(f"Game result: {result}")
@@ -580,7 +719,7 @@ def run_game_from_replay(
 
         from sc2.data import Difficulty, Race
         from sc2.player import Bot, Computer
-        from sc2.replay_continuation import run_game_from_replay
+        from replay_continuation import run_game_from_replay
 
         result, map_name = run_game_from_replay(
             replay_path="/path/to/replay.SC2Replay",
