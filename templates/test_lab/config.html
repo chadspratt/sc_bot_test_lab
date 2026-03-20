@@ -458,7 +458,7 @@ td { text-align: left; }
     initTabs('config-tabs');
 
     function updateBotTestSuite(botId, suiteId) {
-        fetch(`/test-lab/config/custom-bots/${botId}/test-suite/`, {
+        fetch(`{% url 'update_custom_bot_test_suite' 0 %}`.replace('/0/', `/${botId}/`), {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/x-www-form-urlencoded',
