@@ -1320,8 +1320,16 @@ def run_match_page(request):
 
 def config_page(request):
     """Config page with Custom Bots, Test Suites, and System tabs."""
+    import json as _json
+
     bots = CustomBot.objects.all().order_by('-created_at')
-    aiarena_bots = aiarena_runner.get_available_aiarena_bots()
+    all_bot_details = aiarena_runner.get_available_aiarena_bot_details()
+    used_directories = set(
+        CustomBot.objects.values_list('bot_directory', flat=True)
+    )
+    available_bots = [
+        b for b in all_bot_details if b['directory'] not in used_directories
+    ]
     custom_bots_list = CustomBot.objects.all().order_by('name')
     test_suites = TestSuite.objects.prefetch_related('custom_bots', 'replay_tests').order_by('name')
     replay_tests_list = ReplayTest.objects.prefetch_related('test_suites').order_by('-created_at')
@@ -1331,7 +1339,8 @@ def config_page(request):
     return render(request, 'test_lab/config.html', {
         'active_page': 'config',
         'bots': bots,
-        'aiarena_bots': aiarena_bots,
+        'aiarena_bots': available_bots,
+        'aiarena_bots_json': _json.dumps(available_bots),
         'custom_bots': custom_bots_list,
         'test_suites': test_suites,
         'replay_tests': replay_tests_list,

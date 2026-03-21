@@ -256,15 +256,22 @@ def _test_bot_volume_mounts(
 ) -> list[str]:
     """Generate Docker Compose volume mount lines for a test subject bot.
 
-    Mounts the live source directory as the base, then mounts symlink
-    targets separately (Docker on Windows can't follow junctions), and
-    overlays any aiarena-specific files (run.py, requirements.txt,
-    ladderbots.json) from the bot's overlay directory.
+    When a live source directory is available (via *source_override* or
+    ``test_bot.source_path``), it is mounted as the base, symlink targets
+    are mounted separately, and aiarena overlay files are layered on top.
 
-    When *source_override* is provided (e.g. a git worktree path), it is
-    used instead of ``test_bot.source_path``.
+    When no source directory is configured, the bot's ``aiarena/bots/``
+    directory is mounted directly as a single volume — no overlay mounts
+    are needed since all files already live there.
     """
-    source = (source_override or test_bot.source_path).replace('\\', '/')
+    source = source_override or test_bot.source_path
+
+    if not source:
+        # No live source — mount the aiarena/bots/<name>/ directory directly.
+        bot_dir = os.path.join(AIARENA_BOTS_DIR, aiarena_name).replace('\\', '/')
+        return [f'      - "{bot_dir}:/bots/{aiarena_name}"']
+
+    source = source.replace('\\', '/')
     mounts = [f'      - "{source}:/bots/{aiarena_name}"']
 
     # Mount symlink/junction targets explicitly
@@ -444,6 +451,43 @@ def get_available_aiarena_bots() -> list[str]:
             and _has_bot_config(os.path.join(AIARENA_BOTS_DIR, d))
         )
     )
+
+
+def get_available_aiarena_bot_details() -> list[dict]:
+    """Return detailed info for bot directories under aiarena/bots/.
+
+    Each entry is a dict with keys: ``directory``, ``name``, ``race``,
+    ``type``.  When a ``ladderbots.json`` exists the name, race, and type
+    are extracted from the first bot entry; otherwise they default to the
+    directory name and empty strings.
+
+    Excludes internal copies (``_p2`` / ``_v_``).
+    """
+    if not os.path.isdir(AIARENA_BOTS_DIR):
+        return []
+    results: list[dict] = []
+    for d in sorted(os.listdir(AIARENA_BOTS_DIR)):
+        if d.endswith('_p2') or '_v_' in d:
+            continue
+        bot_path = os.path.join(AIARENA_BOTS_DIR, d)
+        if not os.path.isdir(bot_path) or not _has_bot_config(bot_path):
+            continue
+        info: dict = {'directory': d, 'name': d, 'race': '', 'type': ''}
+        ladderbots_path = os.path.join(bot_path, 'ladderbots.json')
+        if os.path.isfile(ladderbots_path):
+            try:
+                with open(ladderbots_path) as f:
+                    data = json.load(f)
+                bots = data.get('Bots', {})
+                if bots:
+                    bot_name, bot_info = next(iter(bots.items()))
+                    info['name'] = bot_name
+                    info['race'] = bot_info.get('Race', '')
+                    info['type'] = bot_info.get('Type', '').lower()
+            except (json.JSONDecodeError, StopIteration):
+                pass
+        results.append(info)
+    return results
 
 
 def validate_bot_directory(bot_dir_name: str) -> str | None:

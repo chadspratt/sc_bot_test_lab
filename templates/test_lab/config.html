@@ -53,13 +53,13 @@ td { text-align: left; }
             </p>
             {% if aiarena_bots %}
             <div class="file-list">
-                <strong>Available bot directories:</strong>
+                <strong>Available bot directories</strong> <small style="color: #666;">(click to autopopulate)</small><strong>:</strong>
                 {% for d in aiarena_bots %}
-                    <code>{{ d }}</code>
+                    <code class="bot-dir-link" data-directory="{{ d.directory }}" style="cursor: pointer; text-decoration: underline; text-decoration-style: dotted;">{{ d.directory }}</code>
                 {% endfor %}
             </div>
             {% else %}
-            <p><em>No bot directories found in test_lab/aiarena/bots/.</em></p>
+            <p><em>No unregistered bot directories found in test_lab/aiarena/bots/.</em></p>
             {% endif %}
 
             <form method="post" action="{% url 'create_custom_bot' %}" style="margin-top: 15px;">
@@ -79,14 +79,13 @@ td { text-align: left; }
                 </div>
                 <div class="form-group">
                     <label for="aiarena_bot_directory">Bot Directory:</label>
+                    <input type="text" name="bot_directory" id="aiarena_bot_directory" placeholder="e.g. my_bot"{% if aiarena_bots %} list="aiarena_bot_dirs"{% endif %}>
                     {% if aiarena_bots %}
-                    <select name="bot_directory" id="aiarena_bot_directory">
+                    <datalist id="aiarena_bot_dirs">
                         {% for d in aiarena_bots %}
-                        <option value="{{ d }}">{{ d }}</option>
+                        <option value="{{ d.directory }}">
                         {% endfor %}
-                    </select>
-                    {% else %}
-                    <input type="text" name="bot_directory" id="aiarena_bot_directory" placeholder="e.g. my_bot">
+                    </datalist>
                     {% endif %}
                 </div>
                 <div class="form-group">
@@ -524,6 +523,43 @@ td { text-align: left; }
 {% block extra_js %}
 <script>
     initTabs('config-tabs');
+
+    // --- Bot directory click-to-autopopulate ---
+    (function() {
+        var botDetails = {{ aiarena_bots_json|safe }};
+        var detailsByDir = {};
+        botDetails.forEach(function(b) { detailsByDir[b.directory] = b; });
+
+        document.querySelectorAll('.bot-dir-link').forEach(function(el) {
+            el.addEventListener('click', function() {
+                var dir = this.getAttribute('data-directory');
+                var info = detailsByDir[dir];
+                if (!info) return;
+                var nameField = document.getElementById('name');
+                var dirField = document.getElementById('aiarena_bot_directory');
+                var raceField = document.getElementById('race');
+                var typeField = document.getElementById('aiarena_bot_type');
+                if (nameField) nameField.value = info.name;
+                if (dirField) dirField.value = info.directory;
+                if (raceField && info.race) {
+                    for (var i = 0; i < raceField.options.length; i++) {
+                        if (raceField.options[i].value.toLowerCase() === info.race.toLowerCase()) {
+                            raceField.selectedIndex = i;
+                            break;
+                        }
+                    }
+                }
+                if (typeField && info.type) {
+                    for (var i = 0; i < typeField.options.length; i++) {
+                        if (typeField.options[i].value === info.type) {
+                            typeField.selectedIndex = i;
+                            break;
+                        }
+                    }
+                }
+            });
+        });
+    })();
 
     function updateBotTestSuite(botId, suiteId) {
         fetch(`{% url 'update_custom_bot_test_suite' 0 %}`.replace('/0/', `/${botId}/`), {
