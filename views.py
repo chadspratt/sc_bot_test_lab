@@ -353,7 +353,7 @@ def _get_match_list_context(request):
     # ------------------------------------------------------------------
     # Context
     # ------------------------------------------------------------------
-    test_subject_bots = CustomBot.objects.all().order_by('name')
+    test_subject_bots = CustomBot.objects.filter(is_test_subject=True).order_by('name')
     test_suites = TestSuite.objects.all().order_by('name')
     return {
         'pivot_data': pivot_data,
@@ -1256,7 +1256,7 @@ def results_page(request):
 def run_match_page(request):
     """Run Match page with match type tabs and custom match results table."""
     custom_bots_list = CustomBot.objects.all().order_by('name')
-    test_subject_bots = CustomBot.objects.all().order_by('name')
+    test_subject_bots = CustomBot.objects.filter(is_test_subject=True).order_by('name')
     version_test_bots = CustomBot.objects.filter(git_repo_path__gt='').order_by('name')
 
     # Collect recent commits for each test-subject bot that has a git repo
@@ -1601,6 +1601,53 @@ def update_custom_bot_test_suite(request, bot_id):
         bot.default_test_suite = None
 
     bot.save(update_fields=['default_test_suite'])
+    return JsonResponse({'status': 'ok'})
+
+
+@csrf_exempt
+@require_POST
+def update_custom_bot_test_subject(request, bot_id):
+    """Update a bot's test subject settings."""
+    try:
+        bot = CustomBot.objects.get(id=bot_id)
+    except CustomBot.DoesNotExist:
+        return JsonResponse({'status': 'error', 'message': 'Bot not found'}, status=404)
+
+    is_test_subject = request.POST.get('is_test_subject') == 'on'
+
+    update_fields = ['is_test_subject']
+
+    if is_test_subject:
+        source_path = request.POST.get('source_path', '').strip()
+        git_repo_path = request.POST.get('git_repo_path', '').strip()
+        enable_version_history = request.POST.get('enable_version_history') == 'on'
+        dockerfile = request.POST.get('dockerfile', '').strip()
+
+        if not source_path:
+            return JsonResponse({'status': 'error', 'message': 'Source path is required for test subject bots.'}, status=400)
+
+        if not os.path.isdir(source_path):
+            return JsonResponse({'status': 'error', 'message': f'Source path not found: {source_path}'}, status=400)
+
+        symlink_mounts = aiarena_runner.scan_directory_symlinks(source_path)
+
+        bot.is_test_subject = True
+        bot.source_path = source_path
+        bot.git_repo_path = git_repo_path
+        bot.enable_version_history = enable_version_history
+        bot.dockerfile = dockerfile
+        bot.symlink_mounts = symlink_mounts
+        update_fields += ['source_path', 'git_repo_path', 'enable_version_history', 'dockerfile', 'symlink_mounts']
+    else:
+        bot.is_test_subject = False
+        bot.source_path = ''
+        bot.git_repo_path = ''
+        bot.enable_version_history = False
+        bot.dockerfile = ''
+        bot.symlink_mounts = []
+        update_fields += ['source_path', 'git_repo_path', 'enable_version_history', 'dockerfile', 'symlink_mounts']
+
+    bot.save(update_fields=update_fields)
     return JsonResponse({'status': 'ok'})
 
 

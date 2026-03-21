@@ -12,6 +12,19 @@ td { text-align: left; }
 .form-row > div > label { display: block; margin-bottom: 4px; font-weight: bold; font-size: 13px; }
 .form-row input[type="text"],
 .form-row input[type="file"] { padding: 6px 8px; border: 1px solid #ccc; border-radius: 3px; }
+.modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; justify-content: center; align-items: center; }
+.modal-overlay.active { display: flex; }
+.modal-box { background: white; border-radius: 8px; padding: 24px; width: 500px; max-width: 90%; max-height: 80vh; overflow-y: auto; box-shadow: 0 4px 20px rgba(0,0,0,0.3); }
+.modal-box h3 { margin-top: 0; margin-bottom: 16px; }
+.modal-box .form-group { margin-bottom: 12px; }
+.modal-box .form-group label { display: block; margin-bottom: 4px; font-weight: bold; }
+.modal-box .form-group input[type="text"],
+.modal-box .form-group select { width: 100%; padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; box-sizing: border-box; }
+.modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 16px; }
+.modal-actions .btn-cancel { background: #6c757d; color: white; border: none; padding: 8px 16px; border-radius: 5px; cursor: pointer; font-size: 14px; }
+.modal-actions .btn-cancel:hover { background: #5a6268; }
+.ts-edit-btn { cursor: pointer; text-decoration: underline; text-decoration-style: dotted; }
+.ts-edit-btn:hover { opacity: 0.8; }
 {% endblock %}
 
 {% block content %}
@@ -161,14 +174,14 @@ td { text-align: left; }
                         <td><code>{{ bot.aiarena_bot_type }}</code></td>
                         <td>
                             {% if bot.is_test_subject %}
-                                <span style="color: #28a745; font-weight: bold;">Yes</span>
+                                <span class="ts-edit-btn" style="color: #28a745; font-weight: bold;" onclick="openTestSubjectModal({{ bot.id }}, '{{ bot.name|escapejs }}', true, '{{ bot.source_path|escapejs }}', '{{ bot.git_repo_path|escapejs }}', {{ bot.enable_version_history|yesno:'true,false' }}, '{{ bot.dockerfile|escapejs }}')">Yes</span>
                                 {% if bot.source_path %}<br><small>src: <code>{{ bot.source_path }}</code></small>{% endif %}
                                 {% if bot.git_repo_path %}<br><small>git: <code>{{ bot.git_repo_path }}</code></small>{% endif %}
                                 {% if bot.enable_version_history %}<br><small style="color: #17a2b8;">version history: enabled</small>{% endif %}
                                 {% if bot.dockerfile %}<br><small>dockerfile: <code>{{ bot.dockerfile }}</code></small>{% endif %}
                                 {% if bot.symlink_mounts %}<br><small>symlinks: {{ bot.symlink_mounts|length }}</small>{% endif %}
                             {% else %}
-                                <span style="color: #999;">No</span>
+                                <span class="ts-edit-btn" style="color: #999;" onclick="openTestSubjectModal({{ bot.id }}, '{{ bot.name|escapejs }}', false, '', '', false, '')">No</span>
                             {% endif %}
                         </td>
                         <td>
@@ -473,6 +486,50 @@ td { text-align: left; }
         </div>
     </div>
 </div>
+
+{# ==================== TEST SUBJECT MODAL ==================== #}
+<div class="modal-overlay" id="test-subject-modal">
+    <div class="modal-box">
+        <h3>Edit Test Subject — <span id="ts-modal-bot-name"></span></h3>
+        <input type="hidden" id="ts-modal-bot-id">
+        <div class="form-group">
+            <label>
+                <input type="checkbox" id="ts-modal-enabled" onchange="document.getElementById('ts-modal-fields').style.display = this.checked ? 'block' : 'none';">
+                This bot is a test subject (Player 1)
+            </label>
+        </div>
+        <div id="ts-modal-fields" style="display: none;">
+            <div class="form-group">
+                <label for="ts-modal-source-path">Source Path:</label>
+                <input type="text" id="ts-modal-source-path" placeholder="e.g. C:\Users\me\mybot">
+                <small style="color: #666;">Absolute path to the bot source on the host. Mounted into Docker at runtime.</small>
+            </div>
+            <div class="form-group">
+                <label for="ts-modal-git-repo-path">Git Repo Path (optional):</label>
+                <input type="text" id="ts-modal-git-repo-path" placeholder="e.g. C:\Users\me\mybot">
+                <small style="color: #666;">Path to git repo for past-version matches. Leave blank to disable.</small>
+            </div>
+            <div class="form-group">
+                <label>
+                    <input type="checkbox" id="ts-modal-version-history">
+                    Enable version history matches
+                </label>
+                <small style="color: #666;">Allow running matches against past versions of this bot (requires Git Repo Path).</small>
+            </div>
+            <div class="form-group">
+                <label for="ts-modal-dockerfile">Custom Dockerfile (optional):</label>
+                <input type="text" id="ts-modal-dockerfile" placeholder="e.g. Dockerfile.mybot">
+                <small style="color: #666;">Dockerfile name (relative to test_lab/aiarena/) for custom build steps.</small>
+            </div>
+        </div>
+        <div id="ts-modal-error" style="display: none; color: red; background: #f8d7da; border: 1px solid #f5c6cb; padding: 8px; border-radius: 4px; margin-top: 10px;"></div>
+        <div class="modal-actions">
+            <button class="btn-cancel" onclick="closeTestSubjectModal()">Cancel</button>
+            <button class="btn btn-primary" onclick="saveTestSubject()">Save</button>
+        </div>
+    </div>
+</div>
+
 {% endblock %}
 
 {% block extra_js %}
@@ -526,5 +583,65 @@ td { text-align: left; }
         document.getElementById('rt_ai_fields').style.display = type === 'BuiltInAI' ? 'flex' : 'none';
         document.getElementById('rt_custom_bot_field').style.display = type === 'CustomBot' ? '' : 'none';
     }
+
+    function openTestSubjectModal(botId, botName, isTestSubject, sourcePath, gitRepoPath, enableVersionHistory, dockerfile) {
+        document.getElementById('ts-modal-bot-id').value = botId;
+        document.getElementById('ts-modal-bot-name').textContent = botName;
+        document.getElementById('ts-modal-enabled').checked = isTestSubject;
+        document.getElementById('ts-modal-source-path').value = sourcePath;
+        document.getElementById('ts-modal-git-repo-path').value = gitRepoPath;
+        document.getElementById('ts-modal-version-history').checked = enableVersionHistory;
+        document.getElementById('ts-modal-dockerfile').value = dockerfile;
+        document.getElementById('ts-modal-fields').style.display = isTestSubject ? 'block' : 'none';
+        document.getElementById('ts-modal-error').style.display = 'none';
+        document.getElementById('test-subject-modal').classList.add('active');
+    }
+
+    function closeTestSubjectModal() {
+        document.getElementById('test-subject-modal').classList.remove('active');
+    }
+
+    function saveTestSubject() {
+        var botId = document.getElementById('ts-modal-bot-id').value;
+        var enabled = document.getElementById('ts-modal-enabled').checked;
+        var params = new URLSearchParams();
+        if (enabled) {
+            params.set('is_test_subject', 'on');
+            params.set('source_path', document.getElementById('ts-modal-source-path').value);
+            params.set('git_repo_path', document.getElementById('ts-modal-git-repo-path').value);
+            if (document.getElementById('ts-modal-version-history').checked) params.set('enable_version_history', 'on');
+            params.set('dockerfile', document.getElementById('ts-modal-dockerfile').value);
+        }
+
+        document.getElementById('ts-modal-error').style.display = 'none';
+
+        fetch(`{% url 'update_custom_bot_test_subject' 0 %}`.replace('/0/', `/${botId}/`), {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+            },
+            body: params.toString()
+        }).then(function(r) { return r.json().then(function(data) { return {ok: r.ok, data: data}; }); })
+        .then(function(result) {
+            if (result.data.status === 'ok') {
+                closeTestSubjectModal();
+                location.reload();
+            } else {
+                var errEl = document.getElementById('ts-modal-error');
+                errEl.textContent = result.data.message || 'Unknown error';
+                errEl.style.display = 'block';
+            }
+        }).catch(function() {
+            var errEl = document.getElementById('ts-modal-error');
+            errEl.textContent = 'Failed to save test subject settings.';
+            errEl.style.display = 'block';
+        });
+    }
+
+    // Close modal on overlay click
+    document.getElementById('test-subject-modal').addEventListener('click', function(e) {
+        if (e.target === this) closeTestSubjectModal();
+    });
 </script>
 {% endblock %}
