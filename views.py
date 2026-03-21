@@ -13,7 +13,7 @@ from django.urls import reverse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
-from . import aiarena_runner, bot_versions
+from . import aiarena_runner, bot_versions, worktrees
 from .models import CustomBot, Match, MatchEvent, ReplayTest, TestGroup, TestSuite
 
 logger = logging.getLogger('test_lab')
@@ -395,6 +395,7 @@ def start_custom_bot_match(
     custom_bot: CustomBot,
     test_bot: CustomBot | None = None,
     test_group_id: int = -1,
+    source_override: str | None = None,
 ) -> int:
     """Launch a single Docker match against a custom bot.
     Returns the match ID.
@@ -404,6 +405,9 @@ def start_custom_bot_match(
 
     ``test_group_id`` defaults to ``-1`` (ad-hoc match).  Pass a real
     TestGroup id to include this match in a test group.
+
+    ``source_override`` overrides the test bot's source directory (e.g.
+    a git worktree path for branch-based testing).
 
     For aiarena-type bots, uses the aiarena local-play-bootstrap infrastructure.
     For python_sc2 / external_python bots, uses the existing single-container approach.
@@ -426,7 +430,10 @@ def start_custom_bot_match(
 
     if custom_bot.is_aiarena:
         # Use aiarena infrastructure (supports any language/framework)
-        aiarena_runner.start_aiarena_match(match, custom_bot, test_bot=test_bot)
+        aiarena_runner.start_aiarena_match(
+            match, custom_bot, test_bot=test_bot,
+            source_override=source_override,
+        )
         return match_id
 
     # Legacy path: python_sc2 / external_python bots
@@ -450,6 +457,10 @@ def start_custom_bot_match(
     if custom_bot.is_external and custom_bot.bot_directory:
         command += ['-e', f'EXTERNAL_BOT_DIR={custom_bot.bot_directory}']
 
+    if source_override:
+        override_src = source_override.replace('\\', '/')
+        command += ['-v', f'{override_src}:/root/bot']
+
     command += [
         'bot',
         'bash', '/root/runner/run_docker_bot_vs_bot.sh',
@@ -466,6 +477,7 @@ def start_test_suite(
     difficulty: str = 'CheatInsane',
     test_bot: CustomBot | None = None,
     test_suite: TestSuite | None = None,
+    branch: str = '',
 ) -> tuple[int, int]:
     """
     Create a TestGroup and launch Docker match containers based on the
@@ -474,6 +486,10 @@ def start_test_suite(
     When *test_suite* is ``None`` or the default "All" suite, runs every
     race/build combination against the built-in AI as well as every
     registered custom bot (original behaviour).
+
+    When *branch* is provided, a git worktree is created for that branch
+    and the bot source is mounted from the worktree instead of the live
+    working directory.  This allows testing multiple branches simultaneously.
 
     Returns (test_group_id, number of matches started).
     Raises FileNotFoundError if docker-compose.yml is missing.
@@ -497,9 +513,17 @@ def start_test_suite(
     include_blizzard = test_suite.include_blizzard_ai if test_suite else True
     suite_custom_bots = list(test_suite.custom_bots.all()) if test_suite else None
 
+    # Resolve branch worktree source override
+    source_override: str | None = None
+    if branch and test_bot and test_bot.git_repo_path:
+        source_override = worktrees.get_or_create_worktree(
+            test_bot.git_repo_path, branch,
+        )
+
     test_group = TestGroup.objects.create(
         description=description[:255],
         test_suite=test_suite,
+        branch=branch,
     )
     test_group_id = test_group.id
 
@@ -518,16 +542,20 @@ def start_test_suite(
                     '-e', f'BUILD={build}',
                     '-e', f'MATCH_ID={match_id}',
                     '-e', f'DIFFICULTY={difficulty}',
-                    'bot',
                 ]
+                if source_override:
+                    override_src = source_override.replace('\\', '/')
+                    command += ['-v', f'{override_src}:/root/bot']
+                command.append('bot')
                 with open(log_file, 'w') as log:
                     subprocess.Popen(command, cwd=DOCKER_COMPOSE_PATH, stdout=log, stderr=log)
                 count += 1
 
     # --- Custom bot matches ---
     if suite_custom_bots is not None:
-        # Use only bots selected in the test suite (excluding the test bot)
-        bots_to_test = [b for b in suite_custom_bots if test_bot is None or b.id != test_bot.id]
+        # Use bots selected in the test suite; if the test bot is included,
+        # run it as a mirror match instead of skipping.
+        bots_to_test = list(suite_custom_bots)
     else:
         # Default: all custom bots except the test bot
         bots_to_test = list(
@@ -536,7 +564,10 @@ def start_test_suite(
 
     for bot in bots_to_test:
         try:
-            start_custom_bot_match(bot, test_bot=test_bot, test_group_id=test_group_id)
+            start_custom_bot_match(
+                bot, test_bot=test_bot, test_group_id=test_group_id,
+                source_override=source_override,
+            )
             count += 1
         except Exception:
             # Don't let a single custom-bot failure abort the whole suite
@@ -571,6 +602,7 @@ def start_test_suite(
                     match.save()
                     aiarena_runner.start_past_version_match(
                         match, commit.hash, commit.short_hash, test_bot=test_bot,
+                        source_override=source_override,
                     )
                     count += 1
                 except Exception as e:
@@ -583,7 +615,10 @@ def start_test_suite(
     replay_test_list = list(test_suite.replay_tests.all()) if test_suite else []
     for replay_test in replay_test_list:
         try:
-            _launch_replay_test_match(replay_test, test_group_id=test_group_id, test_bot=test_bot)
+            _launch_replay_test_match(
+                replay_test, test_group_id=test_group_id, test_bot=test_bot,
+                source_override=source_override,
+            )
             count += 1
         except Exception as e:
             logging.getLogger('test_lab').exception(
@@ -647,6 +682,9 @@ def api_trigger_tests(request):
       - description (str): optional test group description
       - custom_bot_id (int): when set, runs a single match against this
         custom bot instead of the full 15-match test suite
+      - branch (str): git branch to test against. When set, a git worktree
+        is created and the bot source is mounted from the worktree.
+        Multiple branches can be tested simultaneously.
     """
     import json
     try:
@@ -657,6 +695,7 @@ def api_trigger_tests(request):
     custom_bot_id = body.get('custom_bot_id')
     test_bot_id = body.get('test_bot_id')
     description = body.get('description', '')
+    branch = body.get('branch', '')
 
     # Resolve test subject bot
     test_bot = None
@@ -678,13 +717,29 @@ def api_trigger_tests(request):
                 {'status': 'error', 'message': f'Custom bot with id {custom_bot_id} not found'},
                 status=404,
             )
+        # Resolve source override for branch testing
+        source_override = None
+        if branch and test_bot and test_bot.git_repo_path:
+            try:
+                source_override = worktrees.get_or_create_worktree(
+                    test_bot.git_repo_path, branch,
+                )
+            except ValueError as e:
+                return JsonResponse(
+                    {'status': 'error', 'message': f'Invalid branch: {e}'},
+                    status=400,
+                )
         try:
-            match_id = start_custom_bot_match(custom_bot, test_bot=test_bot)
+            match_id = start_custom_bot_match(
+                custom_bot, test_bot=test_bot,
+                source_override=source_override,
+            )
             return JsonResponse({
                 'status': 'ok',
                 'match_id': match_id,
                 'custom_bot': custom_bot.name,
                 'test_bot': test_bot.name if test_bot else 'BotTato',
+                'branch': branch or None,
             })
         except Exception as e:
             return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
@@ -702,10 +757,21 @@ def api_trigger_tests(request):
             )
     elif test_bot and test_bot.default_test_suite:
         test_suite = test_bot.default_test_suite
+
+    # Validate branch early if provided
+    if branch and test_bot and test_bot.git_repo_path:
+        try:
+            worktrees.get_or_create_worktree(test_bot.git_repo_path, branch)
+        except ValueError as e:
+            return JsonResponse(
+                {'status': 'error', 'message': f'Invalid branch: {e}'},
+                status=400,
+            )
+
     try:
         test_group_id, count = start_test_suite(
             description=description, difficulty=difficulty, test_bot=test_bot,
-            test_suite=test_suite,
+            test_suite=test_suite, branch=branch,
         )
         return JsonResponse({
             'status': 'ok',
@@ -714,6 +780,7 @@ def api_trigger_tests(request):
             'difficulty': difficulty,
             'description': description,
             'test_suite': test_suite.name if test_suite else 'All',
+            'branch': branch or None,
         })
     except Exception as e:
         return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
@@ -1716,7 +1783,10 @@ def run_replay_match(request):
     return redirect('run_match')
 
 
-def _launch_replay_test_match(replay_test: ReplayTest, test_group_id: int = -1, test_bot=None) -> int:
+def _launch_replay_test_match(
+    replay_test: ReplayTest, test_group_id: int = -1, test_bot=None,
+    source_override: str | None = None,
+) -> int:
     """Launch a single replay test match in Docker. Returns the match ID."""
     import shutil as _shutil
 
@@ -1773,6 +1843,10 @@ def _launch_replay_test_match(replay_test: ReplayTest, test_group_id: int = -1, 
     if duration_loops and duration_loops > 0:
         duration_seconds = duration_loops / 22.4
         command += ['-e', f'REPLAY_DURATION={duration_seconds:.1f}']
+
+    if source_override:
+        override_src = source_override.replace('\\', '/')
+        command += ['-v', f'{override_src}:/root/bot']
 
     command += [
         'bot',

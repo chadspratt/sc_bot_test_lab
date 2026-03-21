@@ -160,10 +160,21 @@ class TestGroup(models.Model):
         related_name='test_groups',
         help_text="The test suite configuration used for this test group",
     )
+    branch = models.CharField(
+        max_length=200,
+        blank=True,
+        default='',
+        help_text="Git branch the test was run against. Empty = current working directory (default).",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f"Group {self.id}: {self.description}" if self.description else f"Group {self.id}"
+        label = f"Group {self.id}"
+        if self.description:
+            label += f": {self.description}"
+        if self.branch:
+            label += f" [{self.branch}]"
+        return label
 
 
 class Match(models.Model):

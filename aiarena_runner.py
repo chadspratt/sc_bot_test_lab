@@ -11,7 +11,8 @@ The aiarena infrastructure uses four containers:
   - bot_controller2: runs Bot 2 (opponent)
   - proxy_controller: coordinates the match
 
-Bots must be placed in aiarena/bots/<bot_name>/ with a ladderbots.json.
+Bots must be placed in aiarena/bots/<bot_name>/ with a ladderbots.json
+or at minimum a run.py (Python bots without ladderbots.json get a default config).
 """
 
 from __future__ import annotations
@@ -58,7 +59,15 @@ BOTTATO_MIRROR_NAME = 'BotTato_p2'
 BOTTATO_VERSION_PREFIX = 'BotTato_v_'
 
 # Base files in AIARENA_DIR that are copied into each per-match run directory
-_BASE_FILES = ('docker-compose.yml', 'Dockerfile.bottato', 'config.toml')
+_BASE_FILES = (
+    'docker-compose.yml', 'Dockerfile.bottato', 'config.toml',
+    'Dockerfile.proxy_fwd', 'entrypoint_proxy_fwd.sh',
+)
+
+# Bot types whose SC2 client library connects to localhost:GamePort instead of
+# LadderServer:GamePort.  These need a socat proxy inside bot_controller2 so
+# that localhost:<proxy_port> reaches the proxy_controller container.
+_NEEDS_PROXY_FWD: set[str] = {'dotnetcore'}
 
 # Maps available for aiarena matches (same as the test_lab map pool)
 AIARENA_MAP_LIST = [
@@ -204,10 +213,12 @@ def _ensure_mirror_overlay(test_bot: CustomBot) -> str:
         if os.path.isfile(src_lb):
             with open(src_lb) as f:
                 lb_data = json.load(f)
-            if 'Bots' in lb_data and bot_dir in lb_data['Bots']:
-                lb_data['Bots'][mirror_name] = lb_data['Bots'].pop(bot_dir)
-            with open(dst_lb, 'w') as f:
-                json.dump(lb_data, f, indent=4)
+        else:
+            lb_data = _default_ladderbots_data(bot_dir)
+        if 'Bots' in lb_data and bot_dir in lb_data['Bots']:
+            lb_data['Bots'][mirror_name] = lb_data['Bots'].pop(bot_dir)
+        with open(dst_lb, 'w') as f:
+            json.dump(lb_data, f, indent=4)
 
     return mirror_name
 
@@ -243,24 +254,32 @@ def _ensure_version_overlay(test_bot: CustomBot, short_hash: str) -> str:
     if os.path.isfile(src_lb):
         with open(src_lb) as f:
             lb_data = json.load(f)
-        if 'Bots' in lb_data and bot_dir in lb_data['Bots']:
-            lb_data['Bots'][bot_name] = lb_data['Bots'].pop(bot_dir)
-        dst_lb = os.path.join(dst, 'ladderbots.json')
-        with open(dst_lb, 'w') as f:
-            json.dump(lb_data, f, indent=4)
+    else:
+        lb_data = _default_ladderbots_data(bot_dir)
+    if 'Bots' in lb_data and bot_dir in lb_data['Bots']:
+        lb_data['Bots'][bot_name] = lb_data['Bots'].pop(bot_dir)
+    dst_lb = os.path.join(dst, 'ladderbots.json')
+    with open(dst_lb, 'w') as f:
+        json.dump(lb_data, f, indent=4)
 
     return bot_name
 
 
-def _test_bot_volume_mounts(test_bot: CustomBot, aiarena_name: str) -> list[str]:
+def _test_bot_volume_mounts(
+    test_bot: CustomBot, aiarena_name: str,
+    source_override: str | None = None,
+) -> list[str]:
     """Generate Docker Compose volume mount lines for a test subject bot.
 
     Mounts the live source directory as the base, then mounts symlink
     targets separately (Docker on Windows can't follow junctions), and
     overlays any aiarena-specific files (run.py, requirements.txt,
     ladderbots.json) from the bot's overlay directory.
+
+    When *source_override* is provided (e.g. a git worktree path), it is
+    used instead of ``test_bot.source_path``.
     """
-    source = test_bot.source_path.replace('\\', '/')
+    source = (source_override or test_bot.source_path).replace('\\', '/')
     mounts = [f'      - "{source}:/bots/{aiarena_name}"']
 
     # Mount symlink/junction targets explicitly
@@ -316,10 +335,12 @@ def _write_compose_override(
     test_bot_aiarena_name: str,
     bot2_name: str,
     bot2_host_path: str | None,
+    bot2_type: str = 'python',
     is_mirror: bool = False,
     mirror_aiarena_name: str | None = None,
     is_past_version: bool = False,
     past_version_cache_path: str | None = None,
+    source_override: str | None = None,
 ) -> None:
     """Generate docker-compose.override.yml with per-bot volume mounts.
 
@@ -328,13 +349,16 @@ def _write_compose_override(
     - A regular opponent (single directory mount)
     - A mirror match (live mounts + optional custom Dockerfile)
     - A past version (cached source + symlink mounts + optional Dockerfile)
+
+    *source_override* is passed through to ``_test_bot_volume_mounts``
+    for branch-based testing.
     """
     lines = [
         'services:',
         '  bot_controller1:',
         '    volumes:',
     ]
-    lines += _test_bot_volume_mounts(test_bot, test_bot_aiarena_name)
+    lines += _test_bot_volume_mounts(test_bot, test_bot_aiarena_name, source_override=source_override)
 
     lines.append('  bot_controller2:')
     dockerfile = test_bot.dockerfile
@@ -357,10 +381,16 @@ def _write_compose_override(
                 f'      dockerfile: {dockerfile}',
             ]
         lines += ['    volumes:']
-        lines += _test_bot_volume_mounts(test_bot, mirror_aiarena_name)
+        lines += _test_bot_volume_mounts(test_bot, mirror_aiarena_name, source_override=source_override)
     else:
         assert bot2_host_path is not None
         b2 = bot2_host_path.replace('\\', '/')
+        if bot2_type in _NEEDS_PROXY_FWD:
+            lines += [
+                '    build:',
+                '      context: .',
+                '      dockerfile: Dockerfile.proxy_fwd',
+            ]
         lines += [
             '    volumes:',
             f'      - "{b2}:/bots/{bot2_name}"',
@@ -372,8 +402,30 @@ def _write_compose_override(
         f.write('\n'.join(lines))
 
 
+def _has_bot_config(bot_path: str) -> bool:
+    """Return True if a bot directory has ladderbots.json or run.py."""
+    return (
+        os.path.isfile(os.path.join(bot_path, 'ladderbots.json'))
+        or os.path.isfile(os.path.join(bot_path, 'run.py'))
+    )
+
+
+def _default_ladderbots_data(bot_name: str) -> dict:
+    """Generate a default ladderbots.json dict for a Python bot with run.py."""
+    return {
+        'Bots': {
+            bot_name: {
+                'Race': 'Random',
+                'Type': 'Python',
+                'RootPath': './',
+                'FileName': 'run.py',
+            }
+        }
+    }
+
+
 def get_available_aiarena_bots() -> list[str]:
-    """Return directory names under aiarena/bots/ that have a ladderbots.json.
+    """Return directory names under aiarena/bots/ that have a ladderbots.json or run.py.
 
     Excludes internal mirror/version copies (names ending with ``_p2`` or
     matching ``*_v_*``) which are implementation details of self-play and
@@ -387,13 +439,13 @@ def get_available_aiarena_bots() -> list[str]:
             not d.endswith('_p2')
             and '_v_' not in d
             and os.path.isdir(os.path.join(AIARENA_BOTS_DIR, d))
-            and os.path.isfile(os.path.join(AIARENA_BOTS_DIR, d, 'ladderbots.json'))
+            and _has_bot_config(os.path.join(AIARENA_BOTS_DIR, d))
         )
     )
 
 
 def validate_bot_directory(bot_dir_name: str) -> str | None:
-    """Check that a bot directory exists and has ladderbots.json.
+    """Check that a bot directory exists and has ladderbots.json or run.py.
 
     Returns None if valid, or an error message string.
     """
@@ -401,21 +453,29 @@ def validate_bot_directory(bot_dir_name: str) -> str | None:
     if not os.path.isdir(bot_path):
         return f'Bot directory not found: {bot_dir_name}'
 
-    ladderbots_path = os.path.join(bot_path, 'ladderbots.json')
-    if not os.path.isfile(ladderbots_path):
-        return f'ladderbots.json not found in {bot_dir_name}/'
+    if not _has_bot_config(bot_path):
+        return f'Neither ladderbots.json nor run.py found in {bot_dir_name}/'
 
     return None
 
 
 def read_ladderbots_json(bot_dir_name: str) -> dict | None:
-    """Read and parse ladderbots.json for a bot directory."""
-    ladderbots_path = os.path.join(AIARENA_BOTS_DIR, bot_dir_name, 'ladderbots.json')
+    """Read and parse ladderbots.json for a bot directory.
+
+    If ladderbots.json is missing but run.py exists, returns a default
+    Python bot configuration pointing to run.py.
+    """
+    bot_path = os.path.join(AIARENA_BOTS_DIR, bot_dir_name)
+    ladderbots_path = os.path.join(bot_path, 'ladderbots.json')
     try:
         with open(ladderbots_path) as f:
             return json.load(f)
     except (OSError, json.JSONDecodeError):
-        return None
+        pass
+    # Fallback: generate default config if run.py exists
+    if os.path.isfile(os.path.join(bot_path, 'run.py')):
+        return _default_ladderbots_data(bot_dir_name)
+    return None
 
 
 def _create_run_dir(match_id: int) -> str:
@@ -553,6 +613,7 @@ def start_aiarena_match(
     opponent_bot: CustomBot,
     test_bot: CustomBot | None = None,
     map_name: str | None = None,
+    source_override: str | None = None,
 ) -> None:
     """Launch an aiarena match in a background thread.
 
@@ -560,6 +621,9 @@ def start_aiarena_match(
     back to the legacy BotTato constants for backward compatibility.
 
     *opponent_bot* is the opponent (Player 2).
+
+    *source_override* overrides the test bot's source directory (e.g.
+    a git worktree path for branch-based testing).
 
     Each match gets its own run directory under ``aiarena/runs/<match_id>/``
     so multiple matches can run concurrently without conflicting.
@@ -640,14 +704,17 @@ def start_aiarena_match(
             test_bot_aiarena_name=test_bot_dir,
             bot2_name=opponent_dir_name,
             bot2_host_path=opponent_path,
+            bot2_type=opponent_type,
             is_mirror=is_mirror,
             mirror_aiarena_name=mirror_name,
+            source_override=source_override,
         )
     else:
         _write_compose_override_legacy(
             run_dir,
             bot2_name=opponent_dir_name,
             bot2_host_path=opponent_path,
+            bot2_type=opponent_type,
             is_mirror=is_mirror,
         )
 
@@ -666,12 +733,16 @@ def start_past_version_match(
     short_hash: str,
     test_bot: CustomBot | None = None,
     map_name: str | None = None,
+    source_override: str | None = None,
 ) -> None:
     """Launch a match of the current test bot vs a past version.
 
     The past version's bot code is extracted from git history into a
     cache directory.  Symlink targets (e.g. shared libraries) are mounted
     from the current host so all versions share the same runtime deps.
+
+    *source_override* overrides Player 1's source directory (e.g. a git
+    worktree for branch-based testing).
 
     If *test_bot* is ``None``, falls back to BotTato legacy behavior.
     """
@@ -736,6 +807,7 @@ def start_past_version_match(
             bot2_host_path=None,
             is_past_version=True,
             past_version_cache_path=cache_path,
+            source_override=source_override,
         )
     else:
         _write_compose_override_legacy(
@@ -780,10 +852,12 @@ def _ensure_mirror_overlay_legacy() -> str:
         if os.path.isfile(src_lb):
             with open(src_lb) as f:
                 lb_data = json.load(f)
-            if 'Bots' in lb_data and BOTTATO_NAME in lb_data['Bots']:
-                lb_data['Bots'][BOTTATO_MIRROR_NAME] = lb_data['Bots'].pop(BOTTATO_NAME)
-            with open(dst_lb, 'w') as f:
-                json.dump(lb_data, f, indent=4)
+        else:
+            lb_data = _default_ladderbots_data(BOTTATO_NAME)
+        if 'Bots' in lb_data and BOTTATO_NAME in lb_data['Bots']:
+            lb_data['Bots'][BOTTATO_MIRROR_NAME] = lb_data['Bots'].pop(BOTTATO_NAME)
+        with open(dst_lb, 'w') as f:
+            json.dump(lb_data, f, indent=4)
     return BOTTATO_MIRROR_NAME
 
 
@@ -806,11 +880,13 @@ def _ensure_version_overlay_legacy(short_hash: str) -> str:
     if os.path.isfile(src_lb):
         with open(src_lb) as f:
             lb_data = json.load(f)
-        if 'Bots' in lb_data and BOTTATO_NAME in lb_data['Bots']:
-            lb_data['Bots'][bot_name] = lb_data['Bots'].pop(BOTTATO_NAME)
-        dst_lb = os.path.join(dst, 'ladderbots.json')
-        with open(dst_lb, 'w') as f:
-            json.dump(lb_data, f, indent=4)
+    else:
+        lb_data = _default_ladderbots_data(BOTTATO_NAME)
+    if 'Bots' in lb_data and BOTTATO_NAME in lb_data['Bots']:
+        lb_data['Bots'][bot_name] = lb_data['Bots'].pop(BOTTATO_NAME)
+    dst_lb = os.path.join(dst, 'ladderbots.json')
+    with open(dst_lb, 'w') as f:
+        json.dump(lb_data, f, indent=4)
     return bot_name
 
 
@@ -819,6 +895,7 @@ def _write_compose_override_legacy(
     bot2_name: str,
     bot2_host_path: str | None,
     *,
+    bot2_type: str = 'python',
     is_mirror: bool = False,
     is_past_version: bool = False,
     past_version_cache_path: str | None = None,
@@ -871,6 +948,12 @@ def _write_compose_override_legacy(
     else:
         assert bot2_host_path is not None
         b2 = bot2_host_path.replace('\\', '/')
+        if bot2_type in _NEEDS_PROXY_FWD:
+            lines += [
+                '    build:',
+                '      context: .',
+                '      dockerfile: Dockerfile.proxy_fwd',
+            ]
         lines += [
             '    volumes:',
             f'      - "{b2}:/bots/{bot2_name}"',

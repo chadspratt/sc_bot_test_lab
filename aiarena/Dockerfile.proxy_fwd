@@ -1,0 +1,19 @@
+# Extends the stock bot controller with socat for localhost proxy forwarding.
+#
+# Some bot types (e.g. DotNetCore bots using SC2API-CSharp) ignore the
+# --LadderServer argument and connect to localhost:GamePort.  In the
+# multi-container aiarena setup the proxy lives in a separate container,
+# so we need socat to forward localhost:<proxy_port> to
+# proxy_controller:<proxy_port>.
+
+FROM aiarena/arenaclient-bot:v0.8.0
+
+USER root
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends socat \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY entrypoint_proxy_fwd.sh /entrypoint_proxy_fwd.sh
+RUN chmod +x /entrypoint_proxy_fwd.sh
+
+ENTRYPOINT ["/entrypoint_proxy_fwd.sh"]

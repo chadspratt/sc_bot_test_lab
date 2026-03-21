@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Custom Bots</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .nav-links { margin: 20px 0; }
+        .nav-links a { margin-right: 20px; padding: 10px; background-color: #007bff; color: white; text-decoration: none; border-radius: 5px; }
+        .nav-links a:hover { background-color: #0056b3; }
+        .messages { margin: 10px 0; }
+        .success { color: green; padding: 10px; background-color: #d4edda; border: 1px solid #c3e6cb; margin-bottom: 10px; }
+        .error { color: red; padding: 10px; background-color: #f8d7da; border: 1px solid #f5c6cb; margin-bottom: 10px; white-space: pre-wrap; }
+        .section { margin: 20px 0; padding: 20px; border: 1px solid #ddd; border-radius: 5px; background-color: #f8f9fa; }
+        .section h3 { margin-top: 0; }
+        .btn { padding: 8px 16px; border: none; cursor: pointer; font-size: 14px; border-radius: 5px; color: white; }
+        .btn-primary { background-color: #28a745; }
+        .btn-primary:hover { background-color: #218838; }
+        .btn-danger { background-color: #dc3545; }
+        .btn-danger:hover { background-color: #c82333; }
+        table { border-collapse: collapse; width: 100%; }
+        th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+        th { background-color: #343a40; color: white; }
+        tr:nth-child(even) { background-color: #f2f2f2; }
+        .form-group { margin-bottom: 12px; }
+        .form-group label { display: block; margin-bottom: 4px; font-weight: bold; }
+        .form-group input, .form-group select, .form-group textarea {
+            width: 100%; max-width: 400px; padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px;
+        }
+        .form-group textarea { height: 60px; resize: vertical; }
+        .file-list { margin-top: 10px; }
+        .file-list code { background: #e9ecef; padding: 2px 6px; border-radius: 3px; }
+    </style>
+</head>
+<body>
+    <div class="nav-links">
+        <a href="{% url 'match_list' %}">View by Test Group</a>
+        <a href="{% url 'map_breakdown' %}">View by Map</a>
+        <a href="{% url 'building_timing' %}">Building Timing</a>
+        <a href="{% url 'utilities' %}">Utilities</a>
+        <a href="{% url 'custom_bots' %}">Custom Bots</a>
+        <a href="{% url 'custom_match_list' %}">Custom Matches</a>
+        <a href="{% url 'position_is_between' %}">Geometry</a>
+    </div>
+
+    <h1>Custom Bots</h1>
+
+    {% if messages %}
+    <div class="messages">
+        {% for message in messages %}
+        <div class="{{ message.tags }}">{{ message }}</div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <div class="section">
+        <h3>Register New Bot</h3>
+
+        <p>
+            AI Arena bots are ladder-packaged bots that run via the
+            <a href="https://github.com/aiarena/local-play-bootstrap" target="_blank">aiarena/local-play-bootstrap</a>
+            Docker infrastructure. They can be written in any language.
+        </p>
+        <p>
+            Place the bot directory (containing <code>ladderbots.json</code> or <code>run.py</code>) in
+            <code>test_lab/aiarena/bots/</code>. You can download bots from
+            <a href="https://aiarena.net" target="_blank">aiarena.net</a>.
+        </p>
+        {% if aiarena_bots %}
+        <div class="file-list">
+            <strong>Available bot directories:</strong>
+            {% for d in aiarena_bots %}
+                <code>{{ d }}</code>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p><em>No bot directories found in test_lab/aiarena/bots/.</em></p>
+        {% endif %}
+
+        <form method="post" action="{% url 'create_custom_bot' %}" style="margin-top: 15px;">
+            {% csrf_token %}
+            <div class="form-group">
+                <label for="name">Bot Name:</label>
+                <input type="text" name="name" id="name" required placeholder="e.g. Worker Rush">
+            </div>
+            <div class="form-group">
+                <label for="race">Race:</label>
+                <select name="race" id="race">
+                    <option value="Random">Random</option>
+                    <option value="Protoss">Protoss</option>
+                    <option value="Terran">Terran</option>
+                    <option value="Zerg">Zerg</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="aiarena_bot_directory">Bot Directory:</label>
+                {% if aiarena_bots %}
+                <select name="bot_directory" id="aiarena_bot_directory">
+                    {% for d in aiarena_bots %}
+                    <option value="{{ d }}">{{ d }}</option>
+                    {% endfor %}
+                </select>
+                {% else %}
+                <input type="text" name="bot_directory" id="aiarena_bot_directory" placeholder="e.g. my_bot">
+                {% endif %}
+            </div>
+            <div class="form-group">
+                <label for="aiarena_bot_type">Bot Type:</label>
+                <select name="aiarena_bot_type" id="aiarena_bot_type">
+                    <option value="python" selected>Python</option>
+                    <option value="cppwin32">C++ (Win32)</option>
+                    <option value="cpplinux">C++ (Linux)</option>
+                    <option value="dotnetcore">.NET Core</option>
+                    <option value="java">Java</option>
+                    <option value="nodejs">Node.js</option>
+                    <option value="commandcenter">CommandCenter</option>
+                    <option value="binaryi386">Binary (i386)</option>
+                    <option value="wine">Wine</option>
+                </select>
+                <small style="color: #666;">Runtime type as defined in the bot's ladderbots.json</small>
+            </div>
+            <div class="form-group">
+                <label for="description">Description (optional):</label>
+                <textarea name="description" id="description" placeholder="What does this bot do?"></textarea>
+            </div>
+            <hr style="margin: 16px 0;">
+            <h4 style="margin-top: 0;">Test Subject Settings</h4>
+            <p style="font-size: 12px; color: #666;">
+                Mark a bot as a <strong>test subject</strong> to enable running it as Player 1
+                against opponents and past versions of itself.
+            </p>
+            <div class="form-group">
+                <label>
+                    <input type="checkbox" name="is_test_subject" id="is_test_subject" onchange="document.getElementById('test-subject-fields').style.display = this.checked ? 'block' : 'none';">
+                    This bot is a test subject (Player 1)
+                </label>
+            </div>
+            <div id="test-subject-fields" style="display: none;">
+                <div class="form-group">
+                    <label for="source_path">Source Path:</label>
+                    <input type="text" name="source_path" id="source_path" placeholder="e.g. C:\Users\me\mybot">
+                    <small style="color: #666;">Absolute path to the bot source on the host. Mounted into Docker at runtime.</small>
+                </div>
+                <div class="form-group">
+                    <label for="git_repo_path">Git Repo Path (optional):</label>
+                    <input type="text" name="git_repo_path" id="git_repo_path" placeholder="e.g. C:\Users\me\mybot">
+                    <small style="color: #666;">Path to git repo for past-version matches. Leave blank to disable.</small>
+                </div>
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" name="enable_version_history" id="enable_version_history">
+                        Enable version history matches
+                    </label>
+                    <small style="color: #666;">Allow running matches against past versions of this bot (requires Git Repo Path).</small>
+                </div>
+                <div class="form-group">
+                    <label for="dockerfile">Custom Dockerfile (optional):</label>
+                    <input type="text" name="dockerfile" id="dockerfile" placeholder="e.g. Dockerfile.mybot">
+                    <small style="color: #666;">Dockerfile name (relative to test_lab/aiarena/) for custom build steps. Leave blank for vanilla image.</small>
+                </div>
+            </div>
+            <button type="submit" class="btn btn-primary">Register Bot</button>
+        </form>
+    </div>
+
+    <div class="section">
+        <h3>Registered Bots</h3>
+        {% if bots %}
+        <table>
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Race</th>
+                    <th>Directory</th>
+                    <th>Bot Type</th>
+                    <th>Test Subject</th>
+                    <th>Description</th>
+                    <th>Created</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for bot in bots %}
+                <tr>
+                    <td>{{ bot.name }}</td>
+                    <td>{{ bot.race }}</td>
+                    <td><code>{{ bot.bot_directory }}</code></td>
+                    <td><code>{{ bot.aiarena_bot_type }}</code></td>
+                    <td>
+                        {% if bot.is_test_subject %}
+                            <span style="color: #28a745; font-weight: bold;">Yes</span>
+                            {% if bot.source_path %}<br><small>src: <code>{{ bot.source_path }}</code></small>{% endif %}
+                            {% if bot.git_repo_path %}<br><small>git: <code>{{ bot.git_repo_path }}</code></small>{% endif %}
+                            {% if bot.enable_version_history %}<br><small style="color: #17a2b8;">version history: enabled</small>{% endif %}
+                            {% if bot.dockerfile %}<br><small>dockerfile: <code>{{ bot.dockerfile }}</code></small>{% endif %}
+                            {% if bot.symlink_mounts %}<br><small>symlinks: {{ bot.symlink_mounts|length }}</small>{% endif %}
+                        {% else %}
+                            <span style="color: #999;">No</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ bot.description }}</td>
+                    <td>{{ bot.created_at|date:"Y-m-d H:i" }}</td>
+                    <td>
+                        <form method="post" action="{% url 'delete_custom_bot' bot.id %}" style="display: inline;" onsubmit="return confirm('Delete {{ bot.name }}?');">
+                            {% csrf_token %}
+                            <button type="submit" class="btn btn-danger">Delete</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p><em>No bots registered yet.</em></p>
+        {% endif %}
+    </div>
+</body>
+</html>

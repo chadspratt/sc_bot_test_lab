@@ -33,7 +33,7 @@ td { text-align: left; }
                 Docker infrastructure. They can be written in any language.
             </p>
             <p>
-                Place the bot directory (containing <code>ladderbots.json</code>) in
+                Place the bot directory (containing <code>ladderbots.json</code> or <code>run.py</code>) in
                 <code>test_lab/aiarena/bots/</code>. You can download bots from
                 <a href="https://aiarena.net" target="_blank">aiarena.net</a>.
             </p>
@@ -45,7 +45,7 @@ td { text-align: left; }
                 {% endfor %}
             </div>
             {% else %}
-            <p><em>No bot directories with ladderbots.json found in test_lab/aiarena/bots/.</em></p>
+            <p><em>No bot directories found in test_lab/aiarena/bots/.</em></p>
             {% endif %}
 
             <form method="post" action="{% url 'create_custom_bot' %}" style="margin-top: 15px;">
