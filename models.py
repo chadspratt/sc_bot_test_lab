@@ -81,6 +81,10 @@ class CustomBot(models.Model):
         related_name='default_for_bots',
         help_text="Default test suite used when triggering tests for this bot without specifying a suite",
     )
+    is_active = models.BooleanField(
+        default=True,
+        help_text="Inactive bots are excluded from all test suite runs",
+    )
     description = models.TextField(blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -100,6 +104,10 @@ class TestSuite(models.Model):
 
     id = models.AutoField(primary_key=True)
     name = models.CharField(max_length=100, unique=True)
+    is_protected = models.BooleanField(
+        default=False,
+        help_text="Protected suites cannot be edited or deleted from the UI",
+    )
     include_blizzard_ai = models.BooleanField(
         default=True,
         help_text="Include the 15 built-in AI matches (3 races x 5 builds)",
@@ -109,6 +117,10 @@ class TestSuite(models.Model):
         blank=True,
         related_name='test_suites',
         help_text="Custom bots to include in this test suite",
+    )
+    include_all_custom_bots = models.BooleanField(
+        default=False,
+        help_text="Include all active custom bots instead of a specific selection",
     )
     previous_versions = models.CharField(
         max_length=100,

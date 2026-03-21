@@ -160,6 +160,7 @@ td { text-align: left; }
                         <th>Race</th>
                         <th>Directory</th>
                         <th>Bot Type</th>
+                        <th>Active</th>
                         <th>Test Subject</th>
                         <th>Test Suite</th>
                         <th>Description</th>
@@ -174,6 +175,11 @@ td { text-align: left; }
                         <td>{{ bot.race }}</td>
                         <td><code>{{ bot.bot_directory }}</code></td>
                         <td><code>{{ bot.aiarena_bot_type }}</code></td>
+                        <td style="text-align: center;">
+                            <input type="checkbox" {% if bot.is_active %}checked{% endif %}
+                                   onchange="updateBotActive({{ bot.id }}, this.checked)"
+                                   title="{% if bot.is_active %}Active — included in test suites{% else %}Inactive — excluded from test suites{% endif %}">
+                        </td>
                         <td>
                             {% if bot.is_test_subject %}
                                 <span class="ts-edit-btn" style="color: #28a745; font-weight: bold;" onclick="openTestSubjectModal({{ bot.id }}, '{{ bot.name|escapejs }}', true, '{{ bot.source_path|escapejs }}', {{ bot.enable_version_history|yesno:'true,false' }}, '{{ bot.dockerfile|escapejs }}')">Yes</span>
@@ -215,7 +221,7 @@ td { text-align: left; }
     <div id="test-suites" class="tab-panel">
         <div class="utility-section">
             <h3>Test Suites</h3>
-            <p>Define which opponents are included when starting a test suite. The default "All" suite runs all 15 Blizzard AI matches plus every custom bot.</p>
+            <p>Define which opponents are included when starting a test suite. The "Blizzard AI" suite is a built-in protected suite that runs all 15 Blizzard AI matches.</p>
 
             {% if test_suites %}
             <table style="width: auto; border-collapse: collapse; margin-bottom: 15px;">
@@ -235,18 +241,25 @@ td { text-align: left; }
                         <td style="border: 1px solid #ddd; padding: 6px 10px;">{{ suite.name }}</td>
                         <td style="border: 1px solid #ddd; padding: 6px 10px; text-align: center;">{% if suite.include_blizzard_ai %}&#10003;{% else %}&#10007;{% endif %}</td>
                         <td style="border: 1px solid #ddd; padding: 6px 10px;">
-                            {% for bot in suite.custom_bots.all %}{{ bot.name }}{% if not forloop.last %}, {% endif %}{% empty %}<em>None</em>{% endfor %}
+                            {% if suite.include_all_custom_bots %}
+                                <em>All active bots</em>
+                            {% else %}
+                                {% for bot in suite.custom_bots.all %}{{ bot.name }}{% if not forloop.last %}, {% endif %}{% empty %}<em>None</em>{% endfor %}
+                            {% endif %}
                         </td>
                         <td style="border: 1px solid #ddd; padding: 6px 10px;">
                             {% for rt in suite.replay_tests.all %}{{ rt.name }}{% if not forloop.last %}, {% endif %}{% empty %}<em>None</em>{% endfor %}
                         </td>
                         <td style="border: 1px solid #ddd; padding: 6px 10px;">{{ suite.previous_versions|default:"-" }}</td>
                         <td style="border: 1px solid #ddd; padding: 6px 10px;">
-                            {% if suite.name != 'All' %}
+                            {% if not suite.is_protected %}
+                            <button type="button" onclick="openEditSuiteModal({{ suite.id }})" style="background: #007bff; color: white; border: none; padding: 4px 8px; border-radius: 3px; cursor: pointer; font-size: 12px; margin-right: 4px;">Edit</button>
                             <form method="post" action="{% url 'delete_test_suite' suite.id %}" style="display: inline;">
                                 {% csrf_token %}
                                 <button type="submit" onclick="return confirm('Delete test suite &quot;{{ suite.name }}&quot;?')" style="background: #dc3545; color: white; border: none; padding: 4px 8px; border-radius: 3px; cursor: pointer; font-size: 12px;">Delete</button>
                             </form>
+                            {% else %}
+                            <small style="color: #999;">protected</small>
                             {% endif %}
                         </td>
                     </tr>
@@ -276,14 +289,20 @@ td { text-align: left; }
                     </div>
                     <div style="margin-bottom: 10px;">
                         <label style="font-weight: bold;">Custom Bots:</label><br>
+                        <label style="display: block; margin-left: 10px; margin-bottom: 4px;">
+                            <input type="checkbox" name="include_all_custom_bots" onchange="toggleCreateBotCheckboxes(this.checked)">
+                            <strong>All active bots</strong>
+                        </label>
+                        <div id="create-suite-bot-list">
                         {% for bot in custom_bots %}
                         <label style="display: block; margin-left: 10px;">
                             <input type="checkbox" name="custom_bot_ids" value="{{ bot.id }}">
-                            {{ bot.name }} ({{ bot.race }})
+                            {{ bot.name }} ({{ bot.race }}){% if not bot.is_active %} <small style="color: #999;">(inactive)</small>{% endif %}
                         </label>
                         {% empty %}
                         <em>No custom bots registered.</em>
                         {% endfor %}
+                        </div>
                     </div>
                     <div style="margin-bottom: 10px;">
                         <label style="font-weight: bold;">Replay Tests:</label><br>
@@ -488,6 +507,61 @@ td { text-align: left; }
     </div>
 </div>
 
+{# ==================== EDIT TEST SUITE MODAL ==================== #}
+<div class="modal-overlay" id="edit-suite-modal">
+    <div class="modal-box">
+        <h3>Edit Test Suite — <span id="edit-suite-modal-title"></span></h3>
+        <form method="post" id="edit-suite-form">
+            {% csrf_token %}
+            <div class="form-group">
+                <label for="edit-suite-name">Name:</label>
+                <input type="text" name="name" id="edit-suite-name" required>
+            </div>
+            <div class="form-group">
+                <label>
+                    <input type="checkbox" name="include_blizzard_ai" id="edit-suite-blizzard">
+                    Blizzard AI <small style="color: #666;">(15 matches: 3 races &times; 5 builds)</small>
+                </label>
+            </div>
+            <div class="form-group">
+                <label for="edit-suite-prev-versions">Previous Versions:</label>
+                <input type="text" name="previous_versions" id="edit-suite-prev-versions" placeholder="e.g. 1,3">
+                <small style="color: #666;">Comma-separated offsets from HEAD</small>
+            </div>
+            <div class="form-group">
+                <label style="font-weight: bold;">Custom Bots:</label>
+                <label style="display: block; margin-left: 10px; margin-bottom: 4px;">
+                    <input type="checkbox" name="include_all_custom_bots" id="edit-suite-all-bots" onchange="toggleEditBotCheckboxes(this.checked)">
+                    <strong>All active bots</strong>
+                </label>
+                <div id="edit-suite-bot-list">
+                {% for bot in custom_bots %}
+                <label style="display: block; margin-left: 10px;">
+                    <input type="checkbox" name="custom_bot_ids" value="{{ bot.id }}" class="edit-suite-bot-cb">
+                    {{ bot.name }} ({{ bot.race }}){% if not bot.is_active %} <small style="color: #999;">(inactive)</small>{% endif %}
+                </label>
+                {% endfor %}
+                </div>
+            </div>
+            <div class="form-group">
+                <label style="font-weight: bold;">Replay Tests:</label>
+                {% for rt in all_replay_tests %}
+                <label style="display: block; margin-left: 10px;">
+                    <input type="checkbox" name="replay_test_ids" value="{{ rt.id }}" class="edit-suite-rt-cb">
+                    {{ rt.name }} <small style="color: #666;">({{ rt.start_time }} +{{ rt.duration }})</small>
+                </label>
+                {% empty %}
+                <em>No replay tests created yet.</em>
+                {% endfor %}
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn-cancel" onclick="closeEditSuiteModal()">Cancel</button>
+                <button type="submit" class="btn btn-primary">Save</button>
+            </div>
+        </form>
+    </div>
+</div>
+
 {# ==================== TEST SUBJECT MODAL ==================== #}
 <div class="modal-overlay" id="test-subject-modal">
     <div class="modal-box">
@@ -531,6 +605,74 @@ td { text-align: left; }
 {% block extra_js %}
 <script>
     initTabs('config-tabs');
+
+    // --- Test Suite edit modal data ---
+    var _suiteData = {{ test_suites_json|safe }};
+    var _suiteById = {};
+    _suiteData.forEach(function(s) { _suiteById[s.id] = s; });
+
+    function openEditSuiteModal(suiteId) {
+        var suite = _suiteById[suiteId];
+        if (!suite) return;
+        document.getElementById('edit-suite-modal-title').textContent = suite.name;
+        document.getElementById('edit-suite-name').value = suite.name;
+        document.getElementById('edit-suite-blizzard').checked = suite.include_blizzard_ai;
+        document.getElementById('edit-suite-prev-versions').value = suite.previous_versions;
+        document.getElementById('edit-suite-all-bots').checked = suite.include_all_custom_bots;
+        // Set the form action
+        document.getElementById('edit-suite-form').action =
+            '{% url "update_test_suite" 0 %}'.replace('/0/', '/' + suiteId + '/');
+        // Check the right custom bot checkboxes
+        document.querySelectorAll('.edit-suite-bot-cb').forEach(function(cb) {
+            cb.checked = suite.custom_bot_ids.indexOf(parseInt(cb.value)) !== -1;
+        });
+        // Check the right replay test checkboxes
+        document.querySelectorAll('.edit-suite-rt-cb').forEach(function(cb) {
+            cb.checked = suite.replay_test_ids.indexOf(parseInt(cb.value)) !== -1;
+        });
+        toggleEditBotCheckboxes(suite.include_all_custom_bots);
+        document.getElementById('edit-suite-modal').classList.add('active');
+    }
+
+    function closeEditSuiteModal() {
+        document.getElementById('edit-suite-modal').classList.remove('active');
+    }
+
+    document.getElementById('edit-suite-modal').addEventListener('click', function(e) {
+        if (e.target === this) closeEditSuiteModal();
+    });
+
+    function toggleEditBotCheckboxes(allChecked) {
+        var list = document.getElementById('edit-suite-bot-list');
+        list.style.opacity = allChecked ? '0.5' : '1';
+        list.querySelectorAll('input[type="checkbox"]').forEach(function(cb) {
+            cb.disabled = allChecked;
+        });
+    }
+
+    function toggleCreateBotCheckboxes(allChecked) {
+        var list = document.getElementById('create-suite-bot-list');
+        list.style.opacity = allChecked ? '0.5' : '1';
+        list.querySelectorAll('input[type="checkbox"]').forEach(function(cb) {
+            cb.disabled = allChecked;
+        });
+    }
+
+    // --- Bot active toggle ---
+    function updateBotActive(botId, isActive) {
+        var params = new URLSearchParams();
+        if (isActive) params.set('is_active', 'on');
+        fetch('{% url "update_custom_bot_active" 0 %}'.replace('/0/', '/' + botId + '/'), {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+            },
+            body: params.toString()
+        }).then(function(r) { return r.json(); }).then(function(data) {
+            if (data.status !== 'ok') alert('Failed to update: ' + (data.message || 'Unknown error'));
+        }).catch(function() { alert('Failed to update bot active status.'); });
+    }
 
     // --- Bot directory click-to-autopopulate ---
     (function() {

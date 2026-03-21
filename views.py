@@ -536,9 +536,8 @@ def start_test_suite(
     Create a TestGroup and launch Docker match containers based on the
     test suite configuration.
 
-    When *test_suite* is ``None`` or the default "All" suite, runs every
-    race/build combination against the built-in AI as well as every
-    registered custom bot (original behaviour).
+    When *test_suite* is ``None``, falls back to the "Blizzard AI" suite.
+    Suite behaviour is driven entirely by the suite's fields.
 
     When *branch* is provided, a git worktree is created for that branch
     and the bot source is mounted from the worktree instead of the live
@@ -559,12 +558,19 @@ def start_test_suite(
     if test_bot is None:
         test_bot = CustomBot.objects.filter(id=5).first()
 
-    # Resolve the test suite — fall back to "All" if none specified
+    # Resolve the test suite — fall back to "Blizzard AI" if none specified
     if test_suite is None:
-        test_suite = TestSuite.objects.filter(name='All').first()
+        test_suite = TestSuite.objects.filter(name='Blizzard AI').first()
 
     include_blizzard = test_suite.include_blizzard_ai if test_suite else True
-    suite_custom_bots = list(test_suite.custom_bots.all()) if test_suite else None
+
+    # Resolve custom bots for this suite, always excluding inactive bots
+    if test_suite and test_suite.include_all_custom_bots:
+        suite_custom_bots = list(CustomBot.objects.filter(is_active=True))
+    elif test_suite:
+        suite_custom_bots = list(test_suite.custom_bots.filter(is_active=True))
+    else:
+        suite_custom_bots = None
 
     # Resolve branch worktree source override
     source_override: str | None = None
@@ -609,9 +615,9 @@ def start_test_suite(
         # run it as a mirror match instead of skipping.
         bots_to_test = list(suite_custom_bots)
     else:
-        # Default: all custom bots except the test bot
+        # Default: all active custom bots except the test bot
         bots_to_test = list(
-            CustomBot.objects.exclude(id=test_bot.id) if test_bot else CustomBot.objects.all()
+            CustomBot.objects.filter(is_active=True).exclude(id=test_bot.id) if test_bot else CustomBot.objects.filter(is_active=True)
         )
 
     for bot in bots_to_test:
@@ -709,7 +715,7 @@ def trigger_tests(request):
                 description=description, difficulty=difficulty, test_bot=test_bot,
                 test_suite=test_suite,
             )
-            suite_name = test_suite.name if test_suite else 'All'
+            suite_name = test_suite.name if test_suite else 'default'
             messages.success(request, f'Test suite "{suite_name}" started with difficulty {difficulty}! {count} tests running.')
         except Exception as e:
             messages.error(request, f'Failed to start test suite: {str(e)}')
@@ -828,7 +834,7 @@ def api_trigger_tests(request):
             'matches_started': count,
             'difficulty': difficulty,
             'description': description,
-            'test_suite': test_suite.name if test_suite else 'All',
+            'test_suite': test_suite.name if test_suite else 'default',
             'branch': branch or None,
         })
     except Exception as e:
@@ -1339,6 +1345,19 @@ def config_page(request):
     ]
     custom_bots_list = CustomBot.objects.all().order_by('name')
     test_suites = TestSuite.objects.prefetch_related('custom_bots', 'replay_tests').order_by('name')
+    test_suites_json = _json.dumps([
+        {
+            'id': s.id,
+            'name': s.name,
+            'is_protected': s.is_protected,
+            'include_blizzard_ai': s.include_blizzard_ai,
+            'include_all_custom_bots': s.include_all_custom_bots,
+            'custom_bot_ids': list(s.custom_bots.values_list('id', flat=True)),
+            'replay_test_ids': list(s.replay_tests.values_list('id', flat=True)),
+            'previous_versions': s.previous_versions,
+        }
+        for s in test_suites
+    ])
     replay_tests_list = ReplayTest.objects.prefetch_related('test_suites').order_by('-created_at')
     all_replay_tests = ReplayTest.objects.order_by('name')
     system_config = SystemConfig.load()
@@ -1350,6 +1369,7 @@ def config_page(request):
         'aiarena_bots_json': _json.dumps(available_bots),
         'custom_bots': custom_bots_list,
         'test_suites': test_suites,
+        'test_suites_json': test_suites_json,
         'replay_tests': replay_tests_list,
         'all_replay_tests': all_replay_tests,
         'system_config': system_config,
@@ -1403,6 +1423,7 @@ def create_test_suite(request):
         return redirect(config_url)
 
     include_blizzard_ai = request.POST.get('include_blizzard_ai') == 'on'
+    include_all_custom_bots = request.POST.get('include_all_custom_bots') == 'on'
     selected_bot_ids = request.POST.getlist('custom_bot_ids')
     selected_replay_test_ids = request.POST.getlist('replay_test_ids')
     previous_versions = request.POST.get('previous_versions', '').strip()
@@ -1410,6 +1431,7 @@ def create_test_suite(request):
     suite = TestSuite.objects.create(
         name=name,
         include_blizzard_ai=include_blizzard_ai,
+        include_all_custom_bots=include_all_custom_bots,
         previous_versions=previous_versions,
     )
     if selected_bot_ids:
@@ -1423,12 +1445,12 @@ def create_test_suite(request):
 
 @require_POST
 def delete_test_suite(request, suite_id):
-    """Delete a test suite. The default 'All' suite cannot be deleted."""
+    """Delete a test suite. Protected suites cannot be deleted."""
     config_url = f"{reverse('config_page')}#test-suites"
     try:
         suite = TestSuite.objects.get(id=suite_id)
-        if suite.name == 'All':
-            messages.error(request, 'Cannot delete the default "All" test suite.')
+        if suite.is_protected:
+            messages.error(request, f'Cannot delete the protected "{suite.name}" test suite.')
             return redirect(config_url)
         suite_name = suite.name
         suite.delete()
@@ -1436,6 +1458,60 @@ def delete_test_suite(request, suite_id):
     except TestSuite.DoesNotExist:
         messages.error(request, 'Test suite not found.')
     return redirect(config_url)
+
+
+@require_POST
+def update_test_suite(request, suite_id):
+    """Update an existing test suite. Protected suites cannot be edited."""
+    config_url = f"{reverse('config_page')}#test-suites"
+    try:
+        suite = TestSuite.objects.get(id=suite_id)
+    except TestSuite.DoesNotExist:
+        messages.error(request, 'Test suite not found.')
+        return redirect(config_url)
+
+    if suite.is_protected:
+        messages.error(request, f'Cannot edit the protected "{suite.name}" test suite.')
+        return redirect(config_url)
+
+    name = request.POST.get('name', '').strip()
+    if not name:
+        messages.error(request, 'Test suite name is required.')
+        return redirect(config_url)
+
+    # Check uniqueness (excluding current suite)
+    if TestSuite.objects.filter(name=name).exclude(id=suite_id).exists():
+        messages.error(request, f'A test suite named "{name}" already exists.')
+        return redirect(config_url)
+
+    suite.name = name
+    suite.include_blizzard_ai = request.POST.get('include_blizzard_ai') == 'on'
+    suite.include_all_custom_bots = request.POST.get('include_all_custom_bots') == 'on'
+    suite.previous_versions = request.POST.get('previous_versions', '').strip()
+    suite.save()
+
+    selected_bot_ids = request.POST.getlist('custom_bot_ids')
+    suite.custom_bots.set(selected_bot_ids)
+
+    selected_replay_test_ids = request.POST.getlist('replay_test_ids')
+    suite.replay_tests.set(selected_replay_test_ids)
+
+    messages.success(request, f'Test suite "{name}" updated.')
+    return redirect(config_url)
+
+
+@require_POST
+def update_custom_bot_active(request, bot_id):
+    """Toggle a custom bot's active status. Returns JSON."""
+    try:
+        bot = CustomBot.objects.get(id=bot_id)
+    except CustomBot.DoesNotExist:
+        return JsonResponse({'status': 'error', 'message': 'Bot not found'}, status=404)
+
+    is_active = request.POST.get('is_active') == 'on'
+    bot.is_active = is_active
+    bot.save(update_fields=['is_active'])
+    return JsonResponse({'status': 'ok', 'is_active': bot.is_active})
 
 
 def recompile_cython(request):
