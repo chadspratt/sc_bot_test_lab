@@ -46,10 +46,12 @@ def _get_match_list_context(request):
         logger.exception('Error draining match queue')
 
     # Get filters from request
-    selected_difficulty = request.GET.get('difficulty', '')
-    selected_limit = request.GET.get('limit', '')
     selected_test_bot = request.GET.get('test_bot', '')
-    selected_test_suite = request.GET.get('test_suite', '')
+    selected_blizzard = request.GET.get('blizzard', 'All')
+    show_custom_bots = request.GET.get('custom_bots', '1') != '0'
+    show_past_versions = request.GET.get('past_versions', '1') != '0'
+    show_replays = request.GET.get('replays', '1') != '0'
+    selected_limit = request.GET.get('limit', '')
 
     matches = Match.objects.select_related('opponent_bot', 'test_group', 'test_bot', 'replay_test').exclude(test_group_id=-1)
 
@@ -57,25 +59,32 @@ def _get_match_list_context(request):
     if selected_test_bot and selected_test_bot.isdigit():
         matches = matches.filter(test_bot_id=int(selected_test_bot))
 
-    # Apply test suite filter
-    if selected_test_suite and selected_test_suite.isdigit():
-        matches = matches.filter(test_group__test_suite_id=int(selected_test_suite))
+    # Build inclusive match-type filter from blizzard/custom/past/replay controls.
+    # Each enabled type adds an OR clause; matches not matching any are excluded.
+    type_q = Q()
+    is_blizzard_q = Q(opponent_bot__isnull=True, opponent_commit_hash='', replay_test__isnull=True)
 
-    # Difficulty filter applies only to computer opponents; custom-bot and
-    # past-version matches are always included (they run regardless of difficulty).
-    if selected_difficulty:
-        matches = matches.filter(
-            Q(opponent_difficulty=selected_difficulty)
-            | Q(opponent_bot__isnull=False)
-            | ~Q(opponent_commit_hash='')
-            | Q(replay_test__isnull=False)
-        )
+    if selected_blizzard == 'None':
+        pass  # Don't include any blizzard AI matches
+    elif selected_blizzard and selected_blizzard != 'All':
+        type_q |= is_blizzard_q & Q(opponent_difficulty=selected_blizzard)
+    else:
+        type_q |= is_blizzard_q
 
-    # Apply test group limit if selected — only include matches from the N most recent test groups
+    if show_custom_bots:
+        type_q |= Q(opponent_bot__isnull=False)
+    if show_past_versions:
+        type_q |= ~Q(opponent_commit_hash='')
+    if show_replays:
+        type_q |= Q(replay_test__isnull=False)
+
+    matches = matches.filter(type_q)
+
+    # Apply test group limit — only include matches from the N most recent
+    # test groups that contain at least one match after the above filters.
     if selected_limit and selected_limit.isdigit():
         recent_group_ids = list(
-            Match.objects.exclude(test_group_id=-1)
-            .values_list('test_group_id', flat=True)
+            matches.values_list('test_group_id', flat=True)
             .distinct()
             .order_by('-test_group_id')[:int(selected_limit)]
         )
@@ -359,10 +368,12 @@ def _get_match_list_context(request):
         'pivot_data': pivot_data,
         'opponents': sorted_opponents,
         'header_structure': header_structure,
-        'selected_difficulty': selected_difficulty,
+        'selected_blizzard': selected_blizzard,
+        'show_custom_bots': show_custom_bots,
+        'show_past_versions': show_past_versions,
+        'show_replays': show_replays,
         'selected_limit': selected_limit,
         'selected_test_bot': selected_test_bot,
-        'selected_test_suite': selected_test_suite,
         'test_groups': test_groups,
         'test_subject_bots': test_subject_bots,
         'test_suites': test_suites,
@@ -703,14 +714,11 @@ def trigger_tests(request):
         except Exception as e:
             messages.error(request, f'Failed to start test suite: {str(e)}')
 
-    # Redirect back preserving filter state
-    params = ['tab=test-groups']
-    for key in ('test_bot', 'difficulty', 'limit', 'test_suite'):
-        val = request.POST.get(key, '')
-        if val:
-            params.append(f'{key}={val}')
-    qs = '?' + '&'.join(params)
-    return redirect(f"{reverse('results')}{qs}")
+    # Redirect back to the page the user came from (preserves filter state)
+    referer = request.META.get('HTTP_REFERER', '')
+    if referer and '/test_lab/' in referer:
+        return redirect(referer)
+    return redirect(f"{reverse('results')}?tab=test-groups")
 
 
 @csrf_exempt
@@ -1244,9 +1252,8 @@ def results_page(request):
 
     # Build filter query string for tab links (preserves filters across tabs)
     filter_params = []
-    for key in ('difficulty', 'limit', 'test_bot', 'test_suite'):
-        val = request.GET.get(key, '')
-        if val:
+    for key, val in request.GET.items():
+        if key != 'tab' and val:
             filter_params.append(f'{key}={val}')
     context['filter_qs'] = '&' + '&'.join(filter_params) if filter_params else ''
 

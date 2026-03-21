@@ -68,86 +68,84 @@ thead tr:nth-child(2) th { top: 41px; }
 {% if active_tab == 'test-groups' %}
 {# ==================== TEST GROUPS TAB ==================== #}
 
-<div class="trigger-section">
-    <!-- Filter 1: Test Bot -->
-    <form method="get" action="" style="display: inline-block; margin-right: 20px;">
+<div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; gap: 40px;">
+    <!-- Report Filters -->
+    <form method="get" action="" id="filter-form" style="display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center;">
         <input type="hidden" name="tab" value="test-groups">
+
         <label for="test_bot">Test Bot:</label>
-        <select name="test_bot" id="test_bot" onchange="this.form.submit()">
+        <select name="test_bot" id="test_bot">
             <option value="">All Bots</option>
             {% for bot in test_subject_bots %}
             <option value="{{ bot.id }}" {% if selected_test_bot == bot.id|stringformat:"d" %}selected{% endif %}>{{ bot.name }}</option>
             {% endfor %}
         </select>
-        {% if selected_difficulty %}<input type="hidden" name="difficulty" value="{{ selected_difficulty }}">{% endif %}
-        {% if selected_limit %}<input type="hidden" name="limit" value="{{ selected_limit }}">{% endif %}
-        {% if selected_test_suite %}<input type="hidden" name="test_suite" value="{{ selected_test_suite }}">{% endif %}
-        <noscript><input type="submit" value="Filter"></noscript>
-    </form>
 
-    <!-- Filter 2: Difficulty -->
-    <form method="get" action="" style="display: inline-block; margin-right: 20px;">
-        <input type="hidden" name="tab" value="test-groups">
-        <label for="difficulty">Difficulty:</label>
-        <select name="difficulty" id="difficulty" onchange="this.form.submit()">
-            <option value="">All Difficulties</option>
-            <option value="Easy" {% if selected_difficulty == 'Easy' %}selected{% endif %}>Easy</option>
-            <option value="Medium" {% if selected_difficulty == 'Medium' %}selected{% endif %}>Medium</option>
-            <option value="MediumHard" {% if selected_difficulty == 'MediumHard' %}selected{% endif %}>MediumHard</option>
-            <option value="Hard" {% if selected_difficulty == 'Hard' %}selected{% endif %}>Hard</option>
-            <option value="Harder" {% if selected_difficulty == 'Harder' %}selected{% endif %}>Harder</option>
-            <option value="VeryHard" {% if selected_difficulty == 'VeryHard' %}selected{% endif %}>VeryHard</option>
-            <option value="CheatVision" {% if selected_difficulty == 'CheatVision' %}selected{% endif %}>CheatVision</option>
-            <option value="CheatMoney" {% if selected_difficulty == 'CheatMoney' %}selected{% endif %}>CheatMoney</option>
-            <option value="CheatInsane" {% if selected_difficulty == 'CheatInsane' %}selected{% endif %}>CheatInsane</option>
+        <label for="blizzard">Blizzard:</label>
+        <select name="blizzard" id="blizzard">
+            <option value="All" {% if selected_blizzard == 'All' %}selected{% endif %}>All</option>
+            <option value="None" {% if selected_blizzard == 'None' %}selected{% endif %}>None</option>
+            <option value="CheatInsane" {% if selected_blizzard == 'CheatInsane' %}selected{% endif %}>CheatInsane</option>
+            <option value="CheatMoney" {% if selected_blizzard == 'CheatMoney' %}selected{% endif %}>CheatMoney</option>
+            <option value="CheatVision" {% if selected_blizzard == 'CheatVision' %}selected{% endif %}>CheatVision</option>
+            <option value="VeryHard" {% if selected_blizzard == 'VeryHard' %}selected{% endif %}>VeryHard</option>
+            <option value="Harder" {% if selected_blizzard == 'Harder' %}selected{% endif %}>Harder</option>
+            <option value="Hard" {% if selected_blizzard == 'Hard' %}selected{% endif %}>Hard</option>
+            <option value="MediumHard" {% if selected_blizzard == 'MediumHard' %}selected{% endif %}>MediumHard</option>
+            <option value="Medium" {% if selected_blizzard == 'Medium' %}selected{% endif %}>Medium</option>
+            <option value="Easy" {% if selected_blizzard == 'Easy' %}selected{% endif %}>Easy</option>
         </select>
-        {% if selected_test_bot %}<input type="hidden" name="test_bot" value="{{ selected_test_bot }}">{% endif %}
-        {% if selected_limit %}<input type="hidden" name="limit" value="{{ selected_limit }}">{% endif %}
-        {% if selected_test_suite %}<input type="hidden" name="test_suite" value="{{ selected_test_suite }}">{% endif %}
-        <noscript><input type="submit" value="Filter"></noscript>
-    </form>
 
-    <!-- Filter 3: Limit -->
-    <form method="get" action="" style="display: inline-block; margin-right: 20px;">
-        <input type="hidden" name="tab" value="test-groups">
-        <label for="limit">Show:</label>
-        <select name="limit" id="limit" onchange="this.form.submit()">
-            <option value="">All Test Groups</option>
+        <label style="cursor: pointer;">
+            <input type="hidden" name="custom_bots" value="0">
+            <input type="checkbox" name="custom_bots" value="1" {% if show_custom_bots %}checked{% endif %}>
+            Custom Bots
+        </label>
+
+        <label style="cursor: pointer;">
+            <input type="hidden" name="past_versions" value="0">
+            <input type="checkbox" name="past_versions" value="1" {% if show_past_versions %}checked{% endif %}>
+            Past Versions
+        </label>
+
+        <label style="cursor: pointer;">
+            <input type="hidden" name="replays" value="0">
+            <input type="checkbox" name="replays" value="1" {% if show_replays %}checked{% endif %}>
+            Replays
+        </label>
+
+        <label for="limit">Row Limit:</label>
+        <select name="limit" id="limit">
+            <option value="">All</option>
             <option value="10" {% if selected_limit == '10' %}selected{% endif %}>Last 10</option>
             <option value="25" {% if selected_limit == '25' %}selected{% endif %}>Last 25</option>
             <option value="50" {% if selected_limit == '50' %}selected{% endif %}>Last 50</option>
             <option value="100" {% if selected_limit == '100' %}selected{% endif %}>Last 100</option>
         </select>
-        {% if selected_test_bot %}<input type="hidden" name="test_bot" value="{{ selected_test_bot }}">{% endif %}
-        {% if selected_difficulty %}<input type="hidden" name="difficulty" value="{{ selected_difficulty }}">{% endif %}
-        {% if selected_test_suite %}<input type="hidden" name="test_suite" value="{{ selected_test_suite }}">{% endif %}
-        <noscript><input type="submit" value="Filter"></noscript>
+        <noscript><button type="submit">Apply</button></noscript>
     </form>
 
-    <!-- Filter 4: Test Suite -->
-    <form method="get" action="" style="display: inline-block; margin-right: 20px;">
-        <input type="hidden" name="tab" value="test-groups">
-        <label for="test_suite">Suite:</label>
-        <select name="test_suite" id="test_suite" onchange="this.form.submit()">
-            <option value="">All Suites</option>
-            {% for suite in test_suites %}
-            <option value="{{ suite.id }}" {% if selected_test_suite == suite.id|stringformat:"d" %}selected{% endif %}>{{ suite.name }}</option>
+    <!-- Run Test Suite -->
+    <form method="post" action="{% url 'trigger_tests' %}" style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; white-space: nowrap;">
+        {% csrf_token %}
+        <label for="run_test_bot">Test Bot:</label>
+        <select name="test_bot" id="run_test_bot">
+            <option value="">Default</option>
+            {% for bot in test_subject_bots %}
+            <option value="{{ bot.id }}">{{ bot.name }}</option>
             {% endfor %}
         </select>
-        {% if selected_test_bot %}<input type="hidden" name="test_bot" value="{{ selected_test_bot }}">{% endif %}
-        {% if selected_difficulty %}<input type="hidden" name="difficulty" value="{{ selected_difficulty }}">{% endif %}
-        {% if selected_limit %}<input type="hidden" name="limit" value="{{ selected_limit }}">{% endif %}
-        <noscript><input type="submit" value="Filter"></noscript>
-    </form>
 
-    <!-- Trigger: uses current filter state for test_bot, difficulty & test_suite -->
-    <form method="post" action="{% url 'trigger_tests' %}" style="display: inline-block;">
-        {% csrf_token %}
-        {% if selected_test_bot %}<input type="hidden" name="test_bot" value="{{ selected_test_bot }}">{% endif %}
-        <input type="hidden" name="difficulty" value="{{ selected_difficulty|default:'CheatInsane' }}">
-        {% if selected_limit %}<input type="hidden" name="limit" value="{{ selected_limit }}">{% endif %}
-        {% if selected_test_suite %}<input type="hidden" name="test_suite" value="{{ selected_test_suite }}">{% endif %}
-        <input type="text" name="description" placeholder="Test group description" style="padding: 6px 10px; border: 1px solid #555; border-radius: 4px; background: #2a2a2a; color: #e0e0e0; margin-right: 6px; width: 250px;">
+        <label for="run_test_suite">Suite:</label>
+        <select name="test_suite" id="run_test_suite">
+            <option value="">All</option>
+            {% for suite in test_suites %}
+            <option value="{{ suite.id }}">{{ suite.name }}</option>
+            {% endfor %}
+        </select>
+
+        <input type="hidden" name="difficulty" value="CheatInsane">
+        <input type="text" name="description" placeholder="description" style="padding: 6px 10px; border: 1px solid #555; border-radius: 4px; background: #2a2a2a; color: #e0e0e0; width: 180px;">
         <button type="submit" class="trigger-btn">Start Test Suite</button>
     </form>
 </div>
@@ -363,6 +361,11 @@ thead tr:nth-child(2) th { top: 41px; }
 {% block extra_js %}
 {% if active_tab == 'test-groups' %}
 <script>
+    // Auto-submit filter form on any change
+    document.getElementById('filter-form').addEventListener('change', function() {
+        this.submit();
+    });
+
     const STORAGE_KEY = 'visited_match_urls';
 
     function getVisited() {
