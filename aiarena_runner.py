@@ -43,21 +43,6 @@ AIARENA_RUNS_DIR = os.path.join(AIARENA_DIR, 'runs')
 # Repo root (for finding bots in other_bots/ and live source mounts)
 REPO_ROOT = os.path.normpath(os.path.join(AIARENA_DIR, '..', '..', '..', '..'))
 
-# Live source directories (mounted into containers instead of copied)
-BOT_SRC_DIR = os.path.join(REPO_ROOT, 'bot')
-SC2_SRC_DIR = os.path.join(REPO_ROOT, 'python_sc2', 'sc2')
-
-# BotTato is always Bot 1
-BOTTATO_NAME = 'BotTato'
-BOTTATO_RACE = 'T'
-BOTTATO_TYPE = 'python'
-
-# Mirror copy for self-play matches (distinct name so the proxy can route)
-BOTTATO_MIRROR_NAME = 'BotTato_p2'
-
-# Prefix for past-version opponent names (e.g. BotTato_v_d019795)
-BOTTATO_VERSION_PREFIX = 'BotTato_v_'
-
 # Base files in AIARENA_DIR that are copied into each per-match run directory
 _BASE_FILES = (
     'docker-compose.yml', 'Dockerfile.bottato', 'config.toml',
@@ -611,14 +596,13 @@ def get_bot_log_path(match_id: int, bot_name: str) -> str | None:
 def start_aiarena_match(
     match: Match,
     opponent_bot: CustomBot,
-    test_bot: CustomBot | None = None,
+    test_bot: CustomBot,
     map_name: str | None = None,
     source_override: str | None = None,
 ) -> None:
     """Launch an aiarena match in a background thread.
 
-    *test_bot* is the bot being tested (Player 1).  If ``None``, falls
-    back to the legacy BotTato constants for backward compatibility.
+    *test_bot* is the bot being tested (Player 1).
 
     *opponent_bot* is the opponent (Player 2).
 
@@ -640,29 +624,15 @@ def start_aiarena_match(
     opponent_type = opponent_bot.aiarena_bot_type or 'python'
     opponent_dir_name = opponent_bot.bot_directory
 
-    # Determine test bot info
-    if test_bot and test_bot.is_test_subject and test_bot.source_path:
-        test_bot_dir = test_bot.bot_directory or test_bot.name
-        test_bot_race = RACE_TO_CODE.get(test_bot.race, 'R')
-        test_bot_type = test_bot.aiarena_bot_type or 'python'
-    else:
-        # Legacy fallback: use BotTato constants
-        test_bot_dir = BOTTATO_NAME
-        test_bot_race = BOTTATO_RACE
-        test_bot_type = BOTTATO_TYPE
+    test_bot_dir = test_bot.bot_directory or test_bot.name
+    test_bot_race = RACE_TO_CODE.get(test_bot.race, 'R')
+    test_bot_type = test_bot.aiarena_bot_type or 'python'
 
     # Detect mirror/self-play match
-    is_mirror = (
-        _is_mirror_match(test_bot, opponent_dir_name)
-        if test_bot and test_bot.is_test_subject
-        else opponent_dir_name in (BOTTATO_NAME, BOTTATO_MIRROR_NAME)
-    )
+    is_mirror = _is_mirror_match(test_bot, opponent_dir_name)
     mirror_name: str | None = None
     if is_mirror:
-        if test_bot and test_bot.is_test_subject:
-            mirror_name = _ensure_mirror_overlay(test_bot)
-        else:
-            mirror_name = _ensure_mirror_overlay_legacy()
+        mirror_name = _ensure_mirror_overlay(test_bot)
         opponent_dir_name = mirror_name
 
     # Verify overlay exists
@@ -697,41 +667,37 @@ def start_aiarena_match(
         map_name=map_name,
     )
 
-    if test_bot and test_bot.is_test_subject:
-        _write_compose_override(
-            run_dir,
-            test_bot=test_bot,
-            test_bot_aiarena_name=test_bot_dir,
-            bot2_name=opponent_dir_name,
-            bot2_host_path=opponent_path,
-            bot2_type=opponent_type,
-            is_mirror=is_mirror,
-            mirror_aiarena_name=mirror_name,
-            source_override=source_override,
-        )
-    else:
-        _write_compose_override_legacy(
-            run_dir,
-            bot2_name=opponent_dir_name,
-            bot2_host_path=opponent_path,
-            bot2_type=opponent_type,
-            is_mirror=is_mirror,
-        )
+    _write_compose_override(
+        run_dir,
+        test_bot=test_bot,
+        test_bot_aiarena_name=test_bot_dir,
+        bot2_name=opponent_dir_name,
+        bot2_host_path=opponent_path,
+        bot2_type=opponent_type,
+        is_mirror=is_mirror,
+        mirror_aiarena_name=mirror_name,
+        source_override=source_override,
+    )
 
     log_file_path = os.path.join(run_dir, 'compose_output.log')
 
-    def _run_match():
-        _run_docker_match(run_dir, match_id, log_file_path)
+    def _launch():
+        thread = threading.Thread(
+            target=_run_docker_match,
+            args=(run_dir, match_id, log_file_path),
+            daemon=True,
+        )
+        thread.start()
 
-    thread = threading.Thread(target=_run_match, daemon=True)
-    thread.start()
+    from . import match_queue
+    match_queue.enqueue(match_id, _launch)
 
 
 def start_past_version_match(
     match: Match,
     commit_hash: str,
     short_hash: str,
-    test_bot: CustomBot | None = None,
+    test_bot: CustomBot,
     map_name: str | None = None,
     source_override: str | None = None,
 ) -> None:
@@ -743,8 +709,6 @@ def start_past_version_match(
 
     *source_override* overrides Player 1's source directory (e.g. a git
     worktree for branch-based testing).
-
-    If *test_bot* is ``None``, falls back to BotTato legacy behavior.
     """
     from . import bot_versions
 
@@ -754,28 +718,17 @@ def start_past_version_match(
     match.map_name = map_name
     match.save()
 
-    # Determine test bot info
-    if test_bot and test_bot.is_test_subject and test_bot.source_path:
-        test_bot_dir = test_bot.bot_directory or test_bot.name
-        test_bot_race = RACE_TO_CODE.get(test_bot.race, 'R')
-        test_bot_type = test_bot.aiarena_bot_type or 'python'
-        repo_path = test_bot.git_repo_path
-    else:
-        test_bot_dir = BOTTATO_NAME
-        test_bot_race = BOTTATO_RACE
-        test_bot_type = BOTTATO_TYPE
-        repo_path = ''
+    test_bot_dir = test_bot.bot_directory or test_bot.name
+    test_bot_race = RACE_TO_CODE.get(test_bot.race, 'R')
+    test_bot_type = test_bot.aiarena_bot_type or 'python'
 
     # Extract (or reuse) cached bot source for this commit
     cache_path = bot_versions.get_or_create_version_cache(
-        commit_hash, repo_path=repo_path or None,
+        commit_hash, repo_path=test_bot.git_repo_path or None,
     )
 
     # Create overlay directory with aiarena-specific files
-    if test_bot and test_bot.is_test_subject:
-        opponent_bot_name = _ensure_version_overlay(test_bot, short_hash)
-    else:
-        opponent_bot_name = _ensure_version_overlay_legacy(short_hash)
+    opponent_bot_name = _ensure_version_overlay(test_bot, short_hash)
 
     # Verify overlay exists
     overlay_dir = os.path.join(AIARENA_BOTS_DIR, test_bot_dir)
@@ -798,171 +751,29 @@ def start_past_version_match(
         map_name=map_name,
     )
 
-    if test_bot and test_bot.is_test_subject:
-        _write_compose_override(
-            run_dir,
-            test_bot=test_bot,
-            test_bot_aiarena_name=test_bot_dir,
-            bot2_name=opponent_bot_name,
-            bot2_host_path=None,
-            is_past_version=True,
-            past_version_cache_path=cache_path,
-            source_override=source_override,
-        )
-    else:
-        _write_compose_override_legacy(
-            run_dir,
-            bot2_name=opponent_bot_name,
-            bot2_host_path=None,
-            is_past_version=True,
-            past_version_cache_path=cache_path,
-        )
+    _write_compose_override(
+        run_dir,
+        test_bot=test_bot,
+        test_bot_aiarena_name=test_bot_dir,
+        bot2_name=opponent_bot_name,
+        bot2_host_path=None,
+        is_past_version=True,
+        past_version_cache_path=cache_path,
+        source_override=source_override,
+    )
 
     log_file_path = os.path.join(run_dir, 'compose_output.log')
 
-    def _run_match():
-        _run_docker_match(run_dir, match_id, log_file_path)
-
-    thread = threading.Thread(target=_run_match, daemon=True)
-    thread.start()
-
-
-# ---------------------------------------------------------------------------
-# Legacy helpers (BotTato-specific, used when test_bot is None)
-# ---------------------------------------------------------------------------
-
-def _ensure_mirror_overlay_legacy() -> str:
-    """Legacy: ensure BotTato_p2 overlay for backward compat."""
-    src = os.path.join(AIARENA_BOTS_DIR, BOTTATO_NAME)
-    dst = os.path.join(AIARENA_BOTS_DIR, BOTTATO_MIRROR_NAME)
-    if not os.path.isdir(src):
-        raise FileNotFoundError(
-            f'{BOTTATO_NAME} overlay directory not found. Run prepare_bottato.py first.'
+    def _launch():
+        thread = threading.Thread(
+            target=_run_docker_match,
+            args=(run_dir, match_id, log_file_path),
+            daemon=True,
         )
-    os.makedirs(dst, exist_ok=True)
-    for filename in ('run.py', 'requirements.txt'):
-        dst_file = os.path.join(dst, filename)
-        if not os.path.isfile(dst_file):
-            src_file = os.path.join(src, filename)
-            if os.path.isfile(src_file):
-                shutil.copy2(src_file, dst_file)
-    dst_lb = os.path.join(dst, 'ladderbots.json')
-    if not os.path.isfile(dst_lb):
-        src_lb = os.path.join(src, 'ladderbots.json')
-        if os.path.isfile(src_lb):
-            with open(src_lb) as f:
-                lb_data = json.load(f)
-        else:
-            lb_data = _default_ladderbots_data(BOTTATO_NAME)
-        if 'Bots' in lb_data and BOTTATO_NAME in lb_data['Bots']:
-            lb_data['Bots'][BOTTATO_MIRROR_NAME] = lb_data['Bots'].pop(BOTTATO_NAME)
-        with open(dst_lb, 'w') as f:
-            json.dump(lb_data, f, indent=4)
-    return BOTTATO_MIRROR_NAME
+        thread.start()
 
-
-def _ensure_version_overlay_legacy(short_hash: str) -> str:
-    """Legacy: ensure BotTato_v_<hash> overlay for backward compat."""
-    bot_name = f'{BOTTATO_VERSION_PREFIX}{short_hash}'
-    src = os.path.join(AIARENA_BOTS_DIR, BOTTATO_NAME)
-    dst = os.path.join(AIARENA_BOTS_DIR, bot_name)
-    if not os.path.isdir(src):
-        raise FileNotFoundError(
-            f'{BOTTATO_NAME} overlay directory not found. Run prepare_bottato.py first.'
-        )
-    os.makedirs(dst, exist_ok=True)
-    for filename in ('run.py', 'requirements.txt'):
-        src_file = os.path.join(src, filename)
-        dst_file = os.path.join(dst, filename)
-        if os.path.isfile(src_file):
-            shutil.copy2(src_file, dst_file)
-    src_lb = os.path.join(src, 'ladderbots.json')
-    if os.path.isfile(src_lb):
-        with open(src_lb) as f:
-            lb_data = json.load(f)
-    else:
-        lb_data = _default_ladderbots_data(BOTTATO_NAME)
-    if 'Bots' in lb_data and BOTTATO_NAME in lb_data['Bots']:
-        lb_data['Bots'][bot_name] = lb_data['Bots'].pop(BOTTATO_NAME)
-    dst_lb = os.path.join(dst, 'ladderbots.json')
-    with open(dst_lb, 'w') as f:
-        json.dump(lb_data, f, indent=4)
-    return bot_name
-
-
-def _write_compose_override_legacy(
-    run_dir: str,
-    bot2_name: str,
-    bot2_host_path: str | None,
-    *,
-    bot2_type: str = 'python',
-    is_mirror: bool = False,
-    is_past_version: bool = False,
-    past_version_cache_path: str | None = None,
-) -> None:
-    """Legacy compose override using hardcoded BotTato volume mounts."""
-    bot_src = BOT_SRC_DIR.replace('\\', '/')
-    sc2_src = SC2_SRC_DIR.replace('\\', '/')
-
-    def _bottato_mounts(name: str) -> list[str]:
-        overlay = os.path.join(AIARENA_BOTS_DIR, name).replace('\\', '/')
-        return [
-            f'      - "{bot_src}:/bots/{name}"',
-            f'      - "{sc2_src}:/bots/{name}/sc2"',
-            f'      - "{overlay}/run.py:/bots/{name}/run.py"',
-            f'      - "{overlay}/requirements.txt:/bots/{name}/requirements.txt"',
-            f'      - "{overlay}/ladderbots.json:/bots/{name}/ladderbots.json"',
-        ]
-
-    lines = [
-        'services:',
-        '  bot_controller1:',
-        '    volumes:',
-    ]
-    lines += _bottato_mounts(BOTTATO_NAME)
-
-    lines.append('  bot_controller2:')
-    if is_past_version:
-        assert past_version_cache_path is not None
-        cached = past_version_cache_path.replace('\\', '/')
-        overlay = os.path.join(AIARENA_BOTS_DIR, bot2_name).replace('\\', '/')
-        lines += [
-            '    build:',
-            '      context: .',
-            '      dockerfile: Dockerfile.bottato',
-            '    volumes:',
-            f'      - "{cached}:/bots/{bot2_name}"',
-            f'      - "{sc2_src}:/bots/{bot2_name}/sc2"',
-            f'      - "{overlay}/run.py:/bots/{bot2_name}/run.py"',
-            f'      - "{overlay}/requirements.txt:/bots/{bot2_name}/requirements.txt"',
-            f'      - "{overlay}/ladderbots.json:/bots/{bot2_name}/ladderbots.json"',
-        ]
-    elif is_mirror:
-        lines += [
-            '    build:',
-            '      context: .',
-            '      dockerfile: Dockerfile.bottato',
-            '    volumes:',
-        ]
-        lines += _bottato_mounts(BOTTATO_MIRROR_NAME)
-    else:
-        assert bot2_host_path is not None
-        b2 = bot2_host_path.replace('\\', '/')
-        if bot2_type in _NEEDS_PROXY_FWD:
-            lines += [
-                '    build:',
-                '      context: .',
-                '      dockerfile: Dockerfile.proxy_fwd',
-            ]
-        lines += [
-            '    volumes:',
-            f'      - "{b2}:/bots/{bot2_name}"',
-        ]
-    lines.append('')
-
-    override_path = os.path.join(run_dir, 'docker-compose.override.yml')
-    with open(override_path, 'w') as f:
-        f.write('\n'.join(lines))
+    from . import match_queue
+    match_queue.enqueue(match_id, _launch)
 
 
 def _run_docker_match(run_dir: str, match_id: int, log_file_path: str) -> None:
@@ -1076,6 +887,13 @@ def _run_docker_match(run_dir: str, match_id: int, log_file_path: str) -> None:
             os.remove(pid_file)
         except OSError:
             pass
+
+        # Decrement the active count and start any queued matches.
+        try:
+            from . import match_queue
+            match_queue.notify_match_finished()
+        except Exception:
+            logger.exception('Match %d: error notifying queue after completion', match_id)
 
 
 def _collect_and_save_result(run_dir: str, match_id: int) -> None:

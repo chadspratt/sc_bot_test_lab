@@ -333,3 +333,25 @@ class MatchEvent(models.Model):
 
     def __str__(self):
         return f"Match {self.match.id} {self.type} Event at {self.game_timestamp}: {self.message}"
+
+
+class SystemConfig(models.Model):
+    """Singleton table for system-wide settings."""
+
+    class Meta:
+        db_table = 'system_config'
+
+    id = models.AutoField(primary_key=True)
+    max_concurrent_matches = models.IntegerField(
+        default=0,
+        help_text="Maximum number of matches that can run at the same time. 0 = unlimited.",
+    )
+
+    def __str__(self):
+        return f"SystemConfig (max_concurrent={self.max_concurrent_matches})"
+
+    @classmethod
+    def load(cls) -> 'SystemConfig':
+        """Return the single SystemConfig row, creating it if needed."""
+        obj, _ = cls.objects.get_or_create(id=1)
+        return obj

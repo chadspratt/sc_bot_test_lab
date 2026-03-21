@@ -32,6 +32,7 @@ urlpatterns = [
     path('config/test-suites/<int:suite_id>/delete/', views.delete_test_suite, name='delete_test_suite'),
     path('config/replay-tests/create/', views.create_replay_test, name='create_replay_test'),
     path('config/replay-tests/<int:test_id>/delete/', views.delete_replay_test, name='delete_replay_test'),
+    path('config/system/', views.update_system_config, name='update_system_config'),
 
     # Custom actions
     path('custom/recompile-cython/', views.recompile_cython, name='recompile_cython'),

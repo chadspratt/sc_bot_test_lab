@@ -21,6 +21,7 @@ td { text-align: left; }
     <div class="tab-bar">
         <a data-tab="custom-bots">Custom Bots</a>
         <a data-tab="test-suites">Test Suites</a>
+        <a data-tab="system">System</a>
     </div>
 
     {# ==================== CUSTOM BOTS TAB ==================== #}
@@ -448,6 +449,27 @@ td { text-align: left; }
             {% else %}
             <p><em>No replay tests created yet.</em></p>
             {% endif %}
+        </div>
+    </div>
+
+    {# ==================== SYSTEM TAB ==================== #}
+    <div id="system" class="tab-panel">
+        <div class="utility-section">
+            <h3>Concurrency</h3>
+            <p>
+                Control how many matches can run simultaneously. When the limit is reached,
+                new matches are queued and started automatically as running matches finish.
+            </p>
+            <form method="post" action="{% url 'update_system_config' %}" style="margin-top: 15px;">
+                {% csrf_token %}
+                <div class="form-group">
+                    <label for="max_concurrent_matches">Max Concurrent Matches:</label>
+                    <input type="number" name="max_concurrent_matches" id="max_concurrent_matches"
+                           value="{{ system_config.max_concurrent_matches }}" min="0" style="width: 80px; padding: 6px 8px;">
+                    <small style="color: #666;">0 = unlimited (no limit on parallel matches)</small>
+                </div>
+                <button type="submit" class="utility-btn" style="padding: 8px 16px; margin-top: 8px;">Save</button>
+            </form>
         </div>
     </div>
 </div>

@@ -2,6 +2,7 @@ import glob
 import logging
 import os
 import subprocess
+import threading
 from collections import defaultdict
 from datetime import datetime
 
@@ -13,8 +14,16 @@ from django.urls import reverse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
-from . import aiarena_runner, bot_versions, worktrees
-from .models import CustomBot, Match, MatchEvent, ReplayTest, TestGroup, TestSuite
+from . import aiarena_runner, bot_versions, match_queue, worktrees
+from .models import (
+    CustomBot,
+    Match,
+    MatchEvent,
+    ReplayTest,
+    SystemConfig,
+    TestGroup,
+    TestSuite,
+)
 
 logger = logging.getLogger('test_lab')
 
@@ -29,6 +38,12 @@ def _get_match_list_context(request):
             logger.info('Recovered %d stale match(es): %s', len(recovered), recovered)
     except Exception:
         logger.exception('Error checking stale pending matches')
+
+    # Start any queued matches that now have capacity.
+    try:
+        match_queue.drain_queue()
+    except Exception:
+        logger.exception('Error draining match queue')
 
     # Get filters from request
     selected_difficulty = request.GET.get('difficulty', '')
@@ -305,7 +320,7 @@ def _get_match_list_context(request):
                 row['results'].append(None)
                 continue
 
-            if group_id != max_group_id and match_data.result == 'Pending':
+            if group_id != max_group_id and match_data.result in ('Pending', 'Queued'):
                 match_data.result = 'Aborted'
 
             match_data.is_best_time = match_data.id in best_time_match_ids
@@ -391,6 +406,32 @@ DOCKER_COMPOSE_PATH = os.path.normpath(os.path.join(os.path.dirname(__file__)))
 LOGS_DIR = r'C:\Users\inter\Documents\StarCraft II\Replays\Multiplayer\docker'
 
 
+def _launch_legacy_match(match_id: int, command: list[str], cwd: str, log_file_path: str) -> bool:
+    """Launch a legacy single-container Docker match through the queue.
+
+    If at capacity the match is queued and started later.  A monitoring
+    thread waits for the process to finish, then notifies the queue so the
+    next queued match can start promptly.
+
+    Returns ``True`` if started immediately, ``False`` if queued.
+    """
+    def _launcher():
+        def _run():
+            try:
+                with open(log_file_path, 'w') as log:
+                    proc = subprocess.Popen(command, cwd=cwd, stdout=log, stderr=log)
+                proc.wait(timeout=7200)
+            except Exception:
+                logger.exception('Legacy match %d: error', match_id)
+            finally:
+                match_queue.notify_match_finished()
+
+        thread = threading.Thread(target=_run, daemon=True)
+        thread.start()
+
+    return match_queue.enqueue(match_id, _launcher)
+
+
 def start_custom_bot_match(
     custom_bot: CustomBot,
     test_bot: CustomBot | None = None,
@@ -414,6 +455,8 @@ def start_custom_bot_match(
     """
     if test_bot is None:
         test_bot = CustomBot.objects.filter(id=5).first()
+    if test_bot is None:
+        raise ValueError('No test bot specified and default bot (id=5) not found.')
     match = Match(
         test_group_id=test_group_id,
         start_timestamp=datetime.now(),
@@ -466,8 +509,7 @@ def start_custom_bot_match(
         'bash', '/root/runner/run_docker_bot_vs_bot.sh',
     ]
 
-    with open(log_file, 'w') as log:
-        subprocess.Popen(command, cwd=DOCKER_COMPOSE_PATH, stdout=log, stderr=log)
+    _launch_legacy_match(match_id, command, DOCKER_COMPOSE_PATH, log_file)
 
     return match_id
 
@@ -547,8 +589,7 @@ def start_test_suite(
                     override_src = source_override.replace('\\', '/')
                     command += ['-v', f'{override_src}:/root/bot']
                 command.append('bot')
-                with open(log_file, 'w') as log:
-                    subprocess.Popen(command, cwd=DOCKER_COMPOSE_PATH, stdout=log, stderr=log)
+                _launch_legacy_match(match_id, command, DOCKER_COMPOSE_PATH, log_file)
                 count += 1
 
     # --- Custom bot matches ---
@@ -1278,13 +1319,14 @@ def run_match_page(request):
 
 
 def config_page(request):
-    """Config page with Custom Bots and Test Suites tabs."""
+    """Config page with Custom Bots, Test Suites, and System tabs."""
     bots = CustomBot.objects.all().order_by('-created_at')
     aiarena_bots = aiarena_runner.get_available_aiarena_bots()
     custom_bots_list = CustomBot.objects.all().order_by('name')
     test_suites = TestSuite.objects.prefetch_related('custom_bots', 'replay_tests').order_by('name')
     replay_tests_list = ReplayTest.objects.prefetch_related('test_suites').order_by('-created_at')
     all_replay_tests = ReplayTest.objects.order_by('name')
+    system_config = SystemConfig.load()
 
     return render(request, 'test_lab/config.html', {
         'active_page': 'config',
@@ -1294,7 +1336,32 @@ def config_page(request):
         'test_suites': test_suites,
         'replay_tests': replay_tests_list,
         'all_replay_tests': all_replay_tests,
+        'system_config': system_config,
     })
+
+
+@require_POST
+def update_system_config(request):
+    """Update system-wide settings from the System tab."""
+    config_url = f"{reverse('config_page')}#system"
+
+    max_concurrent_raw = request.POST.get('max_concurrent_matches', '0').strip()
+    if not max_concurrent_raw.isdigit():
+        messages.error(request, 'Max concurrent matches must be a non-negative integer.')
+        return redirect(config_url)
+
+    max_concurrent = int(max_concurrent_raw)
+    config = SystemConfig.load()
+    config.max_concurrent_matches = max_concurrent
+    config.save()
+
+    label = 'unlimited' if max_concurrent == 0 else str(max_concurrent)
+    messages.success(request, f'Max concurrent matches updated to {label}.')
+
+    # Drain queue in case the new limit is higher
+    match_queue.drain_queue()
+
+    return redirect(config_url)
 
 
 def custom_page(request):
@@ -1414,12 +1481,12 @@ def run_single_match(request):
                 'bot',
             ]
 
-            with open(log_file, 'w') as log:
-                subprocess.Popen(command, cwd=docker_compose_path, stdout=log, stderr=log)
+            started = _launch_legacy_match(match_id, command, docker_compose_path, log_file)
 
+            status = 'started' if started else 'queued'
             messages.success(
                 request,
-                f'Single match started: {race} {build} @ {difficulty} (match #{match_id})'
+                f'Single match {status}: {race} {build} @ {difficulty} (match #{match_id})'
             )
         except Exception as e:
             messages.error(request, f'Failed to start match: {str(e)}')
@@ -1768,8 +1835,7 @@ def run_replay_match(request):
             'bash', '/root/runner/run_docker_continue_replay.sh',
         ]
 
-        with open(log_file, 'w') as log:
-            subprocess.Popen(command, cwd=docker_compose_path, stdout=log, stderr=log)
+        _launch_legacy_match(match_id, command, docker_compose_path, log_file)
 
         takeover_seconds = game_loop / 22.4
         messages.success(
@@ -1853,8 +1919,7 @@ def _launch_replay_test_match(
         'bash', '/root/runner/run_docker_continue_replay.sh',
     ]
 
-    with open(log_file, 'w') as log:
-        subprocess.Popen(command, cwd=DOCKER_COMPOSE_PATH, stdout=log, stderr=log)
+    _launch_legacy_match(match_id, command, DOCKER_COMPOSE_PATH, log_file)
 
     return match_id
 
