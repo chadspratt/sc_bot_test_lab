@@ -7,7 +7,7 @@ from Django views.
 
 The aiarena infrastructure uses four containers:
   - sc2_controller: runs StarCraft II
-  - bot_controller1: runs Bot 1 (BotTato)
+  - bot_controller1: runs Bot 1 (test subject)
   - bot_controller2: runs Bot 2 (opponent)
   - proxy_controller: coordinates the match
 
@@ -321,6 +321,7 @@ def _write_compose_override(
     bot2_name: str,
     bot2_host_path: str | None,
     bot2_type: str = 'python',
+    bot2_dockerfile: str = '',
     is_mirror: bool = False,
     mirror_aiarena_name: str | None = None,
     is_past_version: bool = False,
@@ -335,14 +336,24 @@ def _write_compose_override(
     - A mirror match (live mounts + optional custom Dockerfile)
     - A past version (cached source + symlink mounts + optional Dockerfile)
 
+    When the test bot or opponent has a custom ``dockerfile`` set, the
+    corresponding controller's image is replaced with a build directive
+    so pre-installed dependencies are available.
+
     *source_override* is passed through to ``_test_bot_volume_mounts``
     for branch-based testing.
     """
     lines = [
         'services:',
         '  bot_controller1:',
-        '    volumes:',
     ]
+    if test_bot.dockerfile:
+        lines += [
+            '    build:',
+            '      context: .',
+            f'      dockerfile: {test_bot.dockerfile}',
+        ]
+    lines.append('    volumes:')
     lines += _test_bot_volume_mounts(test_bot, test_bot_aiarena_name, source_override=source_override)
 
     lines.append('  bot_controller2:')
@@ -370,7 +381,13 @@ def _write_compose_override(
     else:
         assert bot2_host_path is not None
         b2 = bot2_host_path.replace('\\', '/')
-        if bot2_type in _NEEDS_PROXY_FWD:
+        if bot2_dockerfile:
+            lines += [
+                '    build:',
+                '      context: .',
+                f'      dockerfile: {bot2_dockerfile}',
+            ]
+        elif bot2_type in _NEEDS_PROXY_FWD:
             lines += [
                 '    build:',
                 '      context: .',
@@ -674,6 +691,7 @@ def start_aiarena_match(
         bot2_name=opponent_dir_name,
         bot2_host_path=opponent_path,
         bot2_type=opponent_type,
+        bot2_dockerfile=opponent_bot.dockerfile if not is_mirror else '',
         is_mirror=is_mirror,
         mirror_aiarena_name=mirror_name,
         source_override=source_override,
@@ -724,7 +742,7 @@ def start_past_version_match(
 
     # Extract (or reuse) cached bot source for this commit
     cache_path = bot_versions.get_or_create_version_cache(
-        commit_hash, repo_path=test_bot.git_repo_path or None,
+        commit_hash, repo_path=test_bot.source_path or None,
     )
 
     # Create overlay directory with aiarena-specific files

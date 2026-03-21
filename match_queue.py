@@ -221,10 +221,10 @@ def _get_source_override(match) -> str | None:
     if not tg.branch:
         return None
     test_bot = match.test_bot
-    if not test_bot or not test_bot.git_repo_path:
+    if not test_bot or not test_bot.source_path:
         return None
     from . import worktrees
-    return worktrees.get_or_create_worktree(test_bot.git_repo_path, tg.branch)
+    return worktrees.get_or_create_worktree(test_bot.source_path, tg.branch)
 
 
 def _add_source_override(command: list[str], match) -> None:

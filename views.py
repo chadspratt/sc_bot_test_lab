@@ -557,9 +557,9 @@ def start_test_suite(
 
     # Resolve branch worktree source override
     source_override: str | None = None
-    if branch and test_bot and test_bot.git_repo_path:
+    if branch and test_bot and test_bot.source_path:
         source_override = worktrees.get_or_create_worktree(
-            test_bot.git_repo_path, branch,
+            test_bot.source_path, branch,
         )
 
     test_group = TestGroup.objects.create(
@@ -616,9 +616,9 @@ def start_test_suite(
 
     # --- Past-version matches ---
     version_offsets = test_suite.previous_version_offsets if test_suite else []
-    if version_offsets and test_bot and test_bot.git_repo_path:
+    if version_offsets and test_bot and test_bot.source_path:
         max_offset = max(version_offsets)
-        repo_path = test_bot.git_repo_path or None
+        repo_path = test_bot.source_path or None
         commits = bot_versions.get_recent_bot_commits(
             count=max_offset, repo_path=repo_path,
         )
@@ -760,10 +760,10 @@ def api_trigger_tests(request):
             )
         # Resolve source override for branch testing
         source_override = None
-        if branch and test_bot and test_bot.git_repo_path:
+        if branch and test_bot and test_bot.source_path:
             try:
                 source_override = worktrees.get_or_create_worktree(
-                    test_bot.git_repo_path, branch,
+                    test_bot.source_path, branch,
                 )
             except ValueError as e:
                 return JsonResponse(
@@ -800,9 +800,9 @@ def api_trigger_tests(request):
         test_suite = test_bot.default_test_suite
 
     # Validate branch early if provided
-    if branch and test_bot and test_bot.git_repo_path:
+    if branch and test_bot and test_bot.source_path:
         try:
-            worktrees.get_or_create_worktree(test_bot.git_repo_path, branch)
+            worktrees.get_or_create_worktree(test_bot.source_path, branch)
         except ValueError as e:
             return JsonResponse(
                 {'status': 'error', 'message': f'Invalid branch: {e}'},
@@ -1257,13 +1257,13 @@ def run_match_page(request):
     """Run Match page with match type tabs and custom match results table."""
     custom_bots_list = CustomBot.objects.all().order_by('name')
     test_subject_bots = CustomBot.objects.filter(is_test_subject=True).order_by('name')
-    version_test_bots = CustomBot.objects.filter(git_repo_path__gt='').order_by('name')
+    version_test_bots = CustomBot.objects.filter(source_path__gt='').order_by('name')
 
     # Collect recent commits for each test-subject bot that has a git repo
     recent_commits_by_bot: dict[int, list] = {}
     for bot in version_test_bots:
         recent_commits_by_bot[bot.id] = bot_versions.get_recent_bot_commits(
-            count=5, repo_path=bot.git_repo_path,
+            count=5, repo_path=bot.source_path,
         )
 
     # Default commits shown in the Past Version dropdown (first version bot)
@@ -1525,7 +1525,6 @@ def create_custom_bot(request):
     aiarena_bot_type = request.POST.get('aiarena_bot_type', 'python').strip()
     is_test_subject = request.POST.get('is_test_subject') == 'on'
     source_path = request.POST.get('source_path', '').strip()
-    git_repo_path = request.POST.get('git_repo_path', '').strip()
     enable_version_history = request.POST.get('enable_version_history') == 'on'
     dockerfile = request.POST.get('dockerfile', '').strip()
 
@@ -1564,7 +1563,6 @@ def create_custom_bot(request):
             aiarena_bot_type=aiarena_bot_type,
             is_test_subject=is_test_subject,
             source_path=source_path,
-            git_repo_path=git_repo_path,
             enable_version_history=enable_version_history,
             symlink_mounts=symlink_mounts,
             dockerfile=dockerfile,
@@ -1619,7 +1617,6 @@ def update_custom_bot_test_subject(request, bot_id):
 
     if is_test_subject:
         source_path = request.POST.get('source_path', '').strip()
-        git_repo_path = request.POST.get('git_repo_path', '').strip()
         enable_version_history = request.POST.get('enable_version_history') == 'on'
         dockerfile = request.POST.get('dockerfile', '').strip()
 
@@ -1633,19 +1630,17 @@ def update_custom_bot_test_subject(request, bot_id):
 
         bot.is_test_subject = True
         bot.source_path = source_path
-        bot.git_repo_path = git_repo_path
         bot.enable_version_history = enable_version_history
         bot.dockerfile = dockerfile
         bot.symlink_mounts = symlink_mounts
-        update_fields += ['source_path', 'git_repo_path', 'enable_version_history', 'dockerfile', 'symlink_mounts']
+        update_fields += ['source_path', 'enable_version_history', 'dockerfile', 'symlink_mounts']
     else:
         bot.is_test_subject = False
         bot.source_path = ''
-        bot.git_repo_path = ''
         bot.enable_version_history = False
         bot.dockerfile = ''
         bot.symlink_mounts = []
-        update_fields += ['source_path', 'git_repo_path', 'enable_version_history', 'dockerfile', 'symlink_mounts']
+        update_fields += ['source_path', 'enable_version_history', 'dockerfile', 'symlink_mounts']
 
     bot.save(update_fields=update_fields)
     return JsonResponse({'status': 'ok'})
@@ -1719,7 +1714,7 @@ def run_past_version_match(request):
     test_bot_id = request.POST.get('test_bot_id')
     if test_bot_id:
         test_bot = CustomBot.objects.filter(id=test_bot_id, is_test_subject=True).first()
-    if test_bot is None or not test_bot.git_repo_path:
+    if test_bot is None or not test_bot.source_path:
         messages.error(request, 'Selected bot does not have a git repository configured.')
         return redirect('run_match')
 

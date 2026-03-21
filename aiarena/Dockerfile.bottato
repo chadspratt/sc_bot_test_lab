@@ -19,3 +19,4 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Pre-install BotTato's Python dependencies so run.py doesn't need pip
 RUN pip install --no-cache-dir \
     loguru numpy scipy setuptools pymysql "sharepy>=2.0.0"
+    

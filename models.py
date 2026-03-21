@@ -56,17 +56,11 @@ class CustomBot(models.Model):
         max_length=500,
         blank=True,
         default='',
-        help_text="Absolute path to the bot's live source directory on the host",
-    )
-    git_repo_path = models.CharField(
-        max_length=500,
-        blank=True,
-        default='',
-        help_text="Absolute path to the bot's git repository (for past version support)",
+        help_text="Absolute path to the bot's live development source directory on the host, which may differ from the packaged version in the bots folder",
     )
     enable_version_history = models.BooleanField(
         default=False,
-        help_text="Enable past-version matches for this bot (requires git_repo_path)",
+        help_text="Enable past-version matches for this bot (requires source_path to point to a git repo)",
     )
     symlink_mounts = models.JSONField(
         default=list,
@@ -77,7 +71,7 @@ class CustomBot(models.Model):
         max_length=100,
         blank=True,
         default='',
-        help_text="Custom Dockerfile name in aiarena/ for mirror/past-version matches (e.g. Dockerfile.bottato)",
+        help_text="Custom Dockerfile (relative to test_lab/aiarena/) that builds an image with extra dependencies pre-installed, e.g. Dockerfile.bottato. Saves time when running this bot repeatedly by avoiding per-match installs.",
     )
     default_test_suite = models.ForeignKey(
         'TestSuite',

@@ -117,31 +117,26 @@ td { text-align: left; }
                 <div class="form-group">
                     <label>
                         <input type="checkbox" name="is_test_subject" id="is_test_subject" onchange="document.getElementById('test-subject-fields').style.display = this.checked ? 'block' : 'none';">
-                        This bot is a test subject (Player 1)
+                        This bot is a test subject
                     </label>
                 </div>
                 <div id="test-subject-fields" style="display: none;">
                     <div class="form-group">
                         <label for="source_path">Source Path:</label>
                         <input type="text" name="source_path" id="source_path" placeholder="e.g. C:\Users\me\mybot">
-                        <small style="color: #666;">Absolute path to the bot source on the host. Mounted into Docker at runtime.</small>
-                    </div>
-                    <div class="form-group">
-                        <label for="git_repo_path">Git Repo Path (optional):</label>
-                        <input type="text" name="git_repo_path" id="git_repo_path" placeholder="e.g. C:\Users\me\mybot">
-                        <small style="color: #666;">Path to git repo for past-version matches. Leave blank to disable.</small>
+                        <small style="color: #666;">Absolute path to the bot's live development source on the host. May differ from the packaged version in the bots folder. Mounted into Docker at runtime.</small>
                     </div>
                     <div class="form-group">
                         <label>
                             <input type="checkbox" name="enable_version_history" id="enable_version_history">
                             Enable version history matches
                         </label>
-                        <small style="color: #666;">Allow running matches against past versions of this bot (requires Git Repo Path).</small>
+                        <small style="color: #666;">Allow running matches against past versions of this bot (requires Source Path to point to a git repo).</small>
                     </div>
                     <div class="form-group">
                         <label for="dockerfile">Custom Dockerfile (optional):</label>
                         <input type="text" name="dockerfile" id="dockerfile" placeholder="e.g. Dockerfile.mybot">
-                        <small style="color: #666;">Dockerfile name (relative to test_lab/aiarena/) for custom build steps. Leave blank for vanilla image.</small>
+                        <small style="color: #666;">Dockerfile (relative to test_lab/aiarena/) that builds an image with extra dependencies pre-installed. Saves time when running this bot repeatedly. Leave blank for vanilla image.</small>
                     </div>
                 </div>
                 <button type="submit" class="btn btn-primary" style="padding: 8px 16px;">Register Bot</button>
@@ -174,14 +169,13 @@ td { text-align: left; }
                         <td><code>{{ bot.aiarena_bot_type }}</code></td>
                         <td>
                             {% if bot.is_test_subject %}
-                                <span class="ts-edit-btn" style="color: #28a745; font-weight: bold;" onclick="openTestSubjectModal({{ bot.id }}, '{{ bot.name|escapejs }}', true, '{{ bot.source_path|escapejs }}', '{{ bot.git_repo_path|escapejs }}', {{ bot.enable_version_history|yesno:'true,false' }}, '{{ bot.dockerfile|escapejs }}')">Yes</span>
+                                <span class="ts-edit-btn" style="color: #28a745; font-weight: bold;" onclick="openTestSubjectModal({{ bot.id }}, '{{ bot.name|escapejs }}', true, '{{ bot.source_path|escapejs }}', {{ bot.enable_version_history|yesno:'true,false' }}, '{{ bot.dockerfile|escapejs }}')">Yes</span>
                                 {% if bot.source_path %}<br><small>src: <code>{{ bot.source_path }}</code></small>{% endif %}
-                                {% if bot.git_repo_path %}<br><small>git: <code>{{ bot.git_repo_path }}</code></small>{% endif %}
                                 {% if bot.enable_version_history %}<br><small style="color: #17a2b8;">version history: enabled</small>{% endif %}
                                 {% if bot.dockerfile %}<br><small>dockerfile: <code>{{ bot.dockerfile }}</code></small>{% endif %}
                                 {% if bot.symlink_mounts %}<br><small>symlinks: {{ bot.symlink_mounts|length }}</small>{% endif %}
                             {% else %}
-                                <span class="ts-edit-btn" style="color: #999;" onclick="openTestSubjectModal({{ bot.id }}, '{{ bot.name|escapejs }}', false, '', '', false, '')">No</span>
+                                <span class="ts-edit-btn" style="color: #999;" onclick="openTestSubjectModal({{ bot.id }}, '{{ bot.name|escapejs }}', false, '', false, '')">No</span>
                             {% endif %}
                         </td>
                         <td>
@@ -495,31 +489,26 @@ td { text-align: left; }
         <div class="form-group">
             <label>
                 <input type="checkbox" id="ts-modal-enabled" onchange="document.getElementById('ts-modal-fields').style.display = this.checked ? 'block' : 'none';">
-                This bot is a test subject (Player 1)
+                This bot is a test subject
             </label>
         </div>
         <div id="ts-modal-fields" style="display: none;">
             <div class="form-group">
                 <label for="ts-modal-source-path">Source Path:</label>
                 <input type="text" id="ts-modal-source-path" placeholder="e.g. C:\Users\me\mybot">
-                <small style="color: #666;">Absolute path to the bot source on the host. Mounted into Docker at runtime.</small>
-            </div>
-            <div class="form-group">
-                <label for="ts-modal-git-repo-path">Git Repo Path (optional):</label>
-                <input type="text" id="ts-modal-git-repo-path" placeholder="e.g. C:\Users\me\mybot">
-                <small style="color: #666;">Path to git repo for past-version matches. Leave blank to disable.</small>
+                <small style="color: #666;">Absolute path to the bot's live development source on the host. May differ from the packaged version in the bots folder. Mounted into Docker at runtime.</small>
             </div>
             <div class="form-group">
                 <label>
                     <input type="checkbox" id="ts-modal-version-history">
                     Enable version history matches
                 </label>
-                <small style="color: #666;">Allow running matches against past versions of this bot (requires Git Repo Path).</small>
+                <small style="color: #666;">Allow running matches against past versions of this bot (requires Source Path to point to a git repo).</small>
             </div>
             <div class="form-group">
                 <label for="ts-modal-dockerfile">Custom Dockerfile (optional):</label>
                 <input type="text" id="ts-modal-dockerfile" placeholder="e.g. Dockerfile.mybot">
-                <small style="color: #666;">Dockerfile name (relative to test_lab/aiarena/) for custom build steps.</small>
+                <small style="color: #666;">Dockerfile (relative to test_lab/aiarena/) that builds an image with extra dependencies pre-installed. Saves time when running this bot repeatedly.</small>
             </div>
         </div>
         <div id="ts-modal-error" style="display: none; color: red; background: #f8d7da; border: 1px solid #f5c6cb; padding: 8px; border-radius: 4px; margin-top: 10px;"></div>
@@ -584,12 +573,11 @@ td { text-align: left; }
         document.getElementById('rt_custom_bot_field').style.display = type === 'CustomBot' ? '' : 'none';
     }
 
-    function openTestSubjectModal(botId, botName, isTestSubject, sourcePath, gitRepoPath, enableVersionHistory, dockerfile) {
+    function openTestSubjectModal(botId, botName, isTestSubject, sourcePath, enableVersionHistory, dockerfile) {
         document.getElementById('ts-modal-bot-id').value = botId;
         document.getElementById('ts-modal-bot-name').textContent = botName;
         document.getElementById('ts-modal-enabled').checked = isTestSubject;
         document.getElementById('ts-modal-source-path').value = sourcePath;
-        document.getElementById('ts-modal-git-repo-path').value = gitRepoPath;
         document.getElementById('ts-modal-version-history').checked = enableVersionHistory;
         document.getElementById('ts-modal-dockerfile').value = dockerfile;
         document.getElementById('ts-modal-fields').style.display = isTestSubject ? 'block' : 'none';
@@ -608,7 +596,6 @@ td { text-align: left; }
         if (enabled) {
             params.set('is_test_subject', 'on');
             params.set('source_path', document.getElementById('ts-modal-source-path').value);
-            params.set('git_repo_path', document.getElementById('ts-modal-git-repo-path').value);
             if (document.getElementById('ts-modal-version-history').checked) params.set('enable_version_history', 'on');
             params.set('dockerfile', document.getElementById('ts-modal-dockerfile').value);
         }

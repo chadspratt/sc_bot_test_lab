@@ -20,9 +20,7 @@ services:
       - "C:\\Program Files (x86)\\StarCraft II\\Maps:/root/StarCraftII/maps"
 
   bot_controller1:
-    build:
-      context: .
-      dockerfile: Dockerfile.bottato
+    image: aiarena/arenaclient-bot:v0.8.0
     volumes:
       # Bot directories are mounted dynamically via docker-compose.override.yml
       - "./logs/bot_controller1:/logs"
