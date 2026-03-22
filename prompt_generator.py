@@ -21,10 +21,13 @@ tools: [read, edit, search, execute]
 ## Ticket #{ticket_id} — {title}
 
 ### Branch Setup
-Use a git worktree so the main checkout stays clean and multiple tickets can
-be worked on in parallel. Run these commands from the repository root:
+First, change to the bot's repository root:
+```
+cd {source_path}
+```
 
-Create the branch and worktree in one step:
+Then create the worktree (this keeps the main checkout clean and allows
+multiple tickets to be worked on in parallel):
 ```
 git worktree add worktrees/{branch_name} -b {branch_name}
 ```
@@ -33,7 +36,7 @@ If the branch already exists:
 git worktree add worktrees/{branch_name} {branch_name}
 ```
 
-Then **do all your work inside `worktrees/{branch_name}/`**.
+Then **do all your work inside `{source_path}/worktrees/{branch_name}/`**.
 All file paths below are relative to that worktree directory.
 
 ### Request
@@ -74,6 +77,7 @@ def generate_prompt_content(ticket) -> str:
         title=ticket.title,
         branch_name=ticket.branch_name,
         bot_name=ticket.test_bot.name,
+        source_path=ticket.test_bot.source_path,
         description=ticket.description,
         focus_files=focus_files,
     )
