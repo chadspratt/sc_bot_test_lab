@@ -81,6 +81,7 @@
     <div class="top-nav">
         <a href="{% url 'results' %}" {% if active_page == 'results' %}class="active"{% endif %}>Results</a>
         <a href="{% url 'run_match' %}" {% if active_page == 'run_match' %}class="active"{% endif %}>Run Match</a>
+        <a href="{% url 'tickets' %}" {% if active_page == 'tickets' %}class="active"{% endif %}>Tickets</a>
         <a href="{% url 'config_page' %}" {% if active_page == 'config' %}class="active"{% endif %}>Config</a>
         <a href="{% url 'custom_page' %}" {% if active_page == 'custom' %}class="active"{% endif %}>Custom</a>
     </div>

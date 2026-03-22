@@ -42,6 +42,16 @@ urlpatterns = [
 
     # API
     path('api/trigger-tests/', views.api_trigger_tests, name='api_trigger_tests'),
+    path('api/trigger-ticket-tests/', views.api_trigger_ticket_tests, name='api_trigger_ticket_tests'),
+
+    # Tickets
+    path('tickets/', views.tickets_page, name='tickets'),
+    path('tickets/<int:ticket_id>/', views.ticket_detail_page, name='ticket_detail'),
+    path('tickets/create/', views.create_ticket, name='create_ticket'),
+    path('tickets/<int:ticket_id>/update/', views.update_ticket, name='update_ticket'),
+    path('tickets/<int:ticket_id>/status/', views.update_ticket_status, name='update_ticket_status'),
+    path('tickets/<int:ticket_id>/generate-prompt/', views.generate_ticket_prompt, name='generate_ticket_prompt'),
+    path('tickets/<int:ticket_id>/delete/', views.delete_ticket, name='delete_ticket'),
 
     # Geometry (standalone tool page)
     path('geometry/position-is-between/', views.position_is_between, name='position_is_between'),

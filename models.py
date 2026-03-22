@@ -341,6 +341,73 @@ class MatchEvent(models.Model):
         return f"Match {self.match.id} {self.type} Event at {self.game_timestamp}: {self.message}"
 
 
+class Ticket(models.Model):
+    """A unit of work describing a change to make to a bot."""
+
+    class Meta:
+        db_table = 'ticket'
+        ordering = ['-created_at']
+
+    Status = models.TextChoices('Status',
+        'draft ready in_progress review testing done rejected')
+
+    id = models.AutoField(primary_key=True)
+    title = models.CharField(max_length=200)
+    description = models.TextField(
+        help_text="Detailed spec: what to change, acceptance criteria, files to focus on",
+    )
+    status = models.CharField(
+        max_length=20, choices=Status, default='draft',
+    )
+    branch = models.CharField(
+        max_length=200, blank=True, default='',
+        help_text="Auto-generated branch name, e.g. ticket/42-improve-kiting",
+    )
+    test_bot = models.ForeignKey(
+        CustomBot, on_delete=models.CASCADE,
+        related_name='tickets',
+        help_text="Which bot to modify",
+    )
+    test_suite = models.ForeignKey(
+        TestSuite, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='tickets',
+        help_text="Which test suite to run when work is done",
+    )
+    test_group = models.ForeignKey(
+        TestGroup, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='tickets',
+        help_text="Link to the test results after tests have run",
+    )
+    context_files = models.TextField(
+        blank=True, default='',
+        help_text="Newline-separated list of files the agent should focus on",
+    )
+    prompt_file = models.CharField(
+        max_length=500, blank=True, default='',
+        help_text="Path to the generated .prompt.md file",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    @property
+    def slug(self) -> str:
+        """URL-safe slug derived from the title."""
+        import re
+        slug = self.title.lower().strip()
+        slug = re.sub(r'[^a-z0-9]+', '-', slug)
+        return slug.strip('-')[:50]
+
+    @property
+    def branch_name(self) -> str:
+        """Return the branch name, auto-generating if empty."""
+        if self.branch:
+            return self.branch
+        return f'ticket/{self.id}-{self.slug}'
+
+    def __str__(self):
+        return f"#{self.id}: {self.title} [{self.status}]"
+
+
 class SystemConfig(models.Model):
     """Singleton table for system-wide settings."""
 

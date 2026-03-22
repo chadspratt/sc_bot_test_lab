@@ -1,0 +1,94 @@
+{% extends "test_lab/base.html" %}
+{% block title %}Tickets — Test Lab{% endblock %}
+
+{% block extra_css %}
+.status-badge {
+    display: inline-block; padding: 2px 8px; border-radius: 10px;
+    font-size: 12px; font-weight: bold; color: white;
+}
+.status-draft { background-color: #6c757d; }
+.status-ready { background-color: #17a2b8; }
+.status-in_progress { background-color: #ffc107; color: #333; }
+.status-review { background-color: #007bff; }
+.status-testing { background-color: #fd7e14; }
+.status-done { background-color: #28a745; }
+.status-rejected { background-color: #dc3545; }
+{% endblock %}
+
+{% block content %}
+<div id="tickets-container">
+
+    <h2>Tickets</h2>
+
+    <!-- Create ticket form -->
+    <div class="utility-section">
+        <h3>New Ticket</h3>
+        <form method="post" action="{% url 'create_ticket' %}">
+            {% csrf_token %}
+            <div class="form-group">
+                <label for="title">Title</label>
+                <input type="text" id="title" name="title" required placeholder="e.g. Improve marine kiting vs banelings">
+            </div>
+            <div class="form-group">
+                <label for="description">Description</label>
+                <textarea id="description" name="description" rows="4" style="height:auto"
+                    placeholder="What to change, acceptance criteria, details..."></textarea>
+            </div>
+            <div class="form-group">
+                <label for="test_bot_id">Test Bot</label>
+                <select id="test_bot_id" name="test_bot_id" required>
+                    <option value="">-- Select bot --</option>
+                    {% for bot in test_bots %}
+                    <option value="{{ bot.id }}">{{ bot.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="test_suite_id">Test Suite (optional — defaults to bot's default)</label>
+                <select id="test_suite_id" name="test_suite_id">
+                    <option value="">-- Use bot default --</option>
+                    {% for suite in test_suites %}
+                    <option value="{{ suite.id }}">{{ suite.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="context_files">Focus Files (one per line, optional)</label>
+                <textarea id="context_files" name="context_files" rows="3" style="height:auto"
+                    placeholder="bot/bottato/micro/marine_micro.py&#10;bot/bottato/micro/micro_factory.py"></textarea>
+            </div>
+            <button type="submit" class="btn btn-primary">Create Ticket</button>
+        </form>
+    </div>
+
+    <!-- Ticket list -->
+    {% if tickets %}
+    <table>
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>Title</th>
+                <th>Bot</th>
+                <th>Status</th>
+                <th>Branch</th>
+                <th>Created</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for ticket in tickets %}
+            <tr>
+                <td><a href="{% url 'ticket_detail' ticket.id %}">{{ ticket.id }}</a></td>
+                <td><a href="{% url 'ticket_detail' ticket.id %}">{{ ticket.title }}</a></td>
+                <td>{{ ticket.test_bot.name }}</td>
+                <td><span class="status-badge status-{{ ticket.status }}">{{ ticket.get_status_display }}</span></td>
+                <td style="font-family:monospace; font-size:12px;">{{ ticket.branch }}</td>
+                <td>{{ ticket.created_at|date:"M d, H:i" }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p style="margin-top: 20px; color: #666;">No tickets yet. Create one above.</p>
+    {% endif %}
+</div>
+{% endblock %}

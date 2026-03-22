@@ -1,0 +1,190 @@
+{% extends "test_lab/base.html" %}
+{% block title %}Ticket #{{ ticket.id }} — Test Lab{% endblock %}
+
+{% block extra_css %}
+.status-badge {
+    display: inline-block; padding: 2px 8px; border-radius: 10px;
+    font-size: 12px; font-weight: bold; color: white;
+}
+.status-draft { background-color: #6c757d; }
+.status-ready { background-color: #17a2b8; }
+.status-in_progress { background-color: #ffc107; color: #333; }
+.status-review { background-color: #007bff; }
+.status-testing { background-color: #fd7e14; }
+.status-done { background-color: #28a745; }
+.status-rejected { background-color: #dc3545; }
+.ticket-meta { margin: 10px 0; }
+.ticket-meta dt { font-weight: bold; display: inline; }
+.ticket-meta dd { display: inline; margin: 0 20px 0 5px; }
+.action-bar { display: flex; gap: 8px; flex-wrap: wrap; margin: 15px 0; }
+.action-bar form { margin: 0; }
+.diff-block {
+    background: #1e1e1e; color: #d4d4d4; padding: 15px;
+    border-radius: 5px; overflow-x: auto; font-family: monospace;
+    font-size: 13px; white-space: pre; max-height: 500px; overflow-y: auto;
+}
+.diff-block .diff-add { color: #4ec9b0; }
+.diff-block .diff-del { color: #f44747; }
+.diff-block .diff-hunk { color: #569cd6; }
+.prompt-cmd {
+    background: #f0f0f0; padding: 8px 12px; border-radius: 4px;
+    font-family: monospace; font-size: 14px; display: inline-block; margin: 5px 0;
+}
+{% endblock %}
+
+{% block content %}
+<div style="margin-bottom: 10px;">
+    <a href="{% url 'tickets' %}">&larr; All Tickets</a>
+</div>
+
+<h2>
+    Ticket #{{ ticket.id }}: {{ ticket.title }}
+    <span class="status-badge status-{{ ticket.status }}">{{ ticket.get_status_display }}</span>
+</h2>
+
+<!-- Metadata -->
+<dl class="ticket-meta">
+    <dt>Bot:</dt><dd>{{ ticket.test_bot.name }}</dd>
+    <dt>Suite:</dt><dd>{{ ticket.test_suite.name|default:"(bot default)" }}</dd>
+    <dt>Branch:</dt><dd style="font-family:monospace">{{ ticket.branch|default:"(not set)" }}</dd>
+    <dt>Created:</dt><dd>{{ ticket.created_at|date:"M d, Y H:i" }}</dd>
+    <dt>Updated:</dt><dd>{{ ticket.updated_at|date:"M d, Y H:i" }}</dd>
+    {% if ticket.test_group %}
+    <dt>Test Group:</dt><dd><a href="{% url 'results' %}">Group {{ ticket.test_group.id }}</a></dd>
+    {% endif %}
+</dl>
+
+<!-- Action bar -->
+<div class="action-bar">
+    <form method="post" action="{% url 'generate_ticket_prompt' ticket.id %}">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-primary" title="Write .prompt.md file to .github/prompts/">
+            {% if ticket.prompt_file %}Regenerate Prompt{% else %}Generate Prompt{% endif %}
+        </button>
+    </form>
+
+    {% if ticket.status == 'draft' %}
+    <form method="post" action="{% url 'update_ticket_status' ticket.id %}">
+        {% csrf_token %}
+        <input type="hidden" name="status" value="ready">
+        <button type="submit" class="btn" style="background-color:#17a2b8">Mark Ready</button>
+    </form>
+    {% endif %}
+
+    {% if ticket.status == 'ready' %}
+    <form method="post" action="{% url 'update_ticket_status' ticket.id %}">
+        {% csrf_token %}
+        <input type="hidden" name="status" value="in_progress">
+        <button type="submit" class="btn" style="background-color:#ffc107;color:#333">Mark In Progress</button>
+    </form>
+    {% endif %}
+
+    {% if ticket.status == 'in_progress' %}
+    <form method="post" action="{% url 'update_ticket_status' ticket.id %}">
+        {% csrf_token %}
+        <input type="hidden" name="status" value="review">
+        <button type="submit" class="btn" style="background-color:#007bff">Mark for Review</button>
+    </form>
+    {% endif %}
+
+    {% if ticket.status == 'review' %}
+    <form method="post" action="{% url 'update_ticket_status' ticket.id %}">
+        {% csrf_token %}
+        <input type="hidden" name="status" value="done">
+        <button type="submit" class="btn" style="background-color:#28a745">Approve</button>
+    </form>
+    <form method="post" action="{% url 'update_ticket_status' ticket.id %}">
+        {% csrf_token %}
+        <input type="hidden" name="status" value="rejected">
+        <button type="submit" class="btn" style="background-color:#dc3545">Reject</button>
+    </form>
+    {% endif %}
+
+    <form method="post" action="{% url 'delete_ticket' ticket.id %}"
+          onsubmit="return confirm('Delete this ticket?')">
+        {% csrf_token %}
+        <button type="submit" class="btn-danger" style="padding:8px 16px; font-size:14px;">Delete</button>
+    </form>
+</div>
+
+<!-- Prompt file info -->
+{% if ticket.prompt_file %}
+<div class="utility-section" style="background-color:#e8f5e9; border-color:#a5d6a7;">
+    <strong>Prompt file ready!</strong> Invoke in VS Code chat:
+    <span class="prompt-cmd">/ticket-{{ ticket.id }}</span>
+</div>
+{% endif %}
+
+<!-- Editable fields (when in draft/ready/rejected) -->
+{% if ticket.status == 'draft' or ticket.status == 'ready' or ticket.status == 'rejected' %}
+<div class="utility-section">
+    <h3>Edit Ticket</h3>
+    <form method="post" action="{% url 'update_ticket' ticket.id %}">
+        {% csrf_token %}
+        <div class="form-group">
+            <label for="title">Title</label>
+            <input type="text" id="title" name="title" value="{{ ticket.title }}">
+        </div>
+        <div class="form-group">
+            <label for="description">Description</label>
+            <textarea id="description" name="description" rows="6" style="height:auto">{{ ticket.description }}</textarea>
+        </div>
+        <div class="form-group">
+            <label for="context_files">Focus Files (one per line)</label>
+            <textarea id="context_files" name="context_files" rows="3" style="height:auto">{{ ticket.context_files }}</textarea>
+        </div>
+        <button type="submit" class="btn btn-primary">Save Changes</button>
+    </form>
+</div>
+{% else %}
+<!-- Read-only description -->
+<div class="utility-section">
+    <h3>Description</h3>
+    <div style="white-space: pre-wrap;">{{ ticket.description }}</div>
+    {% if ticket.context_files %}
+    <h4 style="margin-top:10px;">Focus Files</h4>
+    <ul>
+        {% for f in ticket.context_files.splitlines %}
+            {% if f.strip %}<li style="font-family:monospace;">{{ f }}</li>{% endif %}
+        {% endfor %}
+    </ul>
+    {% endif %}
+</div>
+{% endif %}
+
+<!-- Git diff -->
+{% if diff_text %}
+<div class="utility-section">
+    <h3>Branch Diff ({{ ticket.branch }} vs main)</h3>
+    <div class="diff-block" id="diff-output"></div>
+</div>
+{% endif %}
+
+{% endblock %}
+
+{% block extra_js %}
+{% if diff_text %}
+<script>
+(function() {
+    var raw = {{ diff_text|escapejs|safe }};
+    var container = document.getElementById('diff-output');
+    if (!raw) return;
+    var lines = raw.split('\n');
+    var html = '';
+    for (var i = 0; i < lines.length; i++) {
+        var line = lines[i].replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        if (line.startsWith('@@')) {
+            html += '<span class="diff-hunk">' + line + '</span>\n';
+        } else if (line.startsWith('+')) {
+            html += '<span class="diff-add">' + line + '</span>\n';
+        } else if (line.startsWith('-')) {
+            html += '<span class="diff-del">' + line + '</span>\n';
+        } else {
+            html += line + '\n';
+        }
+    }
+    container.innerHTML = html;
+})();
+</script>
+{% endif %}
+{% endblock %}

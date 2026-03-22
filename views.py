@@ -14,7 +14,7 @@ from django.urls import reverse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
-from . import aiarena_runner, bot_versions, match_queue, worktrees
+from . import aiarena_runner, bot_versions, match_queue, prompt_generator, worktrees
 from .models import (
     CustomBot,
     Match,
@@ -23,6 +23,7 @@ from .models import (
     SystemConfig,
     TestGroup,
     TestSuite,
+    Ticket,
 )
 
 logger = logging.getLogger('test_lab')
@@ -2212,3 +2213,254 @@ def delete_replay_test(request, test_id):
     except ReplayTest.DoesNotExist:
         messages.error(request, 'Replay test not found.')
     return redirect(config_tests_url)
+
+
+# ---------------------------------------------------------------------------
+# Ticket views
+# ---------------------------------------------------------------------------
+
+def tickets_page(request):
+    """List all tickets."""
+    tickets = Ticket.objects.select_related('test_bot', 'test_suite', 'test_group').all()
+    test_bots = CustomBot.objects.filter(is_test_subject=True)
+    test_suites = TestSuite.objects.all()
+    return render(request, 'test_lab/tickets.html', {
+        'active_page': 'tickets',
+        'tickets': tickets,
+        'test_bots': test_bots,
+        'test_suites': test_suites,
+    })
+
+
+def ticket_detail_page(request, ticket_id):
+    """View a single ticket with its details and diff."""
+    try:
+        ticket = Ticket.objects.select_related(
+            'test_bot', 'test_suite', 'test_group',
+        ).get(id=ticket_id)
+    except Ticket.DoesNotExist:
+        raise Http404('Ticket not found')
+
+    # Try to get the git diff for the branch
+    diff_text = ''
+    if ticket.branch and ticket.test_bot and ticket.test_bot.source_path:
+        try:
+            result = subprocess.run(
+                ['git', 'diff', f'main...{ticket.branch}'],
+                cwd=ticket.test_bot.source_path,
+                capture_output=True, text=True, timeout=10,
+            )
+            diff_text = result.stdout
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            pass
+
+    return render(request, 'test_lab/ticket_detail.html', {
+        'active_page': 'tickets',
+        'ticket': ticket,
+        'diff_text': diff_text,
+        'statuses': Ticket.Status,
+    })
+
+
+@require_POST
+def create_ticket(request):
+    """Create a new ticket."""
+    title = request.POST.get('title', '').strip()
+    description = request.POST.get('description', '').strip()
+    test_bot_id = request.POST.get('test_bot_id')
+    test_suite_id = request.POST.get('test_suite_id') or None
+    context_files = request.POST.get('context_files', '').strip()
+
+    if not title:
+        messages.error(request, 'Title is required.')
+        return redirect('tickets')
+    if not test_bot_id:
+        messages.error(request, 'Test bot is required.')
+        return redirect('tickets')
+
+    try:
+        test_bot = CustomBot.objects.get(id=test_bot_id)
+    except CustomBot.DoesNotExist:
+        messages.error(request, 'Invalid test bot.')
+        return redirect('tickets')
+
+    test_suite = None
+    if test_suite_id:
+        test_suite = TestSuite.objects.filter(id=test_suite_id).first()
+    if test_suite is None and test_bot.default_test_suite:
+        test_suite = test_bot.default_test_suite
+
+    ticket = Ticket.objects.create(
+        title=title,
+        description=description,
+        test_bot=test_bot,
+        test_suite=test_suite,
+        context_files=context_files,
+    )
+    # Auto-generate the branch name now that we have the ID
+    ticket.branch = ticket.branch_name
+    ticket.save(update_fields=['branch'])
+
+    messages.success(request, f'Ticket #{ticket.id} created.')
+    return redirect('ticket_detail', ticket_id=ticket.id)
+
+
+@require_POST
+def update_ticket(request, ticket_id):
+    """Update an existing ticket (draft/ready only)."""
+    try:
+        ticket = Ticket.objects.get(id=ticket_id)
+    except Ticket.DoesNotExist:
+        raise Http404('Ticket not found')
+
+    if ticket.status not in ('draft', 'ready', 'rejected'):
+        messages.error(request, 'Can only edit tickets in draft, ready, or rejected status.')
+        return redirect('ticket_detail', ticket_id=ticket.id)
+
+    ticket.title = request.POST.get('title', ticket.title).strip()
+    ticket.description = request.POST.get('description', ticket.description).strip()
+    ticket.context_files = request.POST.get('context_files', ticket.context_files).strip()
+
+    test_suite_id = request.POST.get('test_suite_id')
+    if test_suite_id:
+        ticket.test_suite = TestSuite.objects.filter(id=test_suite_id).first()
+
+    ticket.save()
+    messages.success(request, f'Ticket #{ticket.id} updated.')
+    return redirect('ticket_detail', ticket_id=ticket.id)
+
+
+@require_POST
+def update_ticket_status(request, ticket_id):
+    """Change a ticket's status."""
+    try:
+        ticket = Ticket.objects.get(id=ticket_id)
+    except Ticket.DoesNotExist:
+        raise Http404('Ticket not found')
+
+    new_status = request.POST.get('status', '')
+    if new_status not in dict(Ticket.Status.choices):
+        messages.error(request, f'Invalid status: {new_status}')
+        return redirect('ticket_detail', ticket_id=ticket.id)
+
+    ticket.status = new_status
+    ticket.save(update_fields=['status'])
+    messages.success(request, f'Ticket #{ticket.id} status → {new_status}.')
+    return redirect('ticket_detail', ticket_id=ticket.id)
+
+
+@require_POST
+def generate_ticket_prompt(request, ticket_id):
+    """Generate the .prompt.md file and mark ticket as ready."""
+    try:
+        ticket = Ticket.objects.select_related('test_bot', 'test_suite').get(id=ticket_id)
+    except Ticket.DoesNotExist:
+        raise Http404('Ticket not found')
+
+    filepath = prompt_generator.write_prompt_file(ticket)
+    ticket.prompt_file = filepath
+    if ticket.status == 'draft':
+        ticket.status = 'ready'
+    ticket.save(update_fields=['prompt_file', 'status'])
+
+    messages.success(
+        request,
+        f'Prompt file generated: .github/prompts/{prompt_generator.prompt_filename(ticket)}  '
+        f'— invoke it in VS Code chat with /ticket-{ticket.id}',
+    )
+    return redirect('ticket_detail', ticket_id=ticket.id)
+
+
+@require_POST
+def delete_ticket(request, ticket_id):
+    """Delete a ticket and its prompt file."""
+    try:
+        ticket = Ticket.objects.get(id=ticket_id)
+    except Ticket.DoesNotExist:
+        raise Http404('Ticket not found')
+
+    prompt_generator.delete_prompt_file(ticket)
+    ticket_title = ticket.title
+    ticket.delete()
+    messages.success(request, f'Ticket "{ticket_title}" deleted.')
+    return redirect('tickets')
+
+
+@csrf_exempt
+@require_POST
+def api_trigger_ticket_tests(request):
+    """API endpoint to trigger tests for a ticket.
+
+    JSON body:
+      - ticket_id (int): required — the ticket whose test suite to run
+
+    Looks up the test bot, test suite, and branch from the ticket.
+    Creates a TestGroup linked to the ticket and starts the suite.
+    """
+    import json
+    try:
+        body = json.loads(request.body) if request.body else {}
+    except json.JSONDecodeError:
+        return JsonResponse(
+            {'status': 'error', 'message': 'Invalid JSON'}, status=400,
+        )
+
+    ticket_id = body.get('ticket_id')
+    if ticket_id is None:
+        return JsonResponse(
+            {'status': 'error', 'message': 'ticket_id is required'}, status=400,
+        )
+
+    try:
+        ticket = Ticket.objects.select_related(
+            'test_bot', 'test_suite',
+        ).get(id=ticket_id)
+    except Ticket.DoesNotExist:
+        return JsonResponse(
+            {'status': 'error', 'message': f'Ticket {ticket_id} not found'},
+            status=404,
+        )
+
+    test_bot = ticket.test_bot
+    test_suite = ticket.test_suite or (test_bot.default_test_suite if test_bot else None)
+    branch = ticket.branch
+
+    if not branch:
+        return JsonResponse(
+            {'status': 'error', 'message': 'Ticket has no branch set'}, status=400,
+        )
+
+    # Validate the branch and create worktree if needed
+    if test_bot and test_bot.source_path:
+        try:
+            worktrees.get_or_create_worktree(test_bot.source_path, branch)
+        except ValueError as e:
+            return JsonResponse(
+                {'status': 'error', 'message': f'Invalid branch: {e}'},
+                status=400,
+            )
+
+    try:
+        test_group_id, count = start_test_suite(
+            description=f'Ticket #{ticket.id}: {ticket.title}',
+            test_bot=test_bot,
+            test_suite=test_suite,
+            branch=branch,
+        )
+    except Exception as e:
+        return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
+
+    # Link the test group back to the ticket
+    ticket.test_group = TestGroup.objects.get(id=test_group_id)
+    ticket.status = 'testing'
+    ticket.save(update_fields=['test_group', 'status'])
+
+    return JsonResponse({
+        'status': 'ok',
+        'ticket_id': ticket.id,
+        'test_group_id': test_group_id,
+        'matches_started': count,
+        'test_bot': test_bot.name if test_bot else 'BotTato',
+        'test_suite': test_suite.name if test_suite else 'default',
+        'branch': branch,
+    })
