@@ -48,7 +48,6 @@ All file paths below are relative to that worktree directory.
 - All imports from bottato use `from bottato.*` (never `from bot.bottato.*`)
 - All imports from python_sc2 use `from sc2.*` (never `from python_sc2.sc2.*`)
 - Do not modify files outside `bot/bottato/` unless necessary
-- Run `cd bot && python -m pytest tests/` (from the worktree) to verify nothing is broken
 
 ### When Finished
 1. Commit all changes to branch `{branch_name}` (inside the worktree)

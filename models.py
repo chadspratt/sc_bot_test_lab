@@ -373,11 +373,6 @@ class Ticket(models.Model):
         related_name='tickets',
         help_text="Which test suite to run when work is done",
     )
-    test_group = models.ForeignKey(
-        TestGroup, on_delete=models.SET_NULL, null=True, blank=True,
-        related_name='tickets',
-        help_text="Link to the test results after tests have run",
-    )
     context_files = models.TextField(
         blank=True, default='',
         help_text="Newline-separated list of files the agent should focus on",

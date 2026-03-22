@@ -122,6 +122,15 @@ thead tr:nth-child(2) th { top: 41px; }
             <option value="50" {% if selected_limit == '50' %}selected{% endif %}>Last 50</option>
             <option value="100" {% if selected_limit == '100' %}selected{% endif %}>Last 100</option>
         </select>
+
+        <label for="branch">Branch:</label>
+        <select name="branch" id="branch">
+            <option value="">All</option>
+            {% for b in branches_with_results %}
+            <option value="{{ b }}" {% if selected_branch == b %}selected{% endif %}>{{ b }}</option>
+            {% endfor %}
+        </select>
+
         <noscript><button type="submit">Apply</button></noscript>
     </form>
 

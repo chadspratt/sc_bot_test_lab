@@ -1,13 +1,13 @@
 """
 Git worktree management for branch-based testing.
 
-Creates and manages git worktrees so that tests can run against different
-branches simultaneously.  Each branch gets its own worktree directory
-under ``aiarena/worktrees/<sanitized_branch>/``.
+When a branch already has a worktree checked out (e.g. created by the
+ticket system), that existing worktree is reused rather than creating a
+duplicate.  If no worktree exists yet, a new one is created under
+``aiarena/worktrees/<sanitized_branch>/``.
 
-Worktrees are reused across test runs for the same branch.  Callers are
-responsible for cleanup via ``remove_worktree()`` when a branch is no
-longer needed.
+Callers are responsible for cleanup via ``remove_worktree()`` when a
+branch is no longer needed.
 """
 
 from __future__ import annotations
@@ -50,8 +50,28 @@ def get_worktree_path(repo_path: str, branch: str) -> str:
     return os.path.join(WORKTREE_BASE_DIR, safe_name)
 
 
+def _find_existing_worktree(repo_path: str, branch: str) -> str | None:
+    """Return the path of an existing worktree for *branch*, or ``None``.
+
+    Checks all worktrees registered with the repository at *repo_path*
+    (e.g. those created by the ticket system) so we can reuse them
+    instead of creating a conflicting second checkout.
+    """
+    for wt in list_worktrees(repo_path):
+        wt_branch = wt.get('branch', '')
+        if wt_branch == f'refs/heads/{branch}' or wt_branch == branch:
+            return wt['path']
+    return None
+
+
 def get_or_create_worktree(repo_path: str, branch: str) -> str:
-    """Create a git worktree for *branch* if one doesn't already exist.
+    """Return a worktree for *branch*, reusing an existing one if possible.
+
+    If the branch is already checked out in a worktree (e.g. one created
+    by the ticket system under the repo's own ``worktrees/`` directory),
+    that path is returned directly — no new worktree is created.
+
+    Otherwise a new worktree is created under ``aiarena/worktrees/``.
 
     *repo_path* is the path to the main git repository (e.g. ``bot/``).
 
@@ -77,6 +97,15 @@ def get_or_create_worktree(repo_path: str, branch: str) -> str:
             f'Branch {branch!r} does not exist in {repo_path}: '
             f'{result.stderr.strip()}'
         )
+
+    # Reuse an existing worktree for this branch (e.g. one created by the
+    # ticket system) instead of trying to create a second checkout.
+    existing = _find_existing_worktree(repo_path, branch)
+    if existing:
+        logger.info(
+            'Using existing worktree for branch %s at %s', branch, existing,
+        )
+        return existing
 
     worktree_path = get_worktree_path(repo_path, branch)
 

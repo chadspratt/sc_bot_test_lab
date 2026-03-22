@@ -49,9 +49,6 @@
     <dt>Branch:</dt><dd style="font-family:monospace">{{ ticket.branch|default:"(not set)" }}</dd>
     <dt>Created:</dt><dd>{{ ticket.created_at|date:"M d, Y H:i" }}</dd>
     <dt>Updated:</dt><dd>{{ ticket.updated_at|date:"M d, Y H:i" }}</dd>
-    {% if ticket.test_group %}
-    <dt>Test Group:</dt><dd><a href="{% url 'results' %}">Group {{ ticket.test_group.id }}</a></dd>
-    {% endif %}
 </dl>
 
 <!-- Action bar -->
@@ -62,6 +59,16 @@
             {% if ticket.prompt_file %}Regenerate Prompt{% else %}Generate Prompt{% endif %}
         </button>
     </form>
+
+    {% if ticket.branch %}
+    <form method="post" action="{% url 'run_ticket_tests' ticket.id %}"
+          onsubmit="return confirm('Run the test suite for branch {{ ticket.branch }}?')">
+        {% csrf_token %}
+        <button type="submit" class="btn" style="background-color:#fd7e14" title="Run test suite against the ticket branch">
+            Run Tests
+        </button>
+    </form>
+    {% endif %}
 
     {% if ticket.status == 'draft' %}
     <form method="post" action="{% url 'update_ticket_status' ticket.id %}">
@@ -115,8 +122,7 @@
 </div>
 {% endif %}
 
-<!-- Editable fields (when in draft/ready/rejected) -->
-{% if ticket.status == 'draft' or ticket.status == 'ready' or ticket.status == 'rejected' %}
+<!-- Editable fields (always available) -->
 <div class="utility-section">
     <h3>Edit Ticket</h3>
     <form method="post" action="{% url 'update_ticket' ticket.id %}">
@@ -130,25 +136,46 @@
             <textarea id="description" name="description" rows="6" style="height:auto">{{ ticket.description }}</textarea>
         </div>
         <div class="form-group">
+            <label for="test_suite_id">Test Suite</label>
+            <select id="test_suite_id" name="test_suite_id">
+                <option value="">-- Use bot default --</option>
+                {% for suite in test_suites %}
+                <option value="{{ suite.id }}" {% if ticket.test_suite_id == suite.id %}selected{% endif %}>{{ suite.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="form-group">
             <label for="context_files">Focus Files (one per line)</label>
             <textarea id="context_files" name="context_files" rows="3" style="height:auto">{{ ticket.context_files }}</textarea>
         </div>
         <button type="submit" class="btn btn-primary">Save Changes</button>
     </form>
 </div>
-{% else %}
-<!-- Read-only description -->
+
+<!-- Test Results for this branch -->
+{% if test_groups %}
 <div class="utility-section">
-    <h3>Description</h3>
-    <div style="white-space: pre-wrap;">{{ ticket.description }}</div>
-    {% if ticket.context_files %}
-    <h4 style="margin-top:10px;">Focus Files</h4>
-    <ul>
-        {% for f in ticket.context_files.splitlines %}
-            {% if f.strip %}<li style="font-family:monospace;">{{ f }}</li>{% endif %}
-        {% endfor %}
-    </ul>
-    {% endif %}
+    <h3>Test Results</h3>
+    <p>
+        <a href="{% url 'results' %}?branch={{ ticket.branch }}">
+            View all results for branch <code>{{ ticket.branch }}</code>
+        </a>
+    </p>
+    <table>
+        <thead>
+            <tr><th>Group</th><th>Description</th><th>Suite</th><th>Created</th></tr>
+        </thead>
+        <tbody>
+            {% for tg in test_groups %}
+            <tr>
+                <td><a href="{% url 'results' %}?branch={{ ticket.branch }}&limit=1">{{ tg.id }}</a></td>
+                <td>{{ tg.description }}</td>
+                <td>{{ tg.test_suite.name|default:"-" }}</td>
+                <td>{{ tg.created_at|date:"M d, H:i" }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
 </div>
 {% endif %}
 

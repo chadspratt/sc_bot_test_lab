@@ -51,6 +51,7 @@ urlpatterns = [
     path('tickets/<int:ticket_id>/update/', views.update_ticket, name='update_ticket'),
     path('tickets/<int:ticket_id>/status/', views.update_ticket_status, name='update_ticket_status'),
     path('tickets/<int:ticket_id>/generate-prompt/', views.generate_ticket_prompt, name='generate_ticket_prompt'),
+    path('tickets/<int:ticket_id>/run-tests/', views.run_ticket_tests, name='run_ticket_tests'),
     path('tickets/<int:ticket_id>/delete/', views.delete_ticket, name='delete_ticket'),
 
     # Geometry (standalone tool page)

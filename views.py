@@ -53,12 +53,20 @@ def _get_match_list_context(request):
     show_past_versions = request.GET.get('past_versions', '1') != '0'
     show_replays = request.GET.get('replays', '1') != '0'
     selected_limit = request.GET.get('limit', '')
+    selected_branch = request.GET.get('branch', '')
 
     matches = Match.objects.select_related('opponent_bot', 'test_group', 'test_bot', 'replay_test').exclude(test_group_id=-1)
 
     # Apply test bot filter
     if selected_test_bot and selected_test_bot.isdigit():
         matches = matches.filter(test_bot_id=int(selected_test_bot))
+
+    # Apply branch filter — only include matches from test groups on this branch
+    if selected_branch:
+        branch_group_ids = list(
+            TestGroup.objects.filter(branch=selected_branch).values_list('id', flat=True)
+        )
+        matches = matches.filter(test_group_id__in=branch_group_ids)
 
     # Build inclusive match-type filter from blizzard/custom/past/replay controls.
     # Each enabled type adds an OR clause; matches not matching any are excluded.
@@ -365,6 +373,12 @@ def _get_match_list_context(request):
     # ------------------------------------------------------------------
     test_subject_bots = CustomBot.objects.filter(is_test_subject=True).order_by('name')
     test_suites = TestSuite.objects.all().order_by('name')
+
+    # Collect distinct branches for the filter dropdown
+    branches_with_results = list(
+        TestGroup.objects.exclude(branch='').values_list('branch', flat=True).distinct().order_by('branch')
+    )
+
     return {
         'pivot_data': pivot_data,
         'opponents': sorted_opponents,
@@ -375,6 +389,8 @@ def _get_match_list_context(request):
         'show_replays': show_replays,
         'selected_limit': selected_limit,
         'selected_test_bot': selected_test_bot,
+        'selected_branch': selected_branch,
+        'branches_with_results': branches_with_results,
         'test_groups': test_groups,
         'test_subject_bots': test_subject_bots,
         'test_suites': test_suites,
@@ -2221,7 +2237,7 @@ def delete_replay_test(request, test_id):
 
 def tickets_page(request):
     """List all tickets."""
-    tickets = Ticket.objects.select_related('test_bot', 'test_suite', 'test_group').all()
+    tickets = Ticket.objects.select_related('test_bot', 'test_suite').all()
     test_bots = CustomBot.objects.filter(is_test_subject=True)
     test_suites = TestSuite.objects.all()
     return render(request, 'test_lab/tickets.html', {
@@ -2236,10 +2252,17 @@ def ticket_detail_page(request, ticket_id):
     """View a single ticket with its details and diff."""
     try:
         ticket = Ticket.objects.select_related(
-            'test_bot', 'test_suite', 'test_group',
+            'test_bot', 'test_suite',
         ).get(id=ticket_id)
     except Ticket.DoesNotExist:
         raise Http404('Ticket not found')
+
+    # Fetch all test groups that ran on this ticket's branch
+    test_groups = []
+    if ticket.branch:
+        test_groups = list(
+            TestGroup.objects.filter(branch=ticket.branch).order_by('-created_at')
+        )
 
     # Try to get the git diff for the branch
     diff_text = ''
@@ -2254,9 +2277,13 @@ def ticket_detail_page(request, ticket_id):
         except (subprocess.TimeoutExpired, FileNotFoundError):
             pass
 
+    test_suites = TestSuite.objects.all().order_by('name')
+
     return render(request, 'test_lab/ticket_detail.html', {
         'active_page': 'tickets',
         'ticket': ticket,
+        'test_groups': test_groups,
+        'test_suites': test_suites,
         'diff_text': diff_text,
         'statuses': Ticket.Status,
     })
@@ -2307,15 +2334,11 @@ def create_ticket(request):
 
 @require_POST
 def update_ticket(request, ticket_id):
-    """Update an existing ticket (draft/ready only)."""
+    """Update an existing ticket."""
     try:
         ticket = Ticket.objects.get(id=ticket_id)
     except Ticket.DoesNotExist:
         raise Http404('Ticket not found')
-
-    if ticket.status not in ('draft', 'ready', 'rejected'):
-        messages.error(request, 'Can only edit tickets in draft, ready, or rejected status.')
-        return redirect('ticket_detail', ticket_id=ticket.id)
 
     ticket.title = request.POST.get('title', ticket.title).strip()
     ticket.description = request.POST.get('description', ticket.description).strip()
@@ -2327,6 +2350,49 @@ def update_ticket(request, ticket_id):
 
     ticket.save()
     messages.success(request, f'Ticket #{ticket.id} updated.')
+    return redirect('ticket_detail', ticket_id=ticket.id)
+
+
+@require_POST
+def run_ticket_tests(request, ticket_id):
+    """Run the test suite for a ticket's branch (web form action)."""
+    try:
+        ticket = Ticket.objects.select_related('test_bot', 'test_suite').get(id=ticket_id)
+    except Ticket.DoesNotExist:
+        raise Http404('Ticket not found')
+
+    test_bot = ticket.test_bot
+    test_suite = ticket.test_suite or (test_bot.default_test_suite if test_bot else None)
+    branch = ticket.branch
+
+    if not branch:
+        messages.error(request, 'Ticket has no branch set.')
+        return redirect('ticket_detail', ticket_id=ticket.id)
+
+    if test_bot and test_bot.source_path:
+        try:
+            worktrees.get_or_create_worktree(test_bot.source_path, branch)
+        except ValueError as e:
+            messages.error(request, f'Invalid branch: {e}')
+            return redirect('ticket_detail', ticket_id=ticket.id)
+
+    try:
+        test_group_id, count = start_test_suite(
+            description=f'Ticket #{ticket.id}: {ticket.title}',
+            test_bot=test_bot,
+            test_suite=test_suite,
+            branch=branch,
+        )
+    except Exception as e:
+        messages.error(request, f'Failed to start tests: {e}')
+        return redirect('ticket_detail', ticket_id=ticket.id)
+
+    ticket.status = 'testing'
+    ticket.save(update_fields=['status'])
+    messages.success(
+        request,
+        f'Test suite started — {count} matches in group {test_group_id}.',
+    )
     return redirect('ticket_detail', ticket_id=ticket.id)
 
 
@@ -2450,10 +2516,8 @@ def api_trigger_ticket_tests(request):
     except Exception as e:
         return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
 
-    # Link the test group back to the ticket
-    ticket.test_group = TestGroup.objects.get(id=test_group_id)
     ticket.status = 'testing'
-    ticket.save(update_fields=['test_group', 'status'])
+    ticket.save(update_fields=['status'])
 
     return JsonResponse({
         'status': 'ok',
