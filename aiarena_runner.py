@@ -73,7 +73,7 @@ RACE_TO_CODE = {
 }
 
 # Map aiarena result types to our Match.Result values
-# BotTato is always Player1.
+# The test bot is always Player1.
 RESULT_MAP = {
     'Player1Win': 'Victory',
     'Player2Win': 'Defeat',
@@ -170,7 +170,7 @@ def _ensure_mirror_overlay(test_bot: CustomBot) -> str:
     from the test bot's overlay, but with the bot key renamed in
     ladderbots.json so the proxy can route the two players.
 
-    Returns the mirror bot name (e.g. ``BotTato_p2``).
+    Returns the mirror bot name (e.g. ``MyBot_p2``).
     """
     bot_dir = test_bot.bot_directory or test_bot.name
     mirror_name = f'{test_bot.name}_p2'

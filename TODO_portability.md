@@ -116,13 +116,13 @@ Same treatment as run_vs_computer.
 This script creates the aiarena overlay for self-play. It currently only
 works for BotTato. Needs significant rework.
 
-- [ ] Rename to something generic (e.g. `prepare_bot_overlay.py`).
-- [ ] Accept bot name, source path, and ladderbots.json key as parameters
+- [x] Rename to something generic (e.g. `prepare_bot_overlay.py`).
+- [x] Accept bot name, source path, and ladderbots.json key as parameters
       (CLI args or read from CustomBot).
-- [ ] Remove hardcoded `'BotTato'` / `'BotTato_p2'` constants.
-- [ ] The embedded `AIARENA_RUN_PY` with Cython compilation is BotTato-specific;
+- [x] Remove hardcoded `'BotTato'` / `'BotTato_p2'` constants.
+- [x] The embedded `AIARENA_RUN_PY` with Cython compilation is BotTato-specific;
       make it pluggable or move it to the bot's own overlay setup.
-- [ ] Update `_ensure_mirror_overlay` in aiarena_runner.py to work with any
+- [x] Update `_ensure_mirror_overlay` in aiarena_runner.py to work with any
       test bot (it currently does, but calls into prepare_bottato patterns).
 
 ---
