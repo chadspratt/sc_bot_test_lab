@@ -535,6 +535,8 @@ def _create_run_dir(match_id: int) -> str:
 
     Returns the absolute path to the run directory.
     """
+    from .models import SystemConfig
+
     run_dir = os.path.join(AIARENA_RUNS_DIR, str(match_id))
     os.makedirs(run_dir, exist_ok=True)
 
@@ -544,6 +546,12 @@ def _create_run_dir(match_id: int) -> str:
         dst = os.path.join(run_dir, filename)
         if os.path.isfile(src) and not os.path.isfile(dst):
             shutil.copy2(src, dst)
+
+    # Write .env with configured paths for docker-compose variable substitution
+    config = SystemConfig.load()
+    env_path = os.path.join(run_dir, '.env')
+    with open(env_path, 'w') as f:
+        f.write(f'SC2_MAPS_PATH={config.sc2_maps_path}\n')
 
     # Create output directories that Docker will bind-mount into
     os.makedirs(os.path.join(run_dir, 'logs'), exist_ok=True)

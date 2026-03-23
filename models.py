@@ -73,6 +73,12 @@ class CustomBot(models.Model):
         default='',
         help_text="Custom Dockerfile (relative to test_lab/aiarena/) that builds an image with extra dependencies pre-installed, e.g. Dockerfile.bottato. Saves time when running this bot repeatedly by avoiding per-match installs.",
     )
+    env_file = models.CharField(
+        max_length=500,
+        blank=True,
+        default='',
+        help_text="Absolute path to a .env file on the host. Passed as --env-file to docker compose run, providing environment variables (e.g. DB credentials) to the container.",
+    )
     default_test_suite = models.ForeignKey(
         'TestSuite',
         null=True,
@@ -448,6 +454,35 @@ class SystemConfig(models.Model):
         default=0,
         help_text="Maximum number of matches that can run at the same time. 0 = unlimited.",
     )
+    logs_dir = models.CharField(
+        max_length=500,
+        blank=True,
+        default='',
+        help_text="Directory for legacy Docker match logs and replays.",
+    )
+    sc2_switcher_path = models.CharField(
+        max_length=500,
+        blank=True,
+        default=r'C:\Program Files (x86)\StarCraft II\Support\SC2Switcher.exe',
+        help_text="Path to SC2Switcher.exe for opening replays.",
+    )
+    sc2_maps_path = models.CharField(
+        max_length=500,
+        blank=True,
+        default=r'C:\Program Files (x86)\StarCraft II\Maps',
+        help_text="Host path to StarCraft II Maps directory (mounted into Docker containers).",
+    )
+    replays_dir = models.CharField(
+        max_length=500,
+        blank=True,
+        default='',
+        help_text="Host path for legacy Docker replays directory.",
+    )
+
+    @property
+    def is_configured(self) -> bool:
+        """Return True if all required fields have been set."""
+        return bool(self.logs_dir and self.sc2_maps_path)
 
     def __str__(self):
         return f"SystemConfig (max_concurrent={self.max_concurrent_matches})"

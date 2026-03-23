@@ -1,0 +1,76 @@
+{% extends "test_lab/base.html" %}
+
+{% block title %}Test Lab — First-Run Setup{% endblock %}
+
+{% block content %}
+<h2>First-Run Setup</h2>
+<p>
+    Welcome to Test Lab! Before you can use the testing framework, a few paths
+    need to be configured for your local environment. You can change these later
+    on the <strong>Config → System</strong> tab.
+</p>
+
+<form method="post" action="{% url 'save_setup' %}">
+    {% csrf_token %}
+
+    <div class="utility-section">
+        <h3>Required Paths</h3>
+
+        <div class="form-group">
+            <label for="logs_dir">Legacy Logs / Replays Directory:</label>
+            <input type="text" name="logs_dir" id="logs_dir"
+                   value="{{ config.logs_dir }}" style="max-width: 600px;"
+                   required>
+            <small style="color: #666;">
+                Directory where legacy Docker match logs and replays are stored.
+                Example: <code>C:\Users\you\Documents\StarCraft II\Replays\Multiplayer\docker</code>
+            </small>
+        </div>
+
+        <div class="form-group">
+            <label for="sc2_maps_path">StarCraft II Maps Path:</label>
+            <input type="text" name="sc2_maps_path" id="sc2_maps_path"
+                   value="{{ config.sc2_maps_path }}" style="max-width: 600px;"
+                   required>
+            <small style="color: #666;">
+                Host path to your StarCraft II Maps directory. Mounted into Docker containers.
+                Example: <code>C:\Program Files (x86)\StarCraft II\Maps</code>
+            </small>
+        </div>
+    </div>
+
+    <div class="utility-section">
+        <h3>Optional Paths</h3>
+
+        <div class="form-group">
+            <label for="sc2_switcher_path">SC2Switcher Path:</label>
+            <input type="text" name="sc2_switcher_path" id="sc2_switcher_path"
+                   value="{{ config.sc2_switcher_path }}" style="max-width: 600px;">
+            <small style="color: #666;">
+                Path to SC2Switcher.exe (used to open replays). Leave default if your SC2 install is standard.
+            </small>
+        </div>
+
+        <div class="form-group">
+            <label for="replays_dir">Legacy Docker Replays Directory:</label>
+            <input type="text" name="replays_dir" id="replays_dir"
+                   value="{{ config.replays_dir }}" style="max-width: 600px;">
+            <small style="color: #666;">
+                Host path for legacy Docker replays. Only needed if using the legacy single-container runner.
+                If blank, defaults to the Logs Directory above.
+            </small>
+        </div>
+
+        <div class="form-group">
+            <label for="max_concurrent_matches">Max Concurrent Matches:</label>
+            <input type="number" name="max_concurrent_matches" id="max_concurrent_matches"
+                   value="{{ config.max_concurrent_matches }}" min="0" style="width: 80px;">
+            <small style="color: #666;">0 = unlimited</small>
+        </div>
+    </div>
+
+    <button type="submit" class="utility-btn" style="padding: 10px 24px; margin-top: 12px;">
+        Save &amp; Continue
+    </button>
+</form>
+{% endblock %}

@@ -1,16 +1,18 @@
 import glob
 import logging
 import os
+import random
 import subprocess
 import threading
 from collections import defaultdict
 from datetime import datetime
 
 from django.contrib import messages
-from django.db.models import Max, Min, Q
+from django.db.models import Count, Max, Min, Q
 from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
+from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
@@ -406,21 +408,59 @@ def get_next_test_group_id() -> int:
     # If no completed matches exist, start at 0, otherwise increment by 1
     return 0 if result is None else result + 1
 
+MAP_LIST = [
+    "PersephoneAIE_v4",
+    "IncorporealAIE_v4",
+    "PylonAIE_v4",
+    "TorchesAIE_v4",
+    "UltraloveAIE_v2",
+    "MagannathaAIE_v2",
+]
+
+
+def get_least_used_map(
+    opponent_race: str, opponent_build: str, opponent_difficulty: str,
+) -> str:
+    """Return the map with the fewest completed matches for the given opponent config."""
+    result = (
+        Match.objects.filter(
+            opponent_race=opponent_race,
+            opponent_build=opponent_build,
+            opponent_difficulty=opponent_difficulty,
+            result__in=['Victory', 'Defeat'],
+            test_group_id__gte=0,
+        )
+        .values('map_name')
+        .annotate(ct=Count('id'))
+        .order_by('ct')
+        .first()
+    )
+    return result['map_name'] if result else random.choice(MAP_LIST)
+
+
 def create_pending_match(
     test_group_id: int, race: str, build: str, difficulty: str,
     test_bot: CustomBot | None = None,
+    map_name: str = '',
 ) -> int:
     """Create a pending match entry and return the match ID.
 
     *test_bot* is the Player-1 bot being tested.  When ``None`` the match
     is attributed to BotTato (id 5) by default.
+
+    *map_name* is the pre-selected map.  When empty, the least-used map
+    for this opponent config is chosen automatically.
     """
     if test_bot is None:
         test_bot = CustomBot.objects.filter(id=5).first()
+    if not map_name:
+        map_name = get_least_used_map(
+            race.capitalize(), build.capitalize(), difficulty or 'CheatInsane',
+        )
     match = Match(
         test_group_id=test_group_id,
         start_timestamp=datetime.now(),
-        map_name="TBD",  # Map will be determined by run_bottato_vs_computer.py
+        map_name=map_name,
         opponent_race=race.capitalize(),
         opponent_difficulty=difficulty or "CheatInsane",
         opponent_build=build.capitalize(),
@@ -432,15 +472,63 @@ def create_pending_match(
     return match.id
 
 DOCKER_COMPOSE_PATH = os.path.normpath(os.path.join(os.path.dirname(__file__)))
-LOGS_DIR = r'C:\Users\inter\Documents\StarCraft II\Replays\Multiplayer\docker'
+
+
+def _get_logs_dir() -> str:
+    """Return the configured legacy logs directory from SystemConfig."""
+    return SystemConfig.load().logs_dir
+
+
+def _get_replays_dir() -> str:
+    """Return the configured legacy replays directory (falls back to logs_dir)."""
+    config = SystemConfig.load()
+    return config.replays_dir or config.logs_dir
+
+
+def _write_legacy_env() -> None:
+    """Write a .env file for the legacy docker-compose with configured paths."""
+    config = SystemConfig.load()
+    env_path = os.path.join(DOCKER_COMPOSE_PATH, '.env')
+    replays_dir = config.replays_dir or config.logs_dir
+    with open(env_path, 'w') as f:
+        f.write(f'SC2_MAPS_PATH={config.sc2_maps_path}\n')
+        f.write(f'REPLAYS_DIR={replays_dir}\n')
+
+
+def _env_file_args(test_bot: CustomBot | None) -> list[str]:
+    """Return ``['-e', 'K=V', ...]`` flags parsed from the bot's env_file."""
+    if not (test_bot and test_bot.env_file and os.path.isfile(test_bot.env_file)):
+        return []
+    args: list[str] = []
+    with open(test_bot.env_file, 'r') as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith('#') and '=' in line:
+                args += ['-e', line]
+    return args
+
+
+def _parse_legacy_result(log_file_path: str) -> str | None:
+    """Parse the match result from a legacy container log file.
+
+    Looks for a ``MATCH_RESULT:<result>`` line printed by the run script.
+    """
+    try:
+        with open(log_file_path, 'r') as f:
+            for line in f:
+                if line.startswith('MATCH_RESULT:'):
+                    return line.strip().split(':', 1)[1]
+    except OSError:
+        pass
+    return None
 
 
 def _launch_legacy_match(match_id: int, command: list[str], cwd: str, log_file_path: str) -> bool:
     """Launch a legacy single-container Docker match through the queue.
 
     If at capacity the match is queued and started later.  A monitoring
-    thread waits for the process to finish, then notifies the queue so the
-    next queued match can start promptly.
+    thread waits for the process to finish, then parses the result from
+    the container log and updates the database.
 
     Returns ``True`` if started immediately, ``False`` if queued.
     """
@@ -450,6 +538,14 @@ def _launch_legacy_match(match_id: int, command: list[str], cwd: str, log_file_p
                 with open(log_file_path, 'w') as log:
                     proc = subprocess.Popen(command, cwd=cwd, stdout=log, stderr=log)
                 proc.wait(timeout=7200)
+                result = _parse_legacy_result(log_file_path)
+                try:
+                    match = Match.objects.get(id=match_id)
+                    match.result = result or 'Crash'
+                    match.end_timestamp = timezone.now()
+                    match.save()
+                except Match.DoesNotExist:
+                    logger.error('Legacy match %d: Match record not found', match_id)
             except Exception:
                 logger.exception('Legacy match %d: error', match_id)
             finally:
@@ -513,9 +609,11 @@ def start_custom_bot_match(
     if not os.path.exists(compose_file):
         raise FileNotFoundError(f'docker-compose.yml not found at: {compose_file}')
 
-    os.makedirs(LOGS_DIR, exist_ok=True)
+    _write_legacy_env()
+    logs_dir = _get_logs_dir()
+    os.makedirs(logs_dir, exist_ok=True)
 
-    log_file = os.path.join(LOGS_DIR, f"{match_id}_vs_{custom_bot.name}.log")
+    log_file = os.path.join(logs_dir, f"{match_id}_vs_{custom_bot.name}.log")
 
     command = [
         'docker', 'compose', '-p', f'match_{match_id}',
@@ -533,6 +631,7 @@ def start_custom_bot_match(
         override_src = source_override.replace('\\', '/')
         command += ['-v', f'{override_src}:/root/bot']
 
+    command += _env_file_args(test_bot)
     command += [
         'bot',
         'bash', '/root/runner/run_docker_bot_vs_bot.sh',
@@ -571,7 +670,9 @@ def start_test_suite(
     if not os.path.exists(compose_file):
         raise FileNotFoundError(f'docker-compose.yml not found at: {compose_file}')
 
-    os.makedirs(LOGS_DIR, exist_ok=True)
+    _write_legacy_env()
+    logs_dir = _get_logs_dir()
+    os.makedirs(logs_dir, exist_ok=True)
 
     if test_bot is None:
         test_bot = CustomBot.objects.filter(id=5).first()
@@ -611,7 +712,8 @@ def start_test_suite(
         for race in ('protoss', 'terran', 'zerg'):
             for build in ('rush', 'timing', 'macro', 'power', 'air'):
                 match_id = create_pending_match(test_group_id, race, build, difficulty, test_bot=test_bot)
-                log_file = os.path.join(LOGS_DIR, f"{match_id}_{race}_{build}.log")
+                match_obj = Match.objects.get(id=match_id)
+                log_file = os.path.join(logs_dir, f"{match_id}_{race}_{build}.log")
                 command = [
                     'docker', 'compose', '-p', f'match_{match_id}',
                     'run', '--rm', '--no-deps',
@@ -619,10 +721,12 @@ def start_test_suite(
                     '-e', f'BUILD={build}',
                     '-e', f'MATCH_ID={match_id}',
                     '-e', f'DIFFICULTY={difficulty}',
+                    '-e', f'MAP_NAME={match_obj.map_name}',
                 ]
                 if source_override:
                     override_src = source_override.replace('\\', '/')
                     command += ['-v', f'{override_src}:/root/bot']
+                command += _env_file_args(test_bot)
                 command.append('bot')
                 _launch_legacy_match(match_id, command, DOCKER_COMPOSE_PATH, log_file)
                 count += 1
@@ -861,14 +965,17 @@ def api_trigger_tests(request):
 
 def serve_replay(request, match_id):
     """Open replay files with StarCraft 2 locally."""
+    config = SystemConfig.load()
+    sc2_switcher = config.sc2_switcher_path
+
     # Check aiarena run directory first
     replay_path = aiarena_runner.get_replay_path(match_id)
     if replay_path:
-        subprocess.Popen([r"C:\Program Files (x86)\StarCraft II\Support\SC2Switcher.exe", replay_path])
+        subprocess.Popen([sc2_switcher, replay_path])
         return HttpResponse(status=204)
 
     # Fall back to legacy directory
-    replay_dir = r'C:\Users\inter\Documents\StarCraft II\Replays\Multiplayer\docker'
+    replay_dir = _get_logs_dir()
     replay_pattern = os.path.join(replay_dir, f"{match_id}_*.SC2Replay")
     replay_files = glob.glob(replay_pattern)
     
@@ -876,7 +983,7 @@ def serve_replay(request, match_id):
         raise Http404("Replay file not found")
     
     file_path = replay_files[0]
-    subprocess.Popen([r"C:\Program Files (x86)\StarCraft II\Support\SC2Switcher.exe", file_path])
+    subprocess.Popen([sc2_switcher, file_path])
     return HttpResponse(status=204)
 
 def serve_log(request, match_id):
@@ -893,8 +1000,8 @@ def serve_log(request, match_id):
         return FileResponse(open(log_path, 'rb'), content_type='text/plain')
 
     # Fall back to legacy directory
-    replay_dir = r'C:\Users\inter\Documents\StarCraft II\Replays\Multiplayer\docker'
-    log_pattern = os.path.join(replay_dir, f"{match_id}*.log")
+    legacy_logs = _get_logs_dir()
+    log_pattern = os.path.join(legacy_logs, f"{match_id}*.log")
     log_files = [
         f for f in glob.glob(log_pattern)
         if '_stderr.log' not in f
@@ -1421,15 +1528,56 @@ def update_system_config(request):
     max_concurrent = int(max_concurrent_raw)
     config = SystemConfig.load()
     config.max_concurrent_matches = max_concurrent
+    config.logs_dir = request.POST.get('logs_dir', '').strip()
+    config.sc2_switcher_path = request.POST.get('sc2_switcher_path', '').strip()
+    config.sc2_maps_path = request.POST.get('sc2_maps_path', '').strip()
+    config.replays_dir = request.POST.get('replays_dir', '').strip()
     config.save()
 
     label = 'unlimited' if max_concurrent == 0 else str(max_concurrent)
-    messages.success(request, f'Max concurrent matches updated to {label}.')
+    messages.success(request, f'System config updated (max concurrent: {label}).')
 
     # Drain queue in case the new limit is higher
     match_queue.drain_queue()
 
     return redirect(config_url)
+
+
+def setup_page(request):
+    """First-run setup page for configuring required system paths."""
+    config = SystemConfig.load()
+    if config.is_configured:
+        return redirect('results')
+    return render(request, 'test_lab/setup.html', {
+        'active_page': 'setup',
+        'config': config,
+    })
+
+
+@require_POST
+def save_setup(request):
+    """Save first-run setup form and redirect to the results page."""
+    config = SystemConfig.load()
+
+    config.logs_dir = request.POST.get('logs_dir', '').strip()
+    config.sc2_maps_path = request.POST.get('sc2_maps_path', '').strip()
+    config.sc2_switcher_path = request.POST.get('sc2_switcher_path', '').strip()
+    config.replays_dir = request.POST.get('replays_dir', '').strip()
+
+    max_concurrent_raw = request.POST.get('max_concurrent_matches', '0').strip()
+    if max_concurrent_raw.isdigit():
+        config.max_concurrent_matches = int(max_concurrent_raw)
+
+    if not config.logs_dir or not config.sc2_maps_path:
+        messages.error(request, 'Logs Directory and SC2 Maps Path are required.')
+        return render(request, 'test_lab/setup.html', {
+            'active_page': 'setup',
+            'config': config,
+        })
+
+    config.save()
+    messages.success(request, 'Setup complete! You can change these settings on the Config → System tab.')
+    return redirect('results')
 
 
 def custom_page(request):
@@ -1586,15 +1734,18 @@ def run_single_match(request):
         difficulty = request.POST.get('difficulty', 'CheatInsane')
 
         docker_compose_path = DOCKER_COMPOSE_PATH
-        logs_dir = LOGS_DIR
+        _write_legacy_env()
+        logs_dir = _get_logs_dir()
         os.makedirs(logs_dir, exist_ok=True)
 
         try:
             # Create a pending match with test_group_id = -1 (not part of a test group)
             match_id = create_pending_match(-1, race, build, difficulty)
+            match_obj = Match.objects.get(id=match_id)
 
             log_file = os.path.join(logs_dir, f"{match_id}_{race}_{build}.log")
 
+            test_bot = match_obj.test_bot
             command = [
                 'docker', 'compose', '-p', f'match_{match_id}',
                 'run', '--rm', '--no-deps',
@@ -1602,8 +1753,8 @@ def run_single_match(request):
                 '-e', f'BUILD={build}',
                 '-e', f'DIFFICULTY={difficulty}',
                 '-e', f'MATCH_ID={match_id}',
-                'bot',
-            ]
+                '-e', f'MAP_NAME={match_obj.map_name}',
+            ] + _env_file_args(test_bot) + ['bot']
 
             started = _launch_legacy_match(match_id, command, docker_compose_path, log_file)
 
@@ -1651,6 +1802,7 @@ def create_custom_bot(request):
     source_path = request.POST.get('source_path', '').strip()
     enable_version_history = request.POST.get('enable_version_history') == 'on'
     dockerfile = request.POST.get('dockerfile', '').strip()
+    env_file = request.POST.get('env_file', '').strip()
 
     if not name:
         messages.error(request, 'Bot name is required.')
@@ -1663,10 +1815,6 @@ def create_custom_bot(request):
     error = aiarena_runner.validate_bot_directory(bot_directory)
     if error:
         messages.error(request, error)
-        return redirect(config_bots_url)
-
-    if is_test_subject and not source_path:
-        messages.error(request, 'Source path is required for test subject bots.')
         return redirect(config_bots_url)
 
     if is_test_subject and source_path and not os.path.isdir(source_path):
@@ -1690,6 +1838,7 @@ def create_custom_bot(request):
             enable_version_history=enable_version_history,
             symlink_mounts=symlink_mounts,
             dockerfile=dockerfile,
+            env_file=env_file,
             description=description,
         )
         msg = f'Bot "{name}" registered successfully.'
@@ -1743,11 +1892,9 @@ def update_custom_bot_test_subject(request, bot_id):
         source_path = request.POST.get('source_path', '').strip()
         enable_version_history = request.POST.get('enable_version_history') == 'on'
         dockerfile = request.POST.get('dockerfile', '').strip()
+        env_file = request.POST.get('env_file', '').strip()
 
-        if not source_path:
-            return JsonResponse({'status': 'error', 'message': 'Source path is required for test subject bots.'}, status=400)
-
-        if not os.path.isdir(source_path):
+        if source_path and not os.path.isdir(source_path):
             return JsonResponse({'status': 'error', 'message': f'Source path not found: {source_path}'}, status=400)
 
         symlink_mounts = aiarena_runner.scan_directory_symlinks(source_path)
@@ -1756,15 +1903,17 @@ def update_custom_bot_test_subject(request, bot_id):
         bot.source_path = source_path
         bot.enable_version_history = enable_version_history
         bot.dockerfile = dockerfile
+        bot.env_file = env_file
         bot.symlink_mounts = symlink_mounts
-        update_fields += ['source_path', 'enable_version_history', 'dockerfile', 'symlink_mounts']
+        update_fields += ['source_path', 'enable_version_history', 'dockerfile', 'env_file', 'symlink_mounts']
     else:
         bot.is_test_subject = False
         bot.source_path = ''
         bot.enable_version_history = False
         bot.dockerfile = ''
+        bot.env_file = ''
         bot.symlink_mounts = []
-        update_fields += ['source_path', 'enable_version_history', 'dockerfile', 'symlink_mounts']
+        update_fields += ['source_path', 'enable_version_history', 'dockerfile', 'env_file', 'symlink_mounts']
 
     bot.save(update_fields=update_fields)
     return JsonResponse({'status': 'ok'})
@@ -1945,7 +2094,8 @@ def run_replay_match(request):
         return redirect('run_match')
 
     docker_compose_path = DOCKER_COMPOSE_PATH
-    logs_dir = LOGS_DIR
+    _write_legacy_env()
+    logs_dir = _get_logs_dir()
     os.makedirs(logs_dir, exist_ok=True)
 
     try:
@@ -1996,6 +2146,8 @@ def run_replay_match(request):
             if duration_seconds and duration_seconds > 0:
                 command += ['-e', f'REPLAY_DURATION={duration_seconds / 22.4:.1f}']
 
+        default_test_bot = CustomBot.objects.filter(id=5).first()
+        command += _env_file_args(default_test_bot)
         command += [
             'bot',
             'bash', '/root/runner/run_docker_continue_replay.sh',
@@ -2046,10 +2198,12 @@ def _launch_replay_test_match(
     match.save()
     match_id = match.id
 
-    os.makedirs(LOGS_DIR, exist_ok=True)
+    _write_legacy_env()
+    logs_dir = _get_logs_dir()
+    os.makedirs(logs_dir, exist_ok=True)
 
     replay_filename = f'{match_id}_source.SC2Replay'
-    replay_dest = os.path.join(LOGS_DIR, replay_filename)
+    replay_dest = os.path.join(logs_dir, replay_filename)
     if replay_test.replay_file != replay_dest:
         _shutil.copy2(replay_test.replay_file, replay_dest)
 
@@ -2057,7 +2211,7 @@ def _launch_replay_test_match(
     match.replay_file = container_replay_path
     match.save()
 
-    log_file = os.path.join(LOGS_DIR, f'{match_id}_replay_test.log')
+    log_file = os.path.join(logs_dir, f'{match_id}_replay_test.log')
 
     command = [
         'docker', 'compose', '-p', f'match_{match_id}',
@@ -2080,6 +2234,7 @@ def _launch_replay_test_match(
         override_src = source_override.replace('\\', '/')
         command += ['-v', f'{override_src}:/root/bot']
 
+    command += _env_file_args(test_bot)
     command += [
         'bot',
         'bash', '/root/runner/run_docker_continue_replay.sh',

@@ -9,6 +9,10 @@ urlpatterns = [
     path('config/', views.config_page, name='config_page'),
     path('custom/', views.custom_page, name='custom_page'),
 
+    # First-run setup
+    path('setup/', views.setup_page, name='setup_page'),
+    path('setup/save/', views.save_setup, name='save_setup'),
+
     # Results actions
     path('trigger-tests/', views.trigger_tests, name='trigger_tests'),
 

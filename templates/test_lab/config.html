@@ -146,6 +146,11 @@ td { text-align: left; }
                         <input type="text" name="dockerfile" id="dockerfile" placeholder="e.g. Dockerfile.mybot">
                         <small style="color: #666;">Dockerfile (relative to test_lab/aiarena/) that builds an image with extra dependencies pre-installed. Saves time when running this bot repeatedly. Leave blank for vanilla image.</small>
                     </div>
+                    <div class="form-group">
+                        <label for="env_file">Env File (optional):</label>
+                        <input type="text" name="env_file" id="env_file" placeholder="e.g. C:\Users\me\mybot\.env">
+                        <small style="color: #666;">Absolute path to a .env file on the host. Provides environment variables (e.g. DB credentials) to the Docker container via --env-file.</small>
+                    </div>
                 </div>
                 <button type="submit" class="btn btn-primary" style="padding: 8px 16px;">Register Bot</button>
             </form>
@@ -183,13 +188,14 @@ td { text-align: left; }
                         </td>
                         <td>
                             {% if bot.is_test_subject %}
-                                <span class="ts-edit-btn" style="color: #28a745; font-weight: bold;" onclick="openTestSubjectModal({{ bot.id }}, '{{ bot.name|escapejs }}', true, '{{ bot.source_path|escapejs }}', {{ bot.enable_version_history|yesno:'true,false' }}, '{{ bot.dockerfile|escapejs }}')">Yes</span>
+                                <span class="ts-edit-btn" style="color: #28a745; font-weight: bold;" onclick="openTestSubjectModal({{ bot.id }}, '{{ bot.name|escapejs }}', true, '{{ bot.source_path|escapejs }}', {{ bot.enable_version_history|yesno:'true,false' }}, '{{ bot.dockerfile|escapejs }}', '{{ bot.env_file|escapejs }}')">Yes</span>
                                 {% if bot.source_path %}<br><small>src: <code>{{ bot.source_path }}</code></small>{% endif %}
                                 {% if bot.enable_version_history %}<br><small style="color: #17a2b8;">version history: enabled</small>{% endif %}
                                 {% if bot.dockerfile %}<br><small>dockerfile: <code>{{ bot.dockerfile }}</code></small>{% endif %}
+                                {% if bot.env_file %}<br><small>env: <code>{{ bot.env_file }}</code></small>{% endif %}
                                 {% if bot.symlink_mounts %}<br><small>symlinks: {{ bot.symlink_mounts|length }}</small>{% endif %}
                             {% else %}
-                                <span class="ts-edit-btn" style="color: #999;" onclick="openTestSubjectModal({{ bot.id }}, '{{ bot.name|escapejs }}', false, '', false, '')">No</span>
+                                <span class="ts-edit-btn" style="color: #999;" onclick="openTestSubjectModal({{ bot.id }}, '{{ bot.name|escapejs }}', false, '', false, '', '')">No</span>
                             {% endif %}
                         </td>
                         <td>
@@ -488,23 +494,61 @@ td { text-align: left; }
 
     {# ==================== SYSTEM TAB ==================== #}
     <div id="system" class="tab-panel">
-        <div class="utility-section">
-            <h3>Concurrency</h3>
-            <p>
-                Control how many matches can run simultaneously. When the limit is reached,
-                new matches are queued and started automatically as running matches finish.
-            </p>
-            <form method="post" action="{% url 'update_system_config' %}" style="margin-top: 15px;">
-                {% csrf_token %}
+        <form method="post" action="{% url 'update_system_config' %}">
+            {% csrf_token %}
+
+            <div class="utility-section">
+                <h3>Paths</h3>
+                <p>
+                    Configure local paths for your StarCraft II installation and match output.
+                    These can also be set during <a href="{% url 'setup_page' %}">first-run setup</a>.
+                </p>
+
+                <div class="form-group">
+                    <label for="logs_dir">Legacy Logs / Replays Directory:</label>
+                    <input type="text" name="logs_dir" id="logs_dir"
+                           value="{{ system_config.logs_dir }}" style="max-width: 600px; padding: 6px 8px;">
+                    <small style="color: #666;">Directory for legacy Docker match logs and replays. <strong>Required.</strong></small>
+                </div>
+
+                <div class="form-group">
+                    <label for="sc2_maps_path">StarCraft II Maps Path:</label>
+                    <input type="text" name="sc2_maps_path" id="sc2_maps_path"
+                           value="{{ system_config.sc2_maps_path }}" style="max-width: 600px; padding: 6px 8px;">
+                    <small style="color: #666;">Host Maps directory mounted into Docker containers. <strong>Required.</strong></small>
+                </div>
+
+                <div class="form-group">
+                    <label for="sc2_switcher_path">SC2Switcher Path:</label>
+                    <input type="text" name="sc2_switcher_path" id="sc2_switcher_path"
+                           value="{{ system_config.sc2_switcher_path }}" style="max-width: 600px; padding: 6px 8px;">
+                    <small style="color: #666;">Path to SC2Switcher.exe for opening replays.</small>
+                </div>
+
+                <div class="form-group">
+                    <label for="replays_dir">Legacy Docker Replays Directory:</label>
+                    <input type="text" name="replays_dir" id="replays_dir"
+                           value="{{ system_config.replays_dir }}" style="max-width: 600px; padding: 6px 8px;">
+                    <small style="color: #666;">Only needed for legacy single-container runner. If blank, defaults to Logs Directory.</small>
+                </div>
+            </div>
+
+            <div class="utility-section">
+                <h3>Concurrency</h3>
+                <p>
+                    Control how many matches can run simultaneously. When the limit is reached,
+                    new matches are queued and started automatically as running matches finish.
+                </p>
                 <div class="form-group">
                     <label for="max_concurrent_matches">Max Concurrent Matches:</label>
                     <input type="number" name="max_concurrent_matches" id="max_concurrent_matches"
                            value="{{ system_config.max_concurrent_matches }}" min="0" style="width: 80px; padding: 6px 8px;">
                     <small style="color: #666;">0 = unlimited (no limit on parallel matches)</small>
                 </div>
-                <button type="submit" class="utility-btn" style="padding: 8px 16px; margin-top: 8px;">Save</button>
-            </form>
-        </div>
+            </div>
+
+            <button type="submit" class="utility-btn" style="padding: 8px 16px; margin-top: 8px;">Save</button>
+        </form>
     </div>
 
     {# ==================== PROMPT TEMPLATES TAB ==================== #}
@@ -680,6 +724,11 @@ td { text-align: left; }
                 <label for="ts-modal-dockerfile">Custom Dockerfile (optional):</label>
                 <input type="text" id="ts-modal-dockerfile" placeholder="e.g. Dockerfile.mybot">
                 <small style="color: #666;">Dockerfile (relative to test_lab/aiarena/) that builds an image with extra dependencies pre-installed. Saves time when running this bot repeatedly.</small>
+            </div>
+            <div class="form-group">
+                <label for="ts-modal-env-file">Env File (optional):</label>
+                <input type="text" id="ts-modal-env-file" placeholder="e.g. C:\Users\me\mybot\.env">
+                <small style="color: #666;">Absolute path to a .env file on the host. Provides environment variables (e.g. DB credentials) to the Docker container via --env-file.</small>
             </div>
         </div>
         <div id="ts-modal-error" style="display: none; color: red; background: #f8d7da; border: 1px solid #f5c6cb; padding: 8px; border-radius: 4px; margin-top: 10px;"></div>
@@ -888,13 +937,14 @@ td { text-align: left; }
         document.getElementById('rt_custom_bot_field').style.display = type === 'CustomBot' ? '' : 'none';
     }
 
-    function openTestSubjectModal(botId, botName, isTestSubject, sourcePath, enableVersionHistory, dockerfile) {
+    function openTestSubjectModal(botId, botName, isTestSubject, sourcePath, enableVersionHistory, dockerfile, envFile) {
         document.getElementById('ts-modal-bot-id').value = botId;
         document.getElementById('ts-modal-bot-name').textContent = botName;
         document.getElementById('ts-modal-enabled').checked = isTestSubject;
         document.getElementById('ts-modal-source-path').value = sourcePath;
         document.getElementById('ts-modal-version-history').checked = enableVersionHistory;
         document.getElementById('ts-modal-dockerfile').value = dockerfile;
+        document.getElementById('ts-modal-env-file').value = envFile || '';
         document.getElementById('ts-modal-fields').style.display = isTestSubject ? 'block' : 'none';
         document.getElementById('ts-modal-error').style.display = 'none';
         document.getElementById('test-subject-modal').classList.add('active');
@@ -913,6 +963,7 @@ td { text-align: left; }
             params.set('source_path', document.getElementById('ts-modal-source-path').value);
             if (document.getElementById('ts-modal-version-history').checked) params.set('enable_version_history', 'on');
             params.set('dockerfile', document.getElementById('ts-modal-dockerfile').value);
+            params.set('env_file', document.getElementById('ts-modal-env-file').value);
         }
 
         document.getElementById('ts-modal-error').style.display = 'none';

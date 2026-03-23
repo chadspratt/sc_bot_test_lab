@@ -16,8 +16,8 @@ services:
       - "ACSC2_PROXY_HOST=proxy_controller"
     volumes:
       - "./logs/sc2_controller:/logs"
-      # SC2 Maps Path — use local StarCraft II installation
-      - "C:\\Program Files (x86)\\StarCraft II\\Maps:/root/StarCraftII/maps"
+      # SC2 Maps Path — configured via SystemConfig, written to .env
+      - "${SC2_MAPS_PATH}:/root/StarCraftII/maps"
 
   bot_controller1:
     image: aiarena/arenaclient-bot:v0.8.0
