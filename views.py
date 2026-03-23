@@ -512,6 +512,28 @@ def _env_file_args(test_bot: CustomBot | None) -> list[str]:
     return args
 
 
+def _bot_identity_args(test_bot: CustomBot | None) -> list[str]:
+    """Return ``['-e', 'K=V', ...]`` flags for BOT_MODULE/CLASS/RACE/NAME.
+
+    These env vars tell ``run_vs_computer.py`` which bot class to import
+    and which race to play.  When the fields are not configured on the
+    CustomBot, the args are omitted and the runner falls back to its
+    built-in defaults.
+    """
+    if test_bot is None:
+        return []
+    args: list[str] = []
+    if test_bot.bot_module:
+        args += ['-e', f'BOT_MODULE={test_bot.bot_module}']
+    if test_bot.bot_class:
+        args += ['-e', f'BOT_CLASS={test_bot.bot_class}']
+    if test_bot.race:
+        args += ['-e', f'BOT_RACE={test_bot.race}']
+    if test_bot.name:
+        args += ['-e', f'BOT_NAME={test_bot.name}']
+    return args
+
+
 def _parse_legacy_result(log_file_path: str) -> str | None:
     """Parse the match result from a legacy container log file.
 
@@ -729,6 +751,7 @@ def start_test_suite(
                 if source_override:
                     override_src = source_override.replace('\\', '/')
                     command += ['-v', f'{override_src}:/root/bot']
+                command += _bot_identity_args(test_bot)
                 command += _env_file_args(test_bot)
                 command.append('bot')
                 _launch_legacy_match(match_id, command, DOCKER_COMPOSE_PATH, log_file)
@@ -1776,7 +1799,7 @@ def run_single_match(request):
                 '-e', f'DIFFICULTY={difficulty}',
                 '-e', f'MATCH_ID={match_id}',
                 '-e', f'MAP_NAME={match_obj.map_name}',
-            ] + _env_file_args(test_bot) + ['bot']
+            ] + _bot_identity_args(test_bot) + _env_file_args(test_bot) + ['bot']
 
             started = _launch_legacy_match(match_id, command, docker_compose_path, log_file)
 
@@ -1825,6 +1848,8 @@ def create_custom_bot(request):
     enable_version_history = request.POST.get('enable_version_history') == 'on'
     dockerfile = request.POST.get('dockerfile', '').strip()
     env_file = request.POST.get('env_file', '').strip()
+    bot_module = request.POST.get('bot_module', '').strip()
+    bot_class = request.POST.get('bot_class', '').strip()
 
     if not name:
         messages.error(request, 'Bot name is required.')
@@ -1861,6 +1886,8 @@ def create_custom_bot(request):
             symlink_mounts=symlink_mounts,
             dockerfile=dockerfile,
             env_file=env_file,
+            bot_module=bot_module,
+            bot_class=bot_class,
             description=description,
         )
         msg = f'Bot "{name}" registered successfully.'
@@ -1915,6 +1942,8 @@ def update_custom_bot_test_subject(request, bot_id):
         enable_version_history = request.POST.get('enable_version_history') == 'on'
         dockerfile = request.POST.get('dockerfile', '').strip()
         env_file = request.POST.get('env_file', '').strip()
+        bot_module = request.POST.get('bot_module', '').strip()
+        bot_class = request.POST.get('bot_class', '').strip()
 
         if source_path and not os.path.isdir(source_path):
             return JsonResponse({'status': 'error', 'message': f'Source path not found: {source_path}'}, status=400)
@@ -1926,16 +1955,20 @@ def update_custom_bot_test_subject(request, bot_id):
         bot.enable_version_history = enable_version_history
         bot.dockerfile = dockerfile
         bot.env_file = env_file
+        bot.bot_module = bot_module
+        bot.bot_class = bot_class
         bot.symlink_mounts = symlink_mounts
-        update_fields += ['source_path', 'enable_version_history', 'dockerfile', 'env_file', 'symlink_mounts']
+        update_fields += ['source_path', 'enable_version_history', 'dockerfile', 'env_file', 'bot_module', 'bot_class', 'symlink_mounts']
     else:
         bot.is_test_subject = False
         bot.source_path = ''
         bot.enable_version_history = False
         bot.dockerfile = ''
         bot.env_file = ''
+        bot.bot_module = ''
+        bot.bot_class = ''
         bot.symlink_mounts = []
-        update_fields += ['source_path', 'enable_version_history', 'dockerfile', 'env_file', 'symlink_mounts']
+        update_fields += ['source_path', 'enable_version_history', 'dockerfile', 'env_file', 'bot_module', 'bot_class', 'symlink_mounts']
 
     bot.save(update_fields=update_fields)
     return JsonResponse({'status': 'ok'})

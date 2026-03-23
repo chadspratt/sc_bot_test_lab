@@ -1,5 +1,4 @@
-"""
-Run BotTato against a built-in Computer opponent (Bot vs Computer).
+"""Run a bot against a built-in Computer opponent (Bot vs Computer).
 
 Runs inside a Docker container.  The match and map are created by the
 Django API before launch; this script only needs to play the game and
@@ -11,10 +10,15 @@ Environment variables:
   DIFFICULTY - Opponent difficulty (default: CheatInsane)
   MAP_NAME   - Map to play on (required)
   MATCH_ID   - Match row ID (required, used for replay naming)
+  BOT_MODULE - Python module path to import the bot class from (e.g. 'bottato.bottato')
+  BOT_CLASS  - Bot class name within the module (e.g. 'BotTato')
+  BOT_RACE   - Bot race: Protoss, Terran, Zerg, or Random
+  BOT_NAME   - Display name for the bot (used in replay metadata)
 """
 
 from __future__ import annotations
 
+import importlib
 import os
 from loguru import logger
 
@@ -23,8 +27,6 @@ from sc2 import maps
 from sc2.data import Race, Result
 from sc2.main import run_game
 from sc2.player import Bot, Computer
-
-from bottato.bottato import BotTato
 
 
 def main() -> str:
@@ -38,6 +40,16 @@ def main() -> str:
     difficulty_env = os.environ.get("DIFFICULTY")
     map_name = os.environ["MAP_NAME"]
     match_id = os.environ["MATCH_ID"]
+
+    bot_module_path = os.environ["BOT_MODULE"]
+    bot_class_name = os.environ["BOT_CLASS"]
+    bot_race_name = os.environ["BOT_RACE"]
+    bot_name = os.environ.get("BOT_NAME", bot_class_name)
+
+    # Dynamically import the bot class
+    bot_module = importlib.import_module(bot_module_path)
+    bot_cls = getattr(bot_module, bot_class_name)
+    bot_race = RACE_DICT.get(bot_race_name.lower(), Race[bot_race_name])
 
     opponent_race = RACE_DICT.get(race, RACE_DICT[None])
     opponent_build = BUILD_DICT.get(build, BUILD_DICT[None])
@@ -53,7 +65,7 @@ def main() -> str:
     try:
         result: Result | list[Result | None] = run_game(
             map_data,
-            [Bot(Race.Terran, BotTato(), "BotTato"), opponent],
+            [Bot(bot_race, bot_cls(), bot_name), opponent],
             realtime=False,
             save_replay_as=replay_path,
             game_time_limit=3600,

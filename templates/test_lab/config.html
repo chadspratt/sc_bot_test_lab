@@ -151,6 +151,16 @@ td { text-align: left; }
                         <input type="text" name="env_file" id="env_file" placeholder="e.g. C:\Users\me\mybot\.env">
                         <small style="color: #666;">Absolute path to a .env file on the host. Provides environment variables (e.g. DB credentials) to the Docker container via --env-file.</small>
                     </div>
+                    <div class="form-group">
+                        <label for="bot_module">Bot Module (optional):</label>
+                        <input type="text" name="bot_module" id="bot_module" placeholder="e.g. bottato.bottato">
+                        <small style="color: #666;">Python module path for the bot class (e.g. 'bottato.bottato'). Used by the legacy Docker runner for dynamic import. Leave blank if not using legacy runner.</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="bot_class">Bot Class (optional):</label>
+                        <input type="text" name="bot_class" id="bot_class" placeholder="e.g. BotTato">
+                        <small style="color: #666;">Python class name that inherits from BotAI (e.g. 'BotTato'). Used by the legacy Docker runner for dynamic import.</small>
+                    </div>
                 </div>
                 <button type="submit" class="btn btn-primary" style="padding: 8px 16px;">Register Bot</button>
             </form>
@@ -188,14 +198,16 @@ td { text-align: left; }
                         </td>
                         <td>
                             {% if bot.is_test_subject %}
-                                <span class="ts-edit-btn" style="color: #28a745; font-weight: bold;" onclick="openTestSubjectModal({{ bot.id }}, '{{ bot.name|escapejs }}', true, '{{ bot.source_path|escapejs }}', {{ bot.enable_version_history|yesno:'true,false' }}, '{{ bot.dockerfile|escapejs }}', '{{ bot.env_file|escapejs }}')">Yes</span>
+                                <span class="ts-edit-btn" style="color: #28a745; font-weight: bold;" onclick="openTestSubjectModal({{ bot.id }}, '{{ bot.name|escapejs }}', true, '{{ bot.source_path|escapejs }}', {{ bot.enable_version_history|yesno:'true,false' }}, '{{ bot.dockerfile|escapejs }}', '{{ bot.env_file|escapejs }}', '{{ bot.bot_module|escapejs }}', '{{ bot.bot_class|escapejs }}')">Yes</span>
                                 {% if bot.source_path %}<br><small>src: <code>{{ bot.source_path }}</code></small>{% endif %}
                                 {% if bot.enable_version_history %}<br><small style="color: #17a2b8;">version history: enabled</small>{% endif %}
                                 {% if bot.dockerfile %}<br><small>dockerfile: <code>{{ bot.dockerfile }}</code></small>{% endif %}
                                 {% if bot.env_file %}<br><small>env: <code>{{ bot.env_file }}</code></small>{% endif %}
+                                {% if bot.bot_module %}<br><small>module: <code>{{ bot.bot_module }}</code></small>{% endif %}
+                                {% if bot.bot_class %}<br><small>class: <code>{{ bot.bot_class }}</code></small>{% endif %}
                                 {% if bot.symlink_mounts %}<br><small>symlinks: {{ bot.symlink_mounts|length }}</small>{% endif %}
                             {% else %}
-                                <span class="ts-edit-btn" style="color: #999;" onclick="openTestSubjectModal({{ bot.id }}, '{{ bot.name|escapejs }}', false, '', false, '', '')">No</span>
+                                <span class="ts-edit-btn" style="color: #999;" onclick="openTestSubjectModal({{ bot.id }}, '{{ bot.name|escapejs }}', false, '', false, '', '', '', '')">No</span>
                             {% endif %}
                         </td>
                         <td>
@@ -730,6 +742,16 @@ td { text-align: left; }
                 <input type="text" id="ts-modal-env-file" placeholder="e.g. C:\Users\me\mybot\.env">
                 <small style="color: #666;">Absolute path to a .env file on the host. Provides environment variables (e.g. DB credentials) to the Docker container via --env-file.</small>
             </div>
+            <div class="form-group">
+                <label for="ts-modal-bot-module">Bot Module (optional):</label>
+                <input type="text" id="ts-modal-bot-module" placeholder="e.g. bottato.bottato">
+                <small style="color: #666;">Python module path for dynamic import in legacy Docker runner (e.g. 'bottato.bottato').</small>
+            </div>
+            <div class="form-group">
+                <label for="ts-modal-bot-class">Bot Class (optional):</label>
+                <input type="text" id="ts-modal-bot-class" placeholder="e.g. BotTato">
+                <small style="color: #666;">Python class name that inherits from BotAI (e.g. 'BotTato').</small>
+            </div>
         </div>
         <div id="ts-modal-error" style="display: none; color: red; background: #f8d7da; border: 1px solid #f5c6cb; padding: 8px; border-radius: 4px; margin-top: 10px;"></div>
         <div class="modal-actions">
@@ -937,7 +959,7 @@ td { text-align: left; }
         document.getElementById('rt_custom_bot_field').style.display = type === 'CustomBot' ? '' : 'none';
     }
 
-    function openTestSubjectModal(botId, botName, isTestSubject, sourcePath, enableVersionHistory, dockerfile, envFile) {
+    function openTestSubjectModal(botId, botName, isTestSubject, sourcePath, enableVersionHistory, dockerfile, envFile, botModule, botClass) {
         document.getElementById('ts-modal-bot-id').value = botId;
         document.getElementById('ts-modal-bot-name').textContent = botName;
         document.getElementById('ts-modal-enabled').checked = isTestSubject;
@@ -945,6 +967,8 @@ td { text-align: left; }
         document.getElementById('ts-modal-version-history').checked = enableVersionHistory;
         document.getElementById('ts-modal-dockerfile').value = dockerfile;
         document.getElementById('ts-modal-env-file').value = envFile || '';
+        document.getElementById('ts-modal-bot-module').value = botModule || '';
+        document.getElementById('ts-modal-bot-class').value = botClass || '';
         document.getElementById('ts-modal-fields').style.display = isTestSubject ? 'block' : 'none';
         document.getElementById('ts-modal-error').style.display = 'none';
         document.getElementById('test-subject-modal').classList.add('active');
@@ -964,6 +988,8 @@ td { text-align: left; }
             if (document.getElementById('ts-modal-version-history').checked) params.set('enable_version_history', 'on');
             params.set('dockerfile', document.getElementById('ts-modal-dockerfile').value);
             params.set('env_file', document.getElementById('ts-modal-env-file').value);
+            params.set('bot_module', document.getElementById('ts-modal-bot-module').value);
+            params.set('bot_class', document.getElementById('ts-modal-bot-class').value);
         }
 
         document.getElementById('ts-modal-error').style.display = 'none';

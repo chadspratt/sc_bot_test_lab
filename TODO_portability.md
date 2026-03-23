@@ -91,13 +91,13 @@ infrastructure.
 
 Currently hardcodes `from bottato.bottato import BotTato` and `Race.Terran`.
 
-- [ ] Accept bot class import path and race via environment variables
+- [x] Accept bot class import path and race via environment variables
       (e.g. `BOT_MODULE=bottato.bottato`, `BOT_CLASS=BotTato`, `BOT_RACE=Terran`).
-- [ ] Read these from `CustomBot` fields; pass them as env vars in the Docker
+- [x] Read these from `CustomBot` fields; pass them as env vars in the Docker
       command built by `run_single_match` / `start_test_suite`.
-- [ ] Remove the hardcoded `from bottato.bottato import BotTato` import;
+- [x] Remove the hardcoded `from bottato.bottato import BotTato` import;
       use `importlib` to load the configured class dynamically.
-- [ ] Use the race from the env var instead of hardcoded `Race.Terran`.
+- [x] Use the race from the env var instead of hardcoded `Race.Terran`.
 
 ---
 

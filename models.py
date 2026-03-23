@@ -29,6 +29,18 @@ class CustomBot(models.Model):
         default='',
         help_text="Deprecated: kept for backward compatibility with older bot registrations.",
     )
+    bot_module = models.CharField(
+        max_length=255,
+        blank=True,
+        default='',
+        help_text="Python module path for dynamic import (e.g. 'bottato.bottato'). Used by the legacy Docker runner.",
+    )
+    bot_class = models.CharField(
+        max_length=100,
+        blank=True,
+        default='',
+        help_text="Python class name that inherits from BotAI (e.g. 'BotTato'). Used by the legacy Docker runner.",
+    )
     is_external = models.BooleanField(
         default=False,
         help_text="Deprecated: kept for backward compatibility.",
