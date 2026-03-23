@@ -1,4 +1,4 @@
-"""Run BotTato by continuing from a replay at a specified game loop.
+"""Run a bot by continuing from a replay at a specified game loop.
 
 Runs inside a Docker container.  The match is created by the Django API
 before launch; this script only needs to play the game and report the
@@ -7,16 +7,21 @@ result via stdout.
 Environment variables:
   REPLAY_PATH              - Path to .SC2Replay file inside the container
   TAKEOVER_GAME_LOOP       - Game loop at which the bot takes over
-  BOT_PLAYER_ID            - Which player in the replay BotTato replaces (1 or 2, default: 1)
+  BOT_PLAYER_ID            - Which player in the replay the bot replaces (1 or 2, default: 1)
   DIFFICULTY               - Computer opponent difficulty (default: CheatInsane)
   BUILD                    - Computer opponent build (default: Macro)
   RACE                     - Computer opponent race (default: Random)
   MATCH_ID                 - Match row ID (required, used for replay naming)
   REPLAY_DURATION          - (optional) seconds after takeover before the bot forfeits
+  BOT_MODULE               - Python module path to import the bot class from (e.g. 'bottato.bottato')
+  BOT_CLASS                - Bot class name within the module (e.g. 'BotTato')
+  BOT_RACE                 - Bot race: Protoss, Terran, Zerg, or Random
+  BOT_NAME                 - Display name for the bot (used in replay metadata)
 """
 
 from __future__ import annotations
 
+import importlib
 import os
 import sys
 from loguru import logger
@@ -25,8 +30,6 @@ from config import BUILD_DICT, DIFFICULTY_DICT, RACE_DICT
 from replay_continuation import run_game_from_replay
 from sc2.data import Difficulty, Race, Result
 from sc2.player import Bot, Computer
-
-from bottato.bottato import BotTato
 
 
 def main() -> str:
@@ -43,6 +46,11 @@ def main() -> str:
     race_env = os.environ.get("RACE")
     match_id = os.environ["MATCH_ID"]
 
+    bot_module_path = os.environ["BOT_MODULE"]
+    bot_class_name = os.environ["BOT_CLASS"]
+    bot_race_name = os.environ["BOT_RACE"]
+    bot_name = os.environ.get("BOT_NAME", bot_class_name)
+
     if not replay_path:
         logger.error("REPLAY_PATH environment variable is required")
         sys.exit(1)
@@ -50,6 +58,11 @@ def main() -> str:
     if not takeover_loop_str:
         logger.error("TAKEOVER_GAME_LOOP environment variable is required")
         sys.exit(1)
+
+    # Dynamically import the bot class
+    bot_module = importlib.import_module(bot_module_path)
+    bot_cls = getattr(bot_module, bot_class_name)
+    bot_race = RACE_DICT.get(bot_race_name.lower(), Race[bot_race_name])
 
     takeover_game_loop = int(takeover_loop_str)
     difficulty: Difficulty = DIFFICULTY_DICT.get(difficulty_env, DIFFICULTY_DICT[None])
@@ -78,7 +91,7 @@ def main() -> str:
             replay_path=replay_path,
             target_game_loop=takeover_game_loop,
             players=[
-                Bot(Race.Terran, BotTato(), "BotTato"),
+                Bot(bot_race, bot_cls(), bot_name),
                 Computer(race, difficulty, ai_build=ai_build),
             ],
             bot_player_id=bot_player_id,

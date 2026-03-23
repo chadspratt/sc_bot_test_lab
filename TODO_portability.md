@@ -105,9 +105,9 @@ Currently hardcodes `from bottato.bottato import BotTato` and `Race.Terran`.
 
 Same treatment as run_vs_computer.
 
-- [ ] Accept `BOT_MODULE`, `BOT_CLASS`, `BOT_RACE` env vars.
-- [ ] Dynamic import instead of hardcoded BotTato.
-- [ ] Pull race from CustomBot via env var.
+- [x] Accept `BOT_MODULE`, `BOT_CLASS`, `BOT_RACE` env vars.
+- [x] Dynamic import instead of hardcoded BotTato.
+- [x] Pull race from CustomBot via env var.
 
 ---
 

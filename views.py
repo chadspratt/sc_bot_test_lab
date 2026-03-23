@@ -2213,6 +2213,7 @@ def run_replay_match(request):
             if duration_seconds and duration_seconds > 0:
                 command += ['-e', f'REPLAY_DURATION={duration_seconds / 22.4:.1f}']
 
+        command += _bot_identity_args(test_bot)
         command += _env_file_args(test_bot)
         command += [
             'bot',
@@ -2300,6 +2301,7 @@ def _launch_replay_test_match(
         override_src = source_override.replace('\\', '/')
         command += ['-v', f'{override_src}:/root/bot']
 
+    command += _bot_identity_args(test_bot)
     command += _env_file_args(test_bot)
     command += [
         'bot',
