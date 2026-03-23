@@ -585,7 +585,7 @@ def start_custom_bot_match(
     match = Match(
         test_group_id=test_group_id,
         start_timestamp=datetime.now(),
-        map_name="TBD",
+        map_name=random.choice(MAP_LIST),
         opponent_race=custom_bot.race,
         opponent_difficulty='',
         opponent_build='',
@@ -621,6 +621,7 @@ def start_custom_bot_match(
         '-e', f'OPPONENT_FILE={custom_bot.bot_file}',
         '-e', f'OPPONENT_CLASS={custom_bot.bot_class_name}',
         '-e', f'OPPONENT_RACE={custom_bot.race.lower()}',
+        '-e', f'MAP_NAME={match.map_name}',
         '-e', f'MATCH_ID={match_id}',
     ]
 

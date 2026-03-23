@@ -1,11 +1,15 @@
-"""
-Run BotTato against a custom opponent bot (Bot vs Bot).
+"""Run BotTato against a custom opponent bot (Bot vs Bot).
+
+Runs inside a Docker container.  The match and map are created by the
+Django API before launch; this script only needs to play the game and
+report the result via stdout.
 
 Environment variables:
   OPPONENT_FILE  - Python filename in other_bots/ (e.g. worker_rush.py)
   OPPONENT_CLASS - Class name inheriting from BotAI (e.g. WorkerRushBot)
   OPPONENT_RACE  - Race name: protoss, terran, zerg, or random
-  MATCH_ID       - (optional) existing match row to update
+  MAP_NAME       - Map to play on (required)
+  MATCH_ID       - Match row ID (required, used for replay naming)
   EXTERNAL_BOT_DIR - (optional) directory name under /root/external_bots/ for
                      third-party bots with their own framework
 """
@@ -14,13 +18,11 @@ from __future__ import annotations
 
 import importlib.util
 import os
-import random
 import sys
 import types
 from loguru import logger
 
-from config import MAP_LIST, RACE_DICT
-from db_helpers import update_match_map, update_match_result
+from config import RACE_DICT
 from sc2 import maps
 from sc2.bot_ai import BotAI
 from sc2.data import Race, Result
@@ -135,11 +137,17 @@ def load_external_opponent(ext_dir: str, rel_file_path: str, class_name: str) ->
     return bot_cls
 
 
-def main():
+def main() -> str:
+    """Run a single bot-vs-bot match and return the result string.
+
+    The result is also printed to stdout as ``MATCH_RESULT:<result>`` so
+    the host-side monitoring thread can parse it from the container log.
+    """
     opponent_file = os.environ.get("OPPONENT_FILE")
     opponent_class = os.environ.get("OPPONENT_CLASS")
     opponent_race_str = os.environ.get("OPPONENT_RACE", "random")
-    existing_match_id = os.environ.get("MATCH_ID")
+    map_name = os.environ["MAP_NAME"]
+    match_id = os.environ["MATCH_ID"]
     external_bot_dir = os.environ.get("EXTERNAL_BOT_DIR", "")
 
     if not opponent_class:
@@ -152,8 +160,7 @@ def main():
 
     opponent_race = RACE_DICT.get(opponent_race_str.lower(), Race.Random)
 
-    # Match ID handling (set up early so crashes can be recorded)
-    match_id: int | None = int(existing_match_id) if existing_match_id else None
+    os.environ["TEST_MATCH_ID"] = match_id
 
     try:
         # Load opponent bot class
@@ -166,22 +173,9 @@ def main():
             OpponentClass = load_opponent_class(opponent_file, opponent_class)
             logger.info(f"Loaded opponent: {opponent_class} from {opponent_file} ({opponent_race})")
 
-        # Choose map
-        chosen_map_name = random.choice(MAP_LIST)
-        sc2_map = maps.get(chosen_map_name)
+        sc2_map = maps.get(map_name)
+        replay_path = f"/root/replays/{match_id}_vs_{opponent_class}_{map_name}.SC2Replay"
 
-        if match_id:
-            update_match_map(match_id, chosen_map_name)
-        else:
-            logger.warning("No MATCH_ID provided; results will only be logged, not saved to DB.")
-
-        replay_path = f"/root/replays/{match_id}_vs_{opponent_class}_{chosen_map_name}.SC2Replay"
-
-        # Set match ID as environment variable for the bot
-        if match_id:
-            os.environ["TEST_MATCH_ID"] = str(match_id)
-
-        # Bot vs Bot: run_game with two Bot() players
         result: Result | list[Result | None] = run_game(
             sc2_map,
             [
@@ -193,32 +187,20 @@ def main():
             game_time_limit=3600,
         )
 
-        # Bot vs Bot returns a list of two Results: [bottato_result, opponent_result]
-        if isinstance(result, list):
-            bottato_result = result[0]
-        else:
-            bottato_result = result
+        bottato_result = result[0] if isinstance(result, list) else result
+        result_str = bottato_result.name if bottato_result else "Crash"
 
-        result_name = bottato_result.name if bottato_result else "Unknown"
+    except Exception:
+        logger.exception(f"Match vs {opponent_class} crashed")
+        result_str = "Crash"
 
-        logger.info(
-            f"\n================================\n"
-            f"Result vs {opponent_class}: {bottato_result}\n"
-            f"================================"
-        )
-
-        if match_id:
-            update_match_result(match_id, result_name)
-
-    except Exception as e:
-        logger.error(
-            f"\n================================\n"
-            f"Result vs {opponent_class}: Crash — {e}\n"
-            f"================================"
-        )
-        if match_id:
-            update_match_result(match_id, "Crash")
-        raise e
+    logger.info(
+        f"\n================================\n"
+        f"Result vs {opponent_class}: {result_str}\n"
+        f"================================"
+    )
+    print(f"MATCH_RESULT:{result_str}", flush=True)
+    return result_str
 
 
 if __name__ == "__main__":
