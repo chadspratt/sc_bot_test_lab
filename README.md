@@ -44,7 +44,7 @@ Django needs `test_lab` to be an importable Python package, so clone it
 
 ```bash
 mkdir sc2_test_lab && cd sc2_test_lab
-git clone <test_lab_repo_url> test_lab
+git clone git@github.com:chadspratt/sc_bot_test_lab.git test_lab
 ```
 
 Your layout should look like:
