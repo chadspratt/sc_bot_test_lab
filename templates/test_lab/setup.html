@@ -17,12 +17,12 @@
         <h3>Required Paths</h3>
 
         <div class="form-group">
-            <label for="logs_dir">Legacy Logs / Replays Directory:</label>
+            <label for="logs_dir">Logs / Replays Directory:</label>
             <input type="text" name="logs_dir" id="logs_dir"
                    value="{{ config.logs_dir }}" style="max-width: 600px;"
                    required>
             <small style="color: #666;">
-                Directory where legacy Docker match logs and replays are stored.
+                Directory where single-container Docker match logs and replays are stored.
                 Example: <code>C:\Users\you\Documents\StarCraft II\Replays\Multiplayer\docker</code>
             </small>
         </div>
@@ -52,11 +52,11 @@
         </div>
 
         <div class="form-group">
-            <label for="replays_dir">Legacy Docker Replays Directory:</label>
+            <label for="replays_dir">Docker Replays Directory:</label>
             <input type="text" name="replays_dir" id="replays_dir"
                    value="{{ config.replays_dir }}" style="max-width: 600px;">
             <small style="color: #666;">
-                Host path for legacy Docker replays. Only needed if using the legacy single-container runner.
+                Host path for Docker replays. Only needed if using the single-container runner.
                 If blank, defaults to the Logs Directory above.
             </small>
         </div>

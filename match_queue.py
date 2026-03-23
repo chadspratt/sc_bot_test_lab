@@ -194,7 +194,7 @@ def _rebuild_launcher(match) -> Callable[[], None] | None:
 
         return _launch_aiarena
 
-    # --- Legacy matches (all use a single docker-compose.yml) ---
+    # --- Single-container matches (all use a single docker-compose.yml) ---
     from .views import DOCKER_COMPOSE_PATH, _get_logs_dir
     os.makedirs(_get_logs_dir(), exist_ok=True)
 
@@ -203,7 +203,7 @@ def _rebuild_launcher(match) -> Callable[[], None] | None:
 
     # Computer AI match
     if match.opponent_race and match.opponent_build:
-        return _rebuild_legacy_ai_launcher(match)
+        return _rebuild_blizzard_ai_launcher(match)
 
     return None
 
@@ -231,8 +231,8 @@ def _add_source_override(command: list[str], match) -> None:
         command += ['-v', f'{override.replace(chr(92), "/")}:/root/bot']
 
 
-def _rebuild_legacy_ai_launcher(match) -> Callable[[], None]:
-    """Rebuild launcher for a legacy computer-AI match."""
+def _rebuild_blizzard_ai_launcher(match) -> Callable[[], None]:
+    """Rebuild launcher for a Blizzard AI match."""
     from .views import DOCKER_COMPOSE_PATH, _get_logs_dir
 
     match_id = match.id
@@ -255,8 +255,8 @@ def _rebuild_legacy_ai_launcher(match) -> Callable[[], None]:
     command += _env_file_args(match.test_bot)
     command.append('bot')
 
-    logger.info('Match %d: rebuilding legacy AI launcher (%s %s)', match_id, race, build)
-    return _make_legacy_launcher(match_id, command, DOCKER_COMPOSE_PATH, log_file_path)
+    logger.info('Match %d: rebuilding Blizzard AI launcher (%s %s)', match_id, race, build)
+    return _make_sc_docker_launcher(match_id, command, DOCKER_COMPOSE_PATH, log_file_path)
 
 
 def _rebuild_replay_test_launcher(match) -> Callable[[], None] | None:
@@ -307,13 +307,13 @@ def _rebuild_replay_test_launcher(match) -> Callable[[], None] | None:
     command += ['bot', 'bash', '/root/runner/run_docker_continue_replay.sh']
 
     logger.info('Match %d: rebuilding replay-test launcher (%s)', match_id, rt.name)
-    return _make_legacy_launcher(match_id, command, DOCKER_COMPOSE_PATH, log_file_path)
+    return _make_sc_docker_launcher(match_id, command, DOCKER_COMPOSE_PATH, log_file_path)
 
 
-def _make_legacy_launcher(
+def _make_sc_docker_launcher(
     match_id: int, command: list[str], cwd: str, log_file_path: str,
 ) -> Callable[[], None]:
-    """Create a launcher closure for a legacy Docker match."""
+    """Create a launcher closure for a single-container Docker match."""
     def _launcher():
         def _run():
             try:
@@ -321,7 +321,7 @@ def _make_legacy_launcher(
                     proc = subprocess.Popen(command, cwd=cwd, stdout=log, stderr=log)
                 proc.wait(timeout=7200)
             except Exception:
-                logger.exception('Legacy match %d: error', match_id)
+                logger.exception('Single-container match %d: error', match_id)
             finally:
                 notify_match_finished()
 

@@ -159,12 +159,12 @@ td { text-align: left; }
                     <div class="form-group">
                         <label for="bot_module">Bot Module (optional):</label>
                         <input type="text" name="bot_module" id="bot_module" placeholder="e.g. bottato.bottato">
-                        <small style="color: #666;">Python module path for the bot class (e.g. 'bottato.bottato'). Used by the legacy Docker runner for dynamic import. Leave blank if not using legacy runner.</small>
+                        <small style="color: #666;">Python module path for the bot class (e.g. 'bottato.bottato'). Used by the single-container Docker runner for dynamic import. Leave blank if not using single-container runner.</small>
                     </div>
                     <div class="form-group">
                         <label for="bot_class">Bot Class (optional):</label>
                         <input type="text" name="bot_class" id="bot_class" placeholder="e.g. BotTato">
-                        <small style="color: #666;">Python class name that inherits from BotAI (e.g. 'BotTato'). Used by the legacy Docker runner for dynamic import.</small>
+                        <small style="color: #666;">Python class name that inherits from BotAI (e.g. 'BotTato'). Used by the single-container Docker runner for dynamic import.</small>
                     </div>
                 </div>
                 <button type="submit" class="btn btn-primary" style="padding: 8px 16px;">Register Bot</button>
@@ -756,7 +756,7 @@ td { text-align: left; }
             <div class="form-group">
                 <label for="ts-modal-bot-module">Bot Module (optional):</label>
                 <input type="text" id="ts-modal-bot-module" placeholder="e.g. bottato.bottato">
-                <small style="color: #666;">Python module path for dynamic import in legacy Docker runner (e.g. 'bottato.bottato').</small>
+                <small style="color: #666;">Python module path for dynamic import in single-container Docker runner (e.g. 'bottato.bottato').</small>
             </div>
             <div class="form-group">
                 <label for="ts-modal-bot-class">Bot Class (optional):</label>

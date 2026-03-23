@@ -33,13 +33,13 @@ class CustomBot(models.Model):
         max_length=255,
         blank=True,
         default='',
-        help_text="Python module path for dynamic import (e.g. 'bottato.bottato'). Used by the legacy Docker runner.",
+        help_text="Python module path for dynamic import (e.g. 'bottato.bottato'). Used by the single-container Docker runner.",
     )
     bot_class = models.CharField(
         max_length=100,
         blank=True,
         default='',
-        help_text="Python class name that inherits from BotAI (e.g. 'BotTato'). Used by the legacy Docker runner.",
+        help_text="Python class name that inherits from BotAI (e.g. 'BotTato'). Used by the single-container Docker runner.",
     )
     is_external = models.BooleanField(
         default=False,
@@ -478,7 +478,7 @@ class SystemConfig(models.Model):
         max_length=500,
         blank=True,
         default='',
-        help_text="Directory for legacy Docker match logs and replays.",
+        help_text="Directory for single-container Docker match logs and replays.",
     )
     sc2_switcher_path = models.CharField(
         max_length=500,
@@ -496,7 +496,7 @@ class SystemConfig(models.Model):
         max_length=500,
         blank=True,
         default='',
-        help_text="Host path for legacy Docker replays directory.",
+        help_text="Host path for single-container Docker replays directory.",
     )
 
     @property

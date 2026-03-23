@@ -44,11 +44,11 @@ def _get_match_list_context(request):
         logger.exception('Error checking stale pending aiarena matches')
 
     try:
-        legacy_recovered = _recover_stale_legacy_matches()
-        if legacy_recovered:
-            logger.info('Recovered %d stale legacy match(es): %s', len(legacy_recovered), legacy_recovered)
+        sc_docker_recovered = _recover_stale_sc_docker_matches()
+        if sc_docker_recovered:
+            logger.info('Recovered %d stale single-container match(es): %s', len(sc_docker_recovered), sc_docker_recovered)
     except Exception:
-        logger.exception('Error checking stale pending legacy matches')
+        logger.exception('Error checking stale pending single-container matches')
 
     # Start any queued matches that now have capacity.
     try:
@@ -479,18 +479,18 @@ DOCKER_COMPOSE_PATH = os.path.normpath(os.path.join(os.path.dirname(__file__)))
 
 
 def _get_logs_dir() -> str:
-    """Return the configured legacy logs directory from SystemConfig."""
+    """Return the configured single-container Docker logs directory from SystemConfig."""
     return SystemConfig.load().logs_dir
 
 
 def _get_replays_dir() -> str:
-    """Return the configured legacy replays directory (falls back to logs_dir)."""
+    """Return the configured single-container Docker replays directory (falls back to logs_dir)."""
     config = SystemConfig.load()
     return config.replays_dir or config.logs_dir
 
 
-def _write_legacy_env() -> None:
-    """Write a .env file for the legacy docker-compose with configured paths."""
+def _write_sc_docker_env() -> None:
+    """Write a .env file for the single-container docker-compose with configured paths."""
     config = SystemConfig.load()
     env_path = os.path.join(DOCKER_COMPOSE_PATH, '.env')
     replays_dir = config.replays_dir or config.logs_dir
@@ -534,8 +534,8 @@ def _bot_identity_args(test_bot: CustomBot | None) -> list[str]:
     return args
 
 
-def _parse_legacy_result(log_file_path: str) -> str | None:
-    """Parse the match result from a legacy container log file.
+def _parse_sc_docker_result(log_file_path: str) -> str | None:
+    """Parse the match result from a single-container Docker log file.
 
     Looks for a ``MATCH_RESULT:<result>`` line printed by the run script.
     """
@@ -549,10 +549,10 @@ def _parse_legacy_result(log_file_path: str) -> str | None:
     return None
 
 
-def _recover_stale_legacy_matches() -> dict[int, str]:
-    """Scan for pending legacy matches whose log file contains a result.
+def _recover_stale_sc_docker_matches() -> dict[int, str]:
+    """Scan for pending single-container Docker matches whose log file contains a result.
 
-    When the Django server restarts, the daemon threads monitoring legacy
+    When the Django server restarts, the daemon threads monitoring
     Docker containers are killed.  The containers finish and write
     ``MATCH_RESULT:<result>`` to their log files, but nobody reads it.
     This function finds those orphaned results and updates the database.
@@ -578,7 +578,7 @@ def _recover_stale_legacy_matches() -> dict[int, str]:
         if not log_files:
             continue
 
-        result = _parse_legacy_result(log_files[0])
+        result = _parse_sc_docker_result(log_files[0])
         if result:
             match_obj.result = result
             match_obj.end_timestamp = timezone.now()
@@ -588,8 +588,8 @@ def _recover_stale_legacy_matches() -> dict[int, str]:
     return recovered
 
 
-def _launch_legacy_match(match_id: int, command: list[str], cwd: str, log_file_path: str) -> bool:
-    """Launch a legacy single-container Docker match through the queue.
+def _launch_sc_docker_match(match_id: int, command: list[str], cwd: str, log_file_path: str) -> bool:
+    """Launch a single-container Docker match through the queue.
 
     If at capacity the match is queued and started later.  A monitoring
     thread waits for the process to finish, then parses the result from
@@ -603,16 +603,16 @@ def _launch_legacy_match(match_id: int, command: list[str], cwd: str, log_file_p
                 with open(log_file_path, 'w') as log:
                     proc = subprocess.Popen(command, cwd=cwd, stdout=log, stderr=log)
                 proc.wait(timeout=7200)
-                result = _parse_legacy_result(log_file_path)
+                result = _parse_sc_docker_result(log_file_path)
                 try:
                     match = Match.objects.get(id=match_id)
                     match.result = result or 'Crash'
                     match.end_timestamp = timezone.now()
                     match.save()
                 except Match.DoesNotExist:
-                    logger.error('Legacy match %d: Match record not found', match_id)
+                    logger.error('Single-container match %d: Match record not found', match_id)
             except Exception:
-                logger.exception('Legacy match %d: error', match_id)
+                logger.exception('Single-container match %d: error', match_id)
             finally:
                 match_queue.notify_match_finished()
 
@@ -659,7 +659,7 @@ def start_custom_bot_match(
     if not custom_bot.is_aiarena:
         raise ValueError(
             f"Custom bot '{custom_bot.name}' is not configured as an aiarena bot. "
-            "The legacy single-container bot-vs-bot runner has been removed. "
+            "The single-container bot-vs-bot runner has been removed. "
             "Please set the bot's type to 'aiarena' in the admin panel."
         )
 
@@ -698,7 +698,7 @@ def start_test_suite(
     if not os.path.exists(compose_file):
         raise FileNotFoundError(f'docker-compose.yml not found at: {compose_file}')
 
-    _write_legacy_env()
+    _write_sc_docker_env()
     logs_dir = _get_logs_dir()
     os.makedirs(logs_dir, exist_ok=True)
 
@@ -754,7 +754,7 @@ def start_test_suite(
                 command += _bot_identity_args(test_bot)
                 command += _env_file_args(test_bot)
                 command.append('bot')
-                _launch_legacy_match(match_id, command, DOCKER_COMPOSE_PATH, log_file)
+                _launch_sc_docker_match(match_id, command, DOCKER_COMPOSE_PATH, log_file)
                 count += 1
 
     # --- Custom bot matches ---
@@ -1011,7 +1011,7 @@ def serve_replay(request, match_id):
         subprocess.Popen([sc2_switcher, replay_path])
         return HttpResponse(status=204)
 
-    # Fall back to legacy directory
+    # Fall back to single-container directory
     replay_dir = _get_logs_dir()
     replay_pattern = os.path.join(replay_dir, f"{match_id}_*.SC2Replay")
     replay_files = glob.glob(replay_pattern)
@@ -1027,7 +1027,7 @@ def serve_log(request, match_id):
     """Serve the main log file for a match.
 
     For aiarena matches this is the docker compose output log.
-    For legacy matches this is the single-container log.
+    For single-container matches this is the Docker container log.
     """
     from django.http import FileResponse
 
@@ -1036,9 +1036,9 @@ def serve_log(request, match_id):
     if log_path:
         return FileResponse(open(log_path, 'rb'), content_type='text/plain')
 
-    # Fall back to legacy directory
-    legacy_logs = _get_logs_dir()
-    log_pattern = os.path.join(legacy_logs, f"{match_id}*.log")
+    # Fall back to single-container directory
+    sc_docker_logs = _get_logs_dir()
+    log_pattern = os.path.join(sc_docker_logs, f"{match_id}*.log")
     log_files = [
         f for f in glob.glob(log_pattern)
         if '_stderr.log' not in f
@@ -1780,7 +1780,7 @@ def run_single_match(request):
             return redirect('run_match')
 
         docker_compose_path = DOCKER_COMPOSE_PATH
-        _write_legacy_env()
+        _write_sc_docker_env()
         logs_dir = _get_logs_dir()
         os.makedirs(logs_dir, exist_ok=True)
 
@@ -1801,7 +1801,7 @@ def run_single_match(request):
                 '-e', f'MAP_NAME={match_obj.map_name}',
             ] + _bot_identity_args(test_bot) + _env_file_args(test_bot) + ['bot']
 
-            started = _launch_legacy_match(match_id, command, docker_compose_path, log_file)
+            started = _launch_sc_docker_match(match_id, command, docker_compose_path, log_file)
 
             status = 'started' if started else 'queued'
             messages.success(
@@ -2169,7 +2169,7 @@ def run_replay_match(request):
         return redirect('run_match')
 
     docker_compose_path = DOCKER_COMPOSE_PATH
-    _write_legacy_env()
+    _write_sc_docker_env()
     logs_dir = _get_logs_dir()
     os.makedirs(logs_dir, exist_ok=True)
 
@@ -2229,7 +2229,7 @@ def run_replay_match(request):
             'bash', '/root/runner/run_docker_continue_replay.sh',
         ]
 
-        _launch_legacy_match(match_id, command, docker_compose_path, log_file)
+        _launch_sc_docker_match(match_id, command, docker_compose_path, log_file)
 
         takeover_seconds = game_loop / 22.4
         messages.success(
@@ -2274,7 +2274,7 @@ def _launch_replay_test_match(
     match.save()
     match_id = match.id
 
-    _write_legacy_env()
+    _write_sc_docker_env()
     logs_dir = _get_logs_dir()
     os.makedirs(logs_dir, exist_ok=True)
 
@@ -2317,7 +2317,7 @@ def _launch_replay_test_match(
         'bash', '/root/runner/run_docker_continue_replay.sh',
     ]
 
-    _launch_legacy_match(match_id, command, DOCKER_COMPOSE_PATH, log_file)
+    _launch_sc_docker_match(match_id, command, DOCKER_COMPOSE_PATH, log_file)
 
     return match_id
 
