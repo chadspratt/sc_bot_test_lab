@@ -132,10 +132,10 @@ works for BotTato. Needs significant rework.
 `_BASE_FILES` in aiarena_runner.py always copies `Dockerfile.bottato` into
 every run directory even when it isn't used.
 
-- [ ] Remove `Dockerfile.bottato` from `_BASE_FILES`.
-- [ ] In `_create_run_dir`, only copy the Dockerfile referenced by
+- [x] Remove `Dockerfile.bottato` from `_BASE_FILES`.
+- [x] In `_create_run_dir`, only copy the Dockerfile referenced by
       `test_bot.dockerfile` (and opponent's dockerfile if set).
-- [ ] This way each bot specifies its own custom Dockerfile (or none)
+- [x] This way each bot specifies its own custom Dockerfile (or none)
       and nothing BotTato-specific leaks into generic runs.
 
 ---

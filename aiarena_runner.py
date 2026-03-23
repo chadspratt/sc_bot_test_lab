@@ -45,7 +45,7 @@ REPO_ROOT = os.path.normpath(os.path.join(AIARENA_DIR, '..', '..', '..', '..'))
 
 # Base files in AIARENA_DIR that are copied into each per-match run directory
 _BASE_FILES = (
-    'docker-compose.yml', 'Dockerfile.bottato', 'config.toml',
+    'docker-compose.yml', 'config.toml',
     'Dockerfile.proxy_fwd', 'entrypoint_proxy_fwd.sh',
 )
 
@@ -524,7 +524,7 @@ def read_ladderbots_json(bot_dir_name: str) -> dict | None:
     return None
 
 
-def _create_run_dir(match_id: int) -> str:
+def _create_run_dir(match_id: int, dockerfiles: tuple[str, ...] = ()) -> str:
     """Create an isolated per-match run directory.
 
     Each match gets its own directory under ``aiarena/runs/<match_id>/``
@@ -532,6 +532,11 @@ def _create_run_dir(match_id: int) -> str:
     directories.  This allows matches to run concurrently without
     conflicting on shared files like ``matches``, ``results.json``,
     ``docker-compose.override.yml``, or ``logs/``.
+
+    *dockerfiles* is a tuple of Dockerfile filenames (relative to
+    ``aiarena/``) required by the bots in this match.  Only the
+    Dockerfiles actually referenced by the test bot or opponent are
+    copied, so nothing bot-specific leaks into generic runs.
 
     Returns the absolute path to the run directory.
     """
@@ -546,6 +551,14 @@ def _create_run_dir(match_id: int) -> str:
         dst = os.path.join(run_dir, filename)
         if os.path.isfile(src) and not os.path.isfile(dst):
             shutil.copy2(src, dst)
+
+    # Copy bot-specific Dockerfiles referenced by this match
+    for dockerfile in dockerfiles:
+        if dockerfile:
+            src = os.path.join(AIARENA_DIR, dockerfile)
+            dst = os.path.join(run_dir, dockerfile)
+            if os.path.isfile(src) and not os.path.isfile(dst):
+                shutil.copy2(src, dst)
 
     # Write .env with configured paths for docker-compose variable substitution
     config = SystemConfig.load()
@@ -723,7 +736,8 @@ def start_aiarena_match(
             )
 
     match_id = match.id
-    run_dir = _create_run_dir(match_id)
+    dockerfiles = (test_bot.dockerfile, opponent_bot.dockerfile if not is_mirror else '')
+    run_dir = _create_run_dir(match_id, dockerfiles=dockerfiles)
 
     _write_matches_file(
         run_dir,
@@ -808,7 +822,7 @@ def start_past_version_match(
         )
 
     match_id = match.id
-    run_dir = _create_run_dir(match_id)
+    run_dir = _create_run_dir(match_id, dockerfiles=(test_bot.dockerfile,))
 
     _write_matches_file(
         run_dir,
