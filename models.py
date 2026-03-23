@@ -74,6 +74,14 @@ class CustomBot(models.Model):
         default=False,
         help_text="Enable past-version matches for this bot (requires source_path to point to a git repo)",
     )
+    archive_paths = models.JSONField(
+        default=list,
+        blank=True,
+        help_text=(
+            "Paths to extract from git history when testing against past versions. "
+            "E.g. ['src/', 'bot.py', 'config/']. If empty, the entire tree is archived."
+        ),
+    )
     symlink_mounts = models.JSONField(
         default=list,
         blank=True,

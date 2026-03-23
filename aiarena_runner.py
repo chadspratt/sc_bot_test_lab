@@ -808,7 +808,9 @@ def start_past_version_match(
 
     # Extract (or reuse) cached bot source for this commit
     cache_path = bot_versions.get_or_create_version_cache(
-        commit_hash, repo_path=test_bot.source_path or None,
+        commit_hash,
+        repo_path=test_bot.source_path or None,
+        archive_paths=test_bot.archive_paths or None,
     )
 
     # Create overlay directory with aiarena-specific files

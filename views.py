@@ -1846,10 +1846,14 @@ def create_custom_bot(request):
     is_test_subject = request.POST.get('is_test_subject') == 'on'
     source_path = request.POST.get('source_path', '').strip()
     enable_version_history = request.POST.get('enable_version_history') == 'on'
+    archive_paths_raw = request.POST.get('archive_paths', '').strip()
     dockerfile = request.POST.get('dockerfile', '').strip()
     env_file = request.POST.get('env_file', '').strip()
     bot_module = request.POST.get('bot_module', '').strip()
     bot_class = request.POST.get('bot_class', '').strip()
+
+    # Parse archive_paths: comma-separated list of paths
+    archive_paths = [p.strip() for p in archive_paths_raw.split(',') if p.strip()] if archive_paths_raw else []
 
     if not name:
         messages.error(request, 'Bot name is required.')
@@ -1883,6 +1887,7 @@ def create_custom_bot(request):
             is_test_subject=is_test_subject,
             source_path=source_path,
             enable_version_history=enable_version_history,
+            archive_paths=archive_paths,
             symlink_mounts=symlink_mounts,
             dockerfile=dockerfile,
             env_file=env_file,
@@ -1944,6 +1949,8 @@ def update_custom_bot_test_subject(request, bot_id):
         env_file = request.POST.get('env_file', '').strip()
         bot_module = request.POST.get('bot_module', '').strip()
         bot_class = request.POST.get('bot_class', '').strip()
+        archive_paths_raw = request.POST.get('archive_paths', '').strip()
+        archive_paths = [p.strip() for p in archive_paths_raw.split(',') if p.strip()] if archive_paths_raw else []
 
         if source_path and not os.path.isdir(source_path):
             return JsonResponse({'status': 'error', 'message': f'Source path not found: {source_path}'}, status=400)
@@ -1953,22 +1960,24 @@ def update_custom_bot_test_subject(request, bot_id):
         bot.is_test_subject = True
         bot.source_path = source_path
         bot.enable_version_history = enable_version_history
+        bot.archive_paths = archive_paths
         bot.dockerfile = dockerfile
         bot.env_file = env_file
         bot.bot_module = bot_module
         bot.bot_class = bot_class
         bot.symlink_mounts = symlink_mounts
-        update_fields += ['source_path', 'enable_version_history', 'dockerfile', 'env_file', 'bot_module', 'bot_class', 'symlink_mounts']
+        update_fields += ['source_path', 'enable_version_history', 'archive_paths', 'dockerfile', 'env_file', 'bot_module', 'bot_class', 'symlink_mounts']
     else:
         bot.is_test_subject = False
         bot.source_path = ''
         bot.enable_version_history = False
+        bot.archive_paths = []
         bot.dockerfile = ''
         bot.env_file = ''
         bot.bot_module = ''
         bot.bot_class = ''
         bot.symlink_mounts = []
-        update_fields += ['source_path', 'enable_version_history', 'dockerfile', 'env_file', 'bot_module', 'bot_class', 'symlink_mounts']
+        update_fields += ['source_path', 'enable_version_history', 'archive_paths', 'dockerfile', 'env_file', 'bot_module', 'bot_class', 'symlink_mounts']
 
     bot.save(update_fields=update_fields)
     return JsonResponse({'status': 'ok'})

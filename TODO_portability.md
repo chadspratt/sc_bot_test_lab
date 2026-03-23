@@ -144,18 +144,18 @@ every run directory even when it isn't used.
 
 Remove BotTato-specific defaults; use CustomBot fields instead.
 
-- [ ] Remove `BOT_REPO_DIR` constant (hardcoded to `bot/`).
+- [x] Remove `BOT_REPO_DIR` constant (hardcoded to `bot/`).
       `get_recent_bot_commits` and `get_or_create_version_cache` already
       accept `repo_path` — callers should always pass `test_bot.source_path`.
-- [ ] Remove `BOT_ARCHIVE_PATHS_REQUIRED` and `BOT_ARCHIVE_PATHS_OPTIONAL`
+- [x] Remove `BOT_ARCHIVE_PATHS_REQUIRED` and `BOT_ARCHIVE_PATHS_OPTIONAL`
       constants. Replace with a **CustomBot field** (e.g. `archive_paths` JSON)
       that lists which paths to extract from git history for past-version tests.
       Explanation in help_text: "Paths to extract from git history when testing
       against past versions. E.g. `['src/', 'bot.py', 'config/']`."
-- [ ] Remove the `is_bottato` branching in `get_or_create_version_cache`.
+- [x] Remove the `is_bottato` branching in `get_or_create_version_cache`.
       If `archive_paths` is configured, use them; otherwise archive the
       entire tree (the current generic fallback).
-- [ ] Merge the concept of required/optional archive paths into a single
+- [x] Merge the concept of required/optional archive paths into a single
       list — the optional paths were only needed because BotTato's repo
       structure changed over time. A single list is simpler.
 
