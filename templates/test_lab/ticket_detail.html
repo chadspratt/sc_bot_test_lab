@@ -148,10 +148,6 @@
         <div class="form-group">
             <label for="prompt_template_id">Prompt Template</label>
             <select id="prompt_template_id" name="prompt_template_id">
-                <option value="">-- None --</option>
-                {% for tmpl in prompt_templates %}
-                <option value="{{ tmpl.id }}" {% if ticket.prompt_template_id == tmpl.id %}selected{% endif %}>{{ tmpl.name }}</option>
-                {% endfor %}
             </select>
         </div>
         <div class="form-group">
@@ -200,6 +196,37 @@
 {% endblock %}
 
 {% block extra_js %}
+<script>
+(function() {
+    var allTemplates = {{ templates_json|safe }};
+    var botId = {{ ticket.test_bot_id }};
+    var currentTemplateId = {{ ticket.prompt_template_id|default:"null" }};
+    var sel = document.getElementById('prompt_template_id');
+
+    // Templates registered for this bot
+    var botTemplates = allTemplates.filter(function(t) {
+        return t.bot_ids.indexOf(botId) !== -1;
+    });
+    // If none registered, fall back to generic templates (no bots assigned)
+    if (botTemplates.length === 0) {
+        botTemplates = allTemplates.filter(function(t) {
+            return t.bot_ids.length === 0;
+        });
+    }
+
+    if (botTemplates.length === 0) {
+        sel.innerHTML = '<option value="">-- No templates available --</option>';
+    } else {
+        botTemplates.forEach(function(t) {
+            var opt = document.createElement('option');
+            opt.value = t.id;
+            opt.textContent = t.name;
+            if (t.id === currentTemplateId) opt.selected = true;
+            sel.appendChild(opt);
+        });
+    }
+})();
+</script>
 {% if diff_text %}
 <script>
 (function() {

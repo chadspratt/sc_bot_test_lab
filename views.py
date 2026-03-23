@@ -2307,6 +2307,15 @@ def ticket_detail_page(request, ticket_id):
 
     test_suites = TestSuite.objects.all().order_by('name')
     prompt_templates = PromptTemplate.objects.prefetch_related('bots').order_by('name')
+    import json as _json
+    templates_json = _json.dumps([
+        {
+            'id': t.id,
+            'name': t.name,
+            'bot_ids': list(t.bots.values_list('id', flat=True)),
+        }
+        for t in prompt_templates
+    ])
 
     return render(request, 'test_lab/ticket_detail.html', {
         'active_page': 'tickets',
@@ -2314,6 +2323,7 @@ def ticket_detail_page(request, ticket_id):
         'test_groups': test_groups,
         'test_suites': test_suites,
         'prompt_templates': prompt_templates,
+        'templates_json': templates_json,
         'diff_text': diff_text,
         'statuses': Ticket.Status,
     })
