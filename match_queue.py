@@ -195,14 +195,11 @@ def _rebuild_launcher(match) -> Callable[[], None] | None:
         return _launch_aiarena
 
     # --- Legacy matches (all use a single docker-compose.yml) ---
-    from .views import DOCKER_COMPOSE_PATH, LOGS_DIR
-    os.makedirs(LOGS_DIR, exist_ok=True)
+    from .views import DOCKER_COMPOSE_PATH, _get_logs_dir
+    os.makedirs(_get_logs_dir(), exist_ok=True)
 
     if match.replay_test_id:
         return _rebuild_replay_test_launcher(match)
-
-    if match.opponent_bot_id and match.opponent_bot and not match.opponent_bot.is_aiarena:
-        return _rebuild_legacy_custom_bot_launcher(match)
 
     # Computer AI match
     if match.opponent_race and match.opponent_build:
@@ -236,13 +233,13 @@ def _add_source_override(command: list[str], match) -> None:
 
 def _rebuild_legacy_ai_launcher(match) -> Callable[[], None]:
     """Rebuild launcher for a legacy computer-AI match."""
-    from .views import DOCKER_COMPOSE_PATH, LOGS_DIR
+    from .views import DOCKER_COMPOSE_PATH, _get_logs_dir
 
     match_id = match.id
     race = match.opponent_race.lower()
     build = match.opponent_build.lower()
     difficulty = match.opponent_difficulty or 'CheatInsane'
-    log_file_path = os.path.join(LOGS_DIR, f'{match_id}_{race}_{build}.log')
+    log_file_path = os.path.join(_get_logs_dir(), f'{match_id}_{race}_{build}.log')
 
     command = [
         'docker', 'compose', '-p', f'match_{match_id}',
@@ -251,42 +248,20 @@ def _rebuild_legacy_ai_launcher(match) -> Callable[[], None]:
         '-e', f'BUILD={build}',
         '-e', f'MATCH_ID={match_id}',
         '-e', f'DIFFICULTY={difficulty}',
+        '-e', f'MAP_NAME={match.map_name}',
     ]
     _add_source_override(command, match)
+    from .views import _env_file_args
+    command += _env_file_args(match.test_bot)
     command.append('bot')
 
     logger.info('Match %d: rebuilding legacy AI launcher (%s %s)', match_id, race, build)
     return _make_legacy_launcher(match_id, command, DOCKER_COMPOSE_PATH, log_file_path)
 
 
-def _rebuild_legacy_custom_bot_launcher(match) -> Callable[[], None]:
-    """Rebuild launcher for a legacy (non-aiarena) custom bot match."""
-    from .views import DOCKER_COMPOSE_PATH, LOGS_DIR
-
-    match_id = match.id
-    bot = match.opponent_bot
-    log_file_path = os.path.join(LOGS_DIR, f'{match_id}_vs_{bot.name}.log')
-
-    command = [
-        'docker', 'compose', '-p', f'match_{match_id}',
-        'run', '--rm', '--no-deps',
-        '-e', f'OPPONENT_FILE={bot.bot_file}',
-        '-e', f'OPPONENT_CLASS={bot.bot_class_name}',
-        '-e', f'OPPONENT_RACE={bot.race.lower()}',
-        '-e', f'MATCH_ID={match_id}',
-    ]
-    if bot.is_external and bot.bot_directory:
-        command += ['-e', f'EXTERNAL_BOT_DIR={bot.bot_directory}']
-    _add_source_override(command, match)
-    command += ['bot', 'bash', '/root/runner/run_docker_bot_vs_bot.sh']
-
-    logger.info('Match %d: rebuilding legacy custom-bot launcher (vs %s)', match_id, bot.name)
-    return _make_legacy_launcher(match_id, command, DOCKER_COMPOSE_PATH, log_file_path)
-
-
 def _rebuild_replay_test_launcher(match) -> Callable[[], None] | None:
     """Rebuild launcher for a replay-test match."""
-    from .views import DOCKER_COMPOSE_PATH, LOGS_DIR
+    from .views import DOCKER_COMPOSE_PATH, _get_logs_dir
 
     match_id = match.id
     rt = match.replay_test
@@ -306,7 +281,7 @@ def _rebuild_replay_test_launcher(match) -> Callable[[], None] | None:
     rt_race = rt.opponent_race or 'Random'
     rt_bot_player_id = rt.bot_player_id or 1
 
-    log_file_path = os.path.join(LOGS_DIR, f'{match_id}_replay_test.log')
+    log_file_path = os.path.join(_get_logs_dir(), f'{match_id}_replay_test.log')
 
     command = [
         'docker', 'compose', '-p', f'match_{match_id}',
@@ -327,6 +302,8 @@ def _rebuild_replay_test_launcher(match) -> Callable[[], None] | None:
         command += ['-e', f'REPLAY_DURATION={duration_seconds:.1f}']
 
     _add_source_override(command, match)
+    from .views import _env_file_args
+    command += _env_file_args(match.test_bot)
     command += ['bot', 'bash', '/root/runner/run_docker_continue_replay.sh']
 
     logger.info('Match %d: rebuilding replay-test launcher (%s)', match_id, rt.name)

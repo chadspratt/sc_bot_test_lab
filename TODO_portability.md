@@ -62,16 +62,16 @@ instead **require** `test_bot` to be provided.
 
 `Match.test_bot` should always be set. Remove `BotTato` string fallbacks.
 
-- [ ] `models.py` — `Match.opponent_version_bot_name`: remove `'BotTato'` fallback
+- [x] `models.py` — `Match.opponent_version_bot_name`: remove `'BotTato'` fallback
       (test_bot will always exist).
-- [ ] `models.py` — `Match.test_bot_name`: remove `'BotTato'` fallback.
-- [ ] `models.py` — `Match.test_bot_directory`: remove `'BotTato'` fallback.
-- [ ] `models.py` — `Match.__str__`: remove hardcoded `vs BotTato@` case.
-- [ ] `views.py` — all `test_bot.name if test_bot else 'BotTato'` patterns:
+- [x] `models.py` — `Match.test_bot_name`: remove `'BotTato'` fallback.
+- [x] `models.py` — `Match.test_bot_directory`: remove `'BotTato'` fallback.
+- [x] `models.py` — `Match.__str__`: remove hardcoded `vs BotTato@` case.
+- [x] `views.py` — all `test_bot.name if test_bot else 'BotTato'` patterns:
       simplify to `test_bot.name` (lines 814, 1810, 2694, etc.).
-- [ ] Make `Match.test_bot` non-nullable in the model (remove `null=True, blank=True`).
+- [x] Make `Match.test_bot` non-nullable in the model (remove `null=True, blank=True`).
       Migration needed — backfill existing NULL rows first.
-- [ ] Update `models.py` help_text that mentions "NULL = BotTato (legacy)".
+- [x] Update `models.py` help_text that mentions "NULL = BotTato (legacy)".
 
 ---
 
@@ -80,9 +80,9 @@ instead **require** `test_bot` to be provided.
 The legacy single-container Bot-vs-Bot runner is superseded by the aiarena
 infrastructure.
 
-- [ ] Delete `runner/run_vs_bot.py`.
-- [ ] Delete `runner/run_docker_bot_vs_bot.sh`.
-- [ ] Remove any references in views.py that launch `run_docker_bot_vs_bot.sh`
+- [x] Delete `runner/run_vs_bot.py`.
+- [x] Delete `runner/run_docker_bot_vs_bot.sh`.
+- [x] Remove any references in views.py that launch `run_docker_bot_vs_bot.sh`
       (the legacy path in `start_custom_bot_match`).
 
 ---

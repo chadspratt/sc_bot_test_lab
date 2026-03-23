@@ -634,50 +634,17 @@ def start_custom_bot_match(
     match.save()
     match_id = match.id
 
-    if custom_bot.is_aiarena:
-        # Use aiarena infrastructure (supports any language/framework)
-        aiarena_runner.start_aiarena_match(
-            match, custom_bot, test_bot=test_bot,
-            source_override=source_override,
+    if not custom_bot.is_aiarena:
+        raise ValueError(
+            f"Custom bot '{custom_bot.name}' is not configured as an aiarena bot. "
+            "The legacy single-container bot-vs-bot runner has been removed. "
+            "Please set the bot's type to 'aiarena' in the admin panel."
         )
-        return match_id
 
-    # Legacy path: python_sc2 / external_python bots
-    compose_file = os.path.join(DOCKER_COMPOSE_PATH, 'docker-compose.yml')
-    if not os.path.exists(compose_file):
-        raise FileNotFoundError(f'docker-compose.yml not found at: {compose_file}')
-
-    _write_legacy_env()
-    logs_dir = _get_logs_dir()
-    os.makedirs(logs_dir, exist_ok=True)
-
-    log_file = os.path.join(logs_dir, f"{match_id}_vs_{custom_bot.name}.log")
-
-    command = [
-        'docker', 'compose', '-p', f'match_{match_id}',
-        'run', '--rm', '--no-deps',
-        '-e', f'OPPONENT_FILE={custom_bot.bot_file}',
-        '-e', f'OPPONENT_CLASS={custom_bot.bot_class_name}',
-        '-e', f'OPPONENT_RACE={custom_bot.race.lower()}',
-        '-e', f'MAP_NAME={match.map_name}',
-        '-e', f'MATCH_ID={match_id}',
-    ]
-
-    if custom_bot.is_external and custom_bot.bot_directory:
-        command += ['-e', f'EXTERNAL_BOT_DIR={custom_bot.bot_directory}']
-
-    if source_override:
-        override_src = source_override.replace('\\', '/')
-        command += ['-v', f'{override_src}:/root/bot']
-
-    command += _env_file_args(test_bot)
-    command += [
-        'bot',
-        'bash', '/root/runner/run_docker_bot_vs_bot.sh',
-    ]
-
-    _launch_legacy_match(match_id, command, DOCKER_COMPOSE_PATH, log_file)
-
+    aiarena_runner.start_aiarena_match(
+        match, custom_bot, test_bot=test_bot,
+        source_override=source_override,
+    )
     return match_id
 
 
