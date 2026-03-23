@@ -36,7 +36,7 @@
             </div>
             <div class="form-group">
                 <label for="test_bot_id">Test Bot</label>
-                <select id="test_bot_id" name="test_bot_id" required>
+                <select id="test_bot_id" name="test_bot_id" required onchange="updateTemplateOptions()">
                     <option value="">-- Select bot --</option>
                     {% for bot in test_bots %}
                     <option value="{{ bot.id }}">{{ bot.name }}</option>
@@ -50,6 +50,12 @@
                     {% for suite in test_suites %}
                     <option value="{{ suite.id }}">{{ suite.name }}</option>
                     {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="prompt_template_id">Prompt Template</label>
+                <select id="prompt_template_id" name="prompt_template_id">
+                    <option value="">-- Select a bot first --</option>
                 </select>
             </div>
             <div class="form-group">
@@ -91,4 +97,45 @@
     <p style="margin-top: 20px; color: #666;">No tickets yet. Create one above.</p>
     {% endif %}
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    var _allTemplates = {{ templates_json|safe }};
+
+    function updateTemplateOptions() {
+        var botId = parseInt(document.getElementById('test_bot_id').value);
+        var sel = document.getElementById('prompt_template_id');
+        sel.innerHTML = '';
+
+        if (!botId) {
+            sel.innerHTML = '<option value="">-- Select a bot first --</option>';
+            return;
+        }
+
+        // Templates registered for this bot
+        var botTemplates = _allTemplates.filter(function(t) {
+            return t.bot_ids.indexOf(botId) !== -1;
+        });
+
+        // If bot has no registered templates, show generic (no bots assigned)
+        if (botTemplates.length === 0) {
+            botTemplates = _allTemplates.filter(function(t) {
+                return t.bot_ids.length === 0;
+            });
+        }
+
+        if (botTemplates.length === 0) {
+            sel.innerHTML = '<option value="">-- No templates available --</option>';
+            return;
+        }
+
+        botTemplates.forEach(function(t) {
+            var opt = document.createElement('option');
+            opt.value = t.id;
+            opt.textContent = t.name;
+            sel.appendChild(opt);
+        });
+    }
+</script>
 {% endblock %}

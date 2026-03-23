@@ -34,6 +34,7 @@ td { text-align: left; }
     <div class="tab-bar">
         <a data-tab="custom-bots">Custom Bots</a>
         <a data-tab="test-suites">Test Suites</a>
+        <a data-tab="prompt-templates">Prompt Templates</a>
         <a data-tab="system">System</a>
     </div>
 
@@ -505,6 +506,95 @@ td { text-align: left; }
             </form>
         </div>
     </div>
+
+    {# ==================== PROMPT TEMPLATES TAB ==================== #}
+    <div id="prompt-templates" class="tab-panel">
+        <div class="utility-section">
+            <h3>Prompt Templates</h3>
+            <p>
+                Template content is stored as <code>.md</code> files in
+                <code>test_lab/prompt_templates/</code>. Register a template to specific bots,
+                or leave unregistered to use a generic default. The default template has important details for
+                how to make the changes in a way that integrates with this testing framework. The Bottato
+                template shows an example of adding bot-specific instructions.
+            </p>
+            <p style="font-size: 12px; color: #666;">
+                Available placeholders: <code>{ticket_id}</code>, <code>{title}</code>,
+                <code>{branch_name}</code>, <code>{bot_name}</code>, <code>{source_path}</code>,
+                <code>{description}</code>, <code>{focus_files}</code>.
+                Use <code>{&#8203;{</code> and <code>}}</code> for literal braces (e.g. in JSON).
+            </p>
+
+            {% if prompt_templates %}
+            <table style="width: auto; border-collapse: collapse; margin-bottom: 15px;">
+                <thead>
+                    <tr>
+                        <th style="border: 1px solid #ddd; padding: 6px 10px; text-align: left;">Name</th>
+                        <th style="border: 1px solid #ddd; padding: 6px 10px; text-align: left;">File</th>
+                        <th style="border: 1px solid #ddd; padding: 6px 10px; text-align: left;">Registered Bots</th>
+                        <th style="border: 1px solid #ddd; padding: 6px 10px; text-align: left;">Created</th>
+                        <th style="border: 1px solid #ddd; padding: 6px 10px;"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for tmpl in prompt_templates %}
+                    <tr>
+                        <td style="border: 1px solid #ddd; padding: 6px 10px;">
+                            <span class="ts-edit-btn" onclick="openEditTemplateModal({{ tmpl.id }})">{{ tmpl.name }}</span>
+                        </td>
+                        <td style="border: 1px solid #ddd; padding: 6px 10px; font-family: monospace; font-size: 12px;">{{ tmpl.filename }}</td>
+                        <td style="border: 1px solid #ddd; padding: 6px 10px;">
+                            {% for bot in tmpl.bots.all %}{{ bot.name }}{% if not forloop.last %}, {% endif %}{% empty %}<em style="color: #999;">Generic (default)</em>{% endfor %}
+                        </td>
+                        <td style="border: 1px solid #ddd; padding: 6px 10px; font-size: 12px;">{{ tmpl.created_at|date:"M d, Y H:i" }}</td>
+                        <td style="border: 1px solid #ddd; padding: 6px 10px;">
+                            <button type="button" onclick="openEditTemplateModal({{ tmpl.id }})" style="background: #007bff; color: white; border: none; padding: 4px 8px; border-radius: 3px; cursor: pointer; font-size: 12px; margin-right: 4px;">Edit</button>
+                            <form method="post" action="{% url 'delete_prompt_template' tmpl.id %}" style="display: inline;">
+                                {% csrf_token %}
+                                <button type="submit" onclick="return confirm('Delete template &quot;{{ tmpl.name }}&quot;? (The file on disk will not be removed.)')" style="background: #dc3545; color: white; border: none; padding: 4px 8px; border-radius: 3px; cursor: pointer; font-size: 12px;">Delete</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% endif %}
+
+            <details>
+                <summary style="cursor: pointer; font-weight: bold; margin-bottom: 10px;">Create New Template</summary>
+                <form method="post" action="{% url 'create_prompt_template' %}" style="margin-top: 10px;">
+                    {% csrf_token %}
+                    <div style="margin-bottom: 10px;">
+                        <label for="pt_name">Name:</label><br>
+                        <input type="text" name="name" id="pt_name" required style="padding: 4px 8px; width: 250px;">
+                    </div>
+                    <div style="margin-bottom: 10px;">
+                        <label for="pt_filename">Filename:</label><br>
+                        <input type="text" name="filename" id="pt_filename" required style="padding: 4px 8px; width: 250px;" placeholder="e.g. my_bot.md">
+                        <small style="color: #666; display: block; margin-top: 2px;">Filename in <code>test_lab/prompt_templates/</code>. Will add <code>.md</code> if omitted.</small>
+                    </div>
+                    <div style="margin-bottom: 10px;">
+                        <label style="font-weight: bold;">Register for Bots:</label><br>
+                        <small style="color: #666;">Leave all unchecked to make this a generic template.</small><br>
+                        {% for bot in test_subject_bots %}
+                        <label style="display: block; margin-left: 10px;">
+                            <input type="checkbox" name="bot_ids" value="{{ bot.id }}">
+                            {{ bot.name }}
+                        </label>
+                        {% empty %}
+                        <em>No test subject bots registered.</em>
+                        {% endfor %}
+                    </div>
+                    <div style="margin-bottom: 10px;">
+                        <label for="pt_content">Template Content <small style="color: #666;">(optional — leave empty if the file already exists on disk)</small>:</label><br>
+                        <textarea name="template_content" id="pt_content" rows="20"
+                            style="width: 100%; font-family: monospace; font-size: 13px; padding: 8px; box-sizing: border-box;"></textarea>
+                    </div>
+                    <button type="submit" class="utility-btn">Create Template</button>
+                </form>
+            </details>
+        </div>
+    </div>
 </div>
 
 {# ==================== EDIT TEST SUITE MODAL ==================== #}
@@ -597,6 +687,45 @@ td { text-align: left; }
             <button class="btn-cancel" onclick="closeTestSubjectModal()">Cancel</button>
             <button class="btn btn-primary" onclick="saveTestSubject()">Save</button>
         </div>
+    </div>
+</div>
+
+{# ==================== EDIT PROMPT TEMPLATE MODAL ==================== #}
+<div class="modal-overlay" id="edit-template-modal">
+    <div class="modal-box" style="width: 700px;">
+        <h3>Edit Template — <span id="edit-template-modal-title"></span></h3>
+        <form method="post" id="edit-template-form">
+            {% csrf_token %}
+            <div class="form-group">
+                <label for="edit-template-name">Name:</label>
+                <input type="text" name="name" id="edit-template-name" required>
+            </div>
+            <div class="form-group">
+                <label>File:</label>
+                <code id="edit-template-filename" style="display: block; padding: 4px 0; color: #555;"></code>
+            </div>
+            <div class="form-group">
+                <label style="font-weight: bold;">Register for Bots:</label>
+                <small style="color: #666;">Leave all unchecked for a generic template.</small>
+                {% for bot in test_subject_bots %}
+                <label style="display: block; margin-left: 10px;">
+                    <input type="checkbox" name="bot_ids" value="{{ bot.id }}" class="edit-template-bot-cb">
+                    {{ bot.name }}
+                </label>
+                {% empty %}
+                <em>No test subject bots registered.</em>
+                {% endfor %}
+            </div>
+            <div class="form-group">
+                <label for="edit-template-content">Template Content <small style="color: #666;">(loaded from file on disk)</small>:</label>
+                <textarea name="template_content" id="edit-template-content" rows="20"
+                    style="width: 100%; font-family: monospace; font-size: 13px; padding: 8px; box-sizing: border-box;"></textarea>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn-cancel" onclick="closeEditTemplateModal()">Cancel</button>
+                <button type="submit" class="btn btn-primary">Save</button>
+            </div>
+        </form>
     </div>
 </div>
 
@@ -815,6 +944,43 @@ td { text-align: left; }
     // Close modal on overlay click
     document.getElementById('test-subject-modal').addEventListener('click', function(e) {
         if (e.target === this) closeTestSubjectModal();
+    });
+
+    // --- Prompt Template edit modal ---
+    var _templateData = {{ prompt_templates_json|safe }};
+    var _templateById = {};
+    _templateData.forEach(function(t) { _templateById[t.id] = t; });
+
+    function openEditTemplateModal(templateId) {
+        var tmpl = _templateById[templateId];
+        if (!tmpl) return;
+        document.getElementById('edit-template-modal-title').textContent = tmpl.name;
+        document.getElementById('edit-template-name').value = tmpl.name;
+        document.getElementById('edit-template-filename').textContent = tmpl.filename;
+        document.getElementById('edit-template-content').value = '(loading...)';
+        document.getElementById('edit-template-form').action =
+            '{% url "update_prompt_template" 0 %}'.replace('/0/', '/' + templateId + '/');
+        document.querySelectorAll('.edit-template-bot-cb').forEach(function(cb) {
+            cb.checked = tmpl.bot_ids.indexOf(parseInt(cb.value)) !== -1;
+        });
+        document.getElementById('edit-template-modal').classList.add('active');
+        // Fetch file content from API
+        fetch('{% url "get_template_file_content" %}?filename=' + encodeURIComponent(tmpl.filename))
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                document.getElementById('edit-template-content').value = data.content || '';
+            })
+            .catch(function() {
+                document.getElementById('edit-template-content').value = '(failed to load file content)';
+            });
+    }
+
+    function closeEditTemplateModal() {
+        document.getElementById('edit-template-modal').classList.remove('active');
+    }
+
+    document.getElementById('edit-template-modal').addEventListener('click', function(e) {
+        if (e.target === this) closeEditTemplateModal();
     });
 </script>
 {% endblock %}

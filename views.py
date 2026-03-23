@@ -19,6 +19,7 @@ from .models import (
     CustomBot,
     Match,
     MatchEvent,
+    PromptTemplate,
     ReplayTest,
     SystemConfig,
     TestGroup,
@@ -1378,6 +1379,17 @@ def config_page(request):
     replay_tests_list = ReplayTest.objects.prefetch_related('test_suites').order_by('-created_at')
     all_replay_tests = ReplayTest.objects.order_by('name')
     system_config = SystemConfig.load()
+    prompt_templates = PromptTemplate.objects.prefetch_related('bots').order_by('name')
+    test_subject_bots = CustomBot.objects.filter(is_test_subject=True).order_by('name')
+    prompt_templates_json = _json.dumps([
+        {
+            'id': t.id,
+            'name': t.name,
+            'filename': t.filename,
+            'bot_ids': list(t.bots.values_list('id', flat=True)),
+        }
+        for t in prompt_templates
+    ])
 
     return render(request, 'test_lab/config.html', {
         'active_page': 'config',
@@ -1390,6 +1402,9 @@ def config_page(request):
         'replay_tests': replay_tests_list,
         'all_replay_tests': all_replay_tests,
         'system_config': system_config,
+        'prompt_templates': prompt_templates,
+        'prompt_templates_json': prompt_templates_json,
+        'test_subject_bots': test_subject_bots,
     })
 
 
@@ -2237,14 +2252,27 @@ def delete_replay_test(request, test_id):
 
 def tickets_page(request):
     """List all tickets."""
-    tickets = Ticket.objects.select_related('test_bot', 'test_suite').all()
+    import json as _json
+    tickets = Ticket.objects.select_related('test_bot', 'test_suite', 'prompt_template').all()
     test_bots = CustomBot.objects.filter(is_test_subject=True)
     test_suites = TestSuite.objects.all()
+    prompt_templates = PromptTemplate.objects.prefetch_related('bots').order_by('name')
+    # Build JSON map: bot_id -> [template ids], and '' -> generic template ids
+    templates_json = _json.dumps([
+        {
+            'id': t.id,
+            'name': t.name,
+            'bot_ids': list(t.bots.values_list('id', flat=True)),
+        }
+        for t in prompt_templates
+    ])
     return render(request, 'test_lab/tickets.html', {
         'active_page': 'tickets',
         'tickets': tickets,
         'test_bots': test_bots,
         'test_suites': test_suites,
+        'prompt_templates': prompt_templates,
+        'templates_json': templates_json,
     })
 
 
@@ -2278,12 +2306,14 @@ def ticket_detail_page(request, ticket_id):
             pass
 
     test_suites = TestSuite.objects.all().order_by('name')
+    prompt_templates = PromptTemplate.objects.prefetch_related('bots').order_by('name')
 
     return render(request, 'test_lab/ticket_detail.html', {
         'active_page': 'tickets',
         'ticket': ticket,
         'test_groups': test_groups,
         'test_suites': test_suites,
+        'prompt_templates': prompt_templates,
         'diff_text': diff_text,
         'statuses': Ticket.Status,
     })
@@ -2317,11 +2347,17 @@ def create_ticket(request):
     if test_suite is None and test_bot.default_test_suite:
         test_suite = test_bot.default_test_suite
 
+    prompt_template = None
+    prompt_template_id = request.POST.get('prompt_template_id')
+    if prompt_template_id:
+        prompt_template = PromptTemplate.objects.filter(id=prompt_template_id).first()
+
     ticket = Ticket.objects.create(
         title=title,
         description=description,
         test_bot=test_bot,
         test_suite=test_suite,
+        prompt_template=prompt_template,
         context_files=context_files,
     )
     # Auto-generate the branch name now that we have the ID
@@ -2347,6 +2383,12 @@ def update_ticket(request, ticket_id):
     test_suite_id = request.POST.get('test_suite_id')
     if test_suite_id:
         ticket.test_suite = TestSuite.objects.filter(id=test_suite_id).first()
+
+    prompt_template_id = request.POST.get('prompt_template_id')
+    if prompt_template_id:
+        ticket.prompt_template = PromptTemplate.objects.filter(id=prompt_template_id).first()
+    elif prompt_template_id == '':
+        ticket.prompt_template = None
 
     ticket.save()
     messages.success(request, f'Ticket #{ticket.id} updated.')
@@ -2419,7 +2461,9 @@ def update_ticket_status(request, ticket_id):
 def generate_ticket_prompt(request, ticket_id):
     """Generate the .prompt.md file and mark ticket as ready."""
     try:
-        ticket = Ticket.objects.select_related('test_bot', 'test_suite').get(id=ticket_id)
+        ticket = Ticket.objects.select_related(
+            'test_bot', 'test_suite', 'prompt_template',
+        ).get(id=ticket_id)
     except Ticket.DoesNotExist:
         raise Http404('Ticket not found')
 
@@ -2435,6 +2479,119 @@ def generate_ticket_prompt(request, ticket_id):
         f'— invoke it in VS Code chat with /ticket-{ticket.id}',
     )
     return redirect('ticket_detail', ticket_id=ticket.id)
+
+
+# ── Prompt Template CRUD ──────────────────────────────────────────────
+
+@require_POST
+def create_prompt_template(request):
+    """Create a new prompt template (DB record + file on disk)."""
+    from .prompt_generator import TEMPLATES_DIR
+    config_url = f"{reverse('config_page')}#prompt-templates"
+    name = request.POST.get('name', '').strip()
+    filename = request.POST.get('filename', '').strip()
+    template_content = request.POST.get('template_content', '').strip()
+
+    if not name:
+        messages.error(request, 'Template name is required.')
+        return redirect(config_url)
+
+    if not filename:
+        messages.error(request, 'Filename is required.')
+        return redirect(config_url)
+
+    if not filename.endswith('.md'):
+        filename += '.md'
+
+    if PromptTemplate.objects.filter(name=name).exists():
+        messages.error(request, f'A template named "{name}" already exists.')
+        return redirect(config_url)
+
+    if PromptTemplate.objects.filter(filename=filename).exists():
+        messages.error(request, f'A template with filename "{filename}" is already registered.')
+        return redirect(config_url)
+
+    # Write the file to disk
+    if template_content:
+        import os
+        os.makedirs(TEMPLATES_DIR, exist_ok=True)
+        filepath = os.path.join(TEMPLATES_DIR, filename)
+        with open(filepath, 'w', encoding='utf-8') as f:
+            f.write(template_content)
+
+    template = PromptTemplate.objects.create(name=name, filename=filename)
+    bot_ids = request.POST.getlist('bot_ids')
+    if bot_ids:
+        template.bots.set(bot_ids)
+
+    messages.success(request, f'Prompt template "{name}" created.')
+    return redirect(config_url)
+
+
+@require_POST
+def update_prompt_template(request, template_id):
+    """Update an existing prompt template (DB record + file on disk)."""
+    from .prompt_generator import TEMPLATES_DIR
+    config_url = f"{reverse('config_page')}#prompt-templates"
+    try:
+        template = PromptTemplate.objects.get(id=template_id)
+    except PromptTemplate.DoesNotExist:
+        messages.error(request, 'Template not found.')
+        return redirect(config_url)
+
+    name = request.POST.get('name', '').strip()
+    template_content = request.POST.get('template_content', '').strip()
+
+    if name and name != template.name:
+        if PromptTemplate.objects.filter(name=name).exclude(id=template_id).exists():
+            messages.error(request, f'A template named "{name}" already exists.')
+            return redirect(config_url)
+        template.name = name
+
+    template.save()
+
+    # Write updated content to file on disk
+    if template_content and template.filename:
+        import os
+        filepath = os.path.join(TEMPLATES_DIR, template.filename)
+        with open(filepath, 'w', encoding='utf-8') as f:
+            f.write(template_content)
+
+    bot_ids = request.POST.getlist('bot_ids')
+    template.bots.set(bot_ids)
+
+    messages.success(request, f'Prompt template "{template.name}" updated.')
+    return redirect(config_url)
+
+
+@require_POST
+def delete_prompt_template(request, template_id):
+    """Delete a prompt template."""
+    config_url = f"{reverse('config_page')}#prompt-templates"
+    try:
+        template = PromptTemplate.objects.get(id=template_id)
+    except PromptTemplate.DoesNotExist:
+        messages.error(request, 'Template not found.')
+        return redirect(config_url)
+
+    template_name = template.name
+    template.delete()
+    messages.success(request, f'Prompt template "{template_name}" deleted.')
+    return redirect(config_url)
+
+
+def get_template_file_content(request):
+    """API: return the content of a prompt template file."""
+    from .prompt_generator import read_template_file
+    filename = request.GET.get('filename', '')
+    if not filename:
+        return JsonResponse({'error': 'Missing filename'}, status=400)
+    # Prevent path traversal
+    basename = os.path.basename(filename)
+    content = read_template_file(basename)
+    if content is None:
+        return JsonResponse({'error': 'File not found', 'content': ''}, status=404)
+    return JsonResponse({'content': content})
 
 
 @require_POST

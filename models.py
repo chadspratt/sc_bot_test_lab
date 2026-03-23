@@ -341,6 +341,35 @@ class MatchEvent(models.Model):
         return f"Match {self.match.id} {self.type} Event at {self.game_timestamp}: {self.message}"
 
 
+class PromptTemplate(models.Model):
+    """Reusable prompt template for ticket-based agent work.
+
+    Template content is stored as .md files in test_lab/prompt_templates/.
+    This model tracks the filename and bot registrations.
+    """
+
+    class Meta:
+        db_table = 'prompt_template'
+
+    id = models.AutoField(primary_key=True)
+    name = models.CharField(max_length=200, unique=True)
+    filename = models.CharField(
+        max_length=200,
+        unique=True,
+        help_text="Filename (relative to test_lab/prompt_templates/) e.g. bottato.md",
+    )
+    bots = models.ManyToManyField(
+        CustomBot,
+        blank=True,
+        related_name='prompt_templates',
+        help_text="Bots this template is registered for. If empty, it is a generic/default template available to bots with no registered templates.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.name
+
+
 class Ticket(models.Model):
     """A unit of work describing a change to make to a bot."""
 
@@ -372,6 +401,11 @@ class Ticket(models.Model):
         TestSuite, on_delete=models.SET_NULL, null=True, blank=True,
         related_name='tickets',
         help_text="Which test suite to run when work is done",
+    )
+    prompt_template = models.ForeignKey(
+        'PromptTemplate', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='tickets',
+        help_text="Prompt template to use when generating the .prompt.md file",
     )
     context_files = models.TextField(
         blank=True, default='',

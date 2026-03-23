@@ -1,6 +1,7 @@
 """Generate .prompt.md files from Ticket data.
 
 No LLM API call is needed — this is pure string templating.
+Template content is read from files in test_lab/prompt_templates/.
 """
 
 from __future__ import annotations
@@ -11,68 +12,53 @@ PROMPTS_DIR = os.path.normpath(
     os.path.join(os.path.dirname(__file__), '..', '..', '..', '.github', 'prompts')
 )
 
-TICKET_PROMPT_TEMPLATE = """\
----
-description: "Ticket #{ticket_id}: {title}"
-agent: "ticket-worker"
-tools: [read, edit, search, execute]
----
+TEMPLATES_DIR = os.path.normpath(
+    os.path.join(os.path.dirname(__file__), 'prompt_templates')
+)
 
-## Ticket #{ticket_id} — {title}
+def read_template_file(filename: str) -> str | None:
+    """Read a template file from the prompt_templates directory."""
+    filepath = os.path.join(TEMPLATES_DIR, filename)
+    if not os.path.isfile(filepath):
+        return None
+    with open(filepath, 'r', encoding='utf-8') as f:
+        return f.read()
 
-### Branch Setup
-First, change to the bot's repository root:
-```
-cd {source_path}
-```
 
-Then create the worktree (this keeps the main checkout clean and allows
-multiple tickets to be worked on in parallel):
-```
-git worktree add worktrees/{branch_name} -b {branch_name}
-```
-If the branch already exists:
-```
-git worktree add worktrees/{branch_name} {branch_name}
-```
-
-Then **do all your work inside `{source_path}/worktrees/{branch_name}/`**.
-All file paths below are relative to that worktree directory.
-
-### Request
-**Bot:** {bot_name}
-
-{description}
-
-### Focus Files
-{focus_files}
-
-### Constraints
-- All imports from bottato use `from bottato.*` (never `from bot.bottato.*`)
-- All imports from python_sc2 use `from sc2.*` (never `from python_sc2.sc2.*`)
-- Do not modify files outside `bot/bottato/` unless necessary
-
-### When Finished
-1. Commit all changes to branch `{branch_name}` (inside the worktree)
-2. Trigger the test suite by running:
-   ```
-   curl -X POST http://localhost:8000/test_lab/api/trigger-ticket-tests/ \\
-     -H "Content-Type: application/json" \\
-     -d '{{"ticket_id": {ticket_id}}}'
-   ```
-3. Report what you changed and why
-"""
+def list_template_files() -> list[str]:
+    """List all .md files in the prompt_templates directory."""
+    if not os.path.isdir(TEMPLATES_DIR):
+        return []
+    return sorted(
+        f for f in os.listdir(TEMPLATES_DIR)
+        if f.endswith('.md') and os.path.isfile(os.path.join(TEMPLATES_DIR, f))
+    )
 
 
 def generate_prompt_content(ticket) -> str:
-    """Render prompt file content from a Ticket instance."""
+    """Render prompt file content from a Ticket instance.
+
+    Uses the ticket's associated prompt_template file if set,
+    otherwise falls back to the default.md template.
+    """
     if ticket.context_files.strip():
         files = [f.strip() for f in ticket.context_files.strip().splitlines() if f.strip()]
         focus_files = '\n'.join(f'- `{f}`' for f in files)
     else:
         focus_files = '(any relevant files — explore the codebase as needed)'
 
-    return TICKET_PROMPT_TEMPLATE.format(
+    # Load template from file
+    template = None
+    if ticket.prompt_template and ticket.prompt_template.filename:
+        template = read_template_file(ticket.prompt_template.filename)
+    if template is None:
+        template = read_template_file('default.md')
+    if template is None:
+        raise FileNotFoundError(
+            f"No template file found (tried '{getattr(ticket.prompt_template, 'filename', '')}' and 'default.md')"
+        )
+
+    return template.format(
         ticket_id=ticket.id,
         title=ticket.title,
         branch_name=ticket.branch_name,
