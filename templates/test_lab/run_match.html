@@ -282,7 +282,6 @@ tr:nth-child(even) { background-color: #f2f2f2; }
         <label for="test_bot_filter">Test Bot:</label>
         <select name="test_bot" id="test_bot_filter" onchange="this.form.submit()">
             <option value="">All</option>
-            <option value="bottato" {% if selected_test_bot == 'bottato' %}selected{% endif %}>BotTato (legacy)</option>
             {% for bot in test_subject_bots %}
             <option value="{{ bot.id }}" {% if selected_test_bot == bot.id|stringformat:"d" %}selected{% endif %}>{{ bot.name }}</option>
             {% endfor %}

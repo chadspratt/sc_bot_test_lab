@@ -185,16 +185,16 @@ for the Custom page.
 
 ## 11. Clean up BotTato references in field descriptions and templates
 
-- [ ] `models.py` — `CustomBot.dockerfile` help_text: change
+- [x] `models.py` — `CustomBot.dockerfile` help_text: change
       "e.g. Dockerfile.bottato" → "e.g. Dockerfile.mybot".
-- [ ] `models.py` — `Match.test_bot` help_text: remove "NULL = BotTato (legacy)".
-- [ ] `models.py` — `PromptTemplate.filename` help_text: change
+- [x] `models.py` — `Match.test_bot` help_text: remove "NULL = BotTato (legacy)".
+- [x] `models.py` — `PromptTemplate.filename` help_text: change
       "e.g. bottato.md" → "e.g. mybot.md".
-- [ ] `run_match.html` — remove the hardcoded
+- [x] `run_match.html` — remove the hardcoded
       `<option value="bottato">BotTato (legacy)</option>` from the test bot dropdown.
-- [ ] `run_match.html` — change "BotTato takes over" wording to generic
+- [x] `run_match.html` — change "BotTato takes over" wording to generic
       "test bot takes over" (lines 196, 242, 255).
-- [ ] `run_match.html` — remove `<option value="">BotTato (default)</option>`;
+- [x] `run_match.html` — remove `<option value="">BotTato (default)</option>`;
       the dropdown should only list registered test-subject bots.
 
 **Keep as-is** (example/placeholder text that's fine for illustration):

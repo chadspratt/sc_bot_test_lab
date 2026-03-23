@@ -83,7 +83,7 @@ class CustomBot(models.Model):
         max_length=100,
         blank=True,
         default='',
-        help_text="Custom Dockerfile (relative to test_lab/aiarena/) that builds an image with extra dependencies pre-installed, e.g. Dockerfile.bottato. Saves time when running this bot repeatedly by avoiding per-match installs.",
+        help_text="Custom Dockerfile (relative to test_lab/aiarena/) that builds an image with extra dependencies pre-installed, e.g. Dockerfile.mybot. Saves time when running this bot repeatedly by avoiding per-match installs.",
     )
     env_file = models.CharField(
         max_length=500,
@@ -227,7 +227,7 @@ class Match(models.Model):
     test_bot = models.ForeignKey(
         CustomBot, on_delete=models.SET_NULL, null=True, blank=True,
         related_name='test_matches',
-        help_text="The bot being tested (Player 1). NULL = BotTato (legacy).",
+        help_text="The bot being tested (Player 1).",
     )
     result = models.CharField(max_length=50, choices=Result)
     duration_in_game_time = models.IntegerField(null=True, blank=True)
@@ -374,7 +374,7 @@ class PromptTemplate(models.Model):
     filename = models.CharField(
         max_length=200,
         unique=True,
-        help_text="Filename (relative to test_lab/prompt_templates/) e.g. bottato.md",
+        help_text="Filename (relative to test_lab/prompt_templates/) e.g. mybot.md",
     )
     bots = models.ManyToManyField(
         CustomBot,
