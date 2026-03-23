@@ -48,13 +48,13 @@ values (with a note that they can be changed later on the config page).
 Every place that falls back to `CustomBot.objects.filter(id=5)` should
 instead **require** `test_bot` to be provided.
 
-- [ ] `create_pending_match()` in views.py (line 419): remove the `id=5` fallback;
+- [x] `create_pending_match()` in views.py (line 419): remove the `id=5` fallback;
       make `test_bot` a required parameter (remove `None` default).
-- [ ] `start_custom_bot_match()` in views.py (line 486): same — require `test_bot`.
-- [ ] `start_test_suite()` in views.py (line 577): same — require `test_bot`.
-- [ ] **"Run Single Match vs Computer" form** in `run_match.html`: add a Test Bot
+- [x] `start_custom_bot_match()` in views.py (line 486): same — require `test_bot`.
+- [x] `start_test_suite()` in views.py (line 577): same — require `test_bot`.
+- [x] **"Run Single Match vs Computer" form** in `run_match.html`: add a Test Bot
       dropdown (like the custom-match form already has) so the user always picks one.
-- [ ] Update the `run_single_match` view to read `test_bot_id` from POST and pass it.
+- [x] Update the `run_single_match` view to read `test_bot_id` from POST and pass it.
 
 ---
 

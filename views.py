@@ -39,9 +39,16 @@ def _get_match_list_context(request):
     try:
         recovered = aiarena_runner.check_stale_pending_matches()
         if recovered:
-            logger.info('Recovered %d stale match(es): %s', len(recovered), recovered)
+            logger.info('Recovered %d stale aiarena match(es): %s', len(recovered), recovered)
     except Exception:
-        logger.exception('Error checking stale pending matches')
+        logger.exception('Error checking stale pending aiarena matches')
+
+    try:
+        legacy_recovered = _recover_stale_legacy_matches()
+        if legacy_recovered:
+            logger.info('Recovered %d stale legacy match(es): %s', len(legacy_recovered), legacy_recovered)
+    except Exception:
+        logger.exception('Error checking stale pending legacy matches')
 
     # Start any queued matches that now have capacity.
     try:
@@ -440,19 +447,16 @@ def get_least_used_map(
 
 def create_pending_match(
     test_group_id: int, race: str, build: str, difficulty: str,
-    test_bot: CustomBot | None = None,
+    test_bot: CustomBot,
     map_name: str = '',
 ) -> int:
     """Create a pending match entry and return the match ID.
 
-    *test_bot* is the Player-1 bot being tested.  When ``None`` the match
-    is attributed to BotTato (id 5) by default.
+    *test_bot* is the Player-1 bot being tested.
 
     *map_name* is the pre-selected map.  When empty, the least-used map
     for this opponent config is chosen automatically.
     """
-    if test_bot is None:
-        test_bot = CustomBot.objects.filter(id=5).first()
     if not map_name:
         map_name = get_least_used_map(
             race.capitalize(), build.capitalize(), difficulty or 'CheatInsane',
@@ -523,6 +527,45 @@ def _parse_legacy_result(log_file_path: str) -> str | None:
     return None
 
 
+def _recover_stale_legacy_matches() -> dict[int, str]:
+    """Scan for pending legacy matches whose log file contains a result.
+
+    When the Django server restarts, the daemon threads monitoring legacy
+    Docker containers are killed.  The containers finish and write
+    ``MATCH_RESULT:<result>`` to their log files, but nobody reads it.
+    This function finds those orphaned results and updates the database.
+
+    Returns a dict of ``{match_id: result}`` for recovered matches.
+    """
+    logs_dir = _get_logs_dir()
+    if not os.path.isdir(logs_dir):
+        return {}
+
+    recovered: dict[int, str] = {}
+    pending = Match.objects.filter(result='Pending')
+
+    for match_obj in pending:
+        # Skip matches that have an aiarena run directory (handled separately)
+        aiarena_run_dir = aiarena_runner.get_run_dir(match_obj.id)
+        if os.path.isdir(aiarena_run_dir):
+            continue
+
+        # Look for a log file matching this match ID
+        pattern = os.path.join(logs_dir, f"{match_obj.id}_*.log")
+        log_files = glob.glob(pattern)
+        if not log_files:
+            continue
+
+        result = _parse_legacy_result(log_files[0])
+        if result:
+            match_obj.result = result
+            match_obj.end_timestamp = timezone.now()
+            match_obj.save()
+            recovered[match_obj.id] = result
+
+    return recovered
+
+
 def _launch_legacy_match(match_id: int, command: list[str], cwd: str, log_file_path: str) -> bool:
     """Launch a legacy single-container Docker match through the queue.
 
@@ -559,15 +602,14 @@ def _launch_legacy_match(match_id: int, command: list[str], cwd: str, log_file_p
 
 def start_custom_bot_match(
     custom_bot: CustomBot,
-    test_bot: CustomBot | None = None,
+    test_bot: CustomBot,
     test_group_id: int = -1,
     source_override: str | None = None,
 ) -> int:
     """Launch a single Docker match against a custom bot.
     Returns the match ID.
 
-    ``test_bot`` is the test-subject bot (player 1).  When *None* defaults
-    to BotTato (id 5).
+    ``test_bot`` is the test-subject bot (player 1).
 
     ``test_group_id`` defaults to ``-1`` (ad-hoc match).  Pass a real
     TestGroup id to include this match in a test group.
@@ -578,10 +620,6 @@ def start_custom_bot_match(
     For aiarena-type bots, uses the aiarena local-play-bootstrap infrastructure.
     For python_sc2 / external_python bots, uses the existing single-container approach.
     """
-    if test_bot is None:
-        test_bot = CustomBot.objects.filter(id=5).first()
-    if test_bot is None:
-        raise ValueError('No test bot specified and default bot (id=5) not found.')
     match = Match(
         test_group_id=test_group_id,
         start_timestamp=datetime.now(),
@@ -645,8 +683,8 @@ def start_custom_bot_match(
 
 def start_test_suite(
     description: str,
+    test_bot: CustomBot,
     difficulty: str = 'CheatInsane',
-    test_bot: CustomBot | None = None,
     test_suite: TestSuite | None = None,
     branch: str = '',
 ) -> tuple[int, int]:
@@ -664,7 +702,7 @@ def start_test_suite(
     Returns (test_group_id, number of matches started).
     Raises FileNotFoundError if docker-compose.yml is missing.
 
-    *test_bot* is the Player-1 bot; ``None`` defaults to BotTato (id 5).
+    *test_bot* is the Player-1 bot.
     Custom bot matches run regardless of difficulty.
     """
     compose_file = os.path.join(DOCKER_COMPOSE_PATH, 'docker-compose.yml')
@@ -674,9 +712,6 @@ def start_test_suite(
     _write_legacy_env()
     logs_dir = _get_logs_dir()
     os.makedirs(logs_dir, exist_ok=True)
-
-    if test_bot is None:
-        test_bot = CustomBot.objects.filter(id=5).first()
 
     # Resolve the test suite — fall back to "Blizzard AI" if none specified
     if test_suite is None:
@@ -826,6 +861,12 @@ def trigger_tests(request):
         test_bot_id = request.POST.get('test_bot')
         if test_bot_id:
             test_bot = CustomBot.objects.filter(id=test_bot_id).first()
+        if test_bot is None:
+            messages.error(request, 'Please select a test bot.')
+            referer = request.META.get('HTTP_REFERER', '')
+            if referer and '/test_lab/' in referer:
+                return redirect(referer)
+            return redirect(f"{reverse('results')}?tab=test-groups")
 
         # Resolve test suite
         test_suite = None
@@ -885,6 +926,11 @@ def api_trigger_tests(request):
                 {'status': 'error', 'message': f'Test bot with id {test_bot_id} not found'},
                 status=404,
             )
+    if test_bot is None:
+        return JsonResponse(
+            {'status': 'error', 'message': 'test_bot_id is required'},
+            status=400,
+        )
 
     # Custom bot match
     if custom_bot_id is not None:
@@ -916,7 +962,7 @@ def api_trigger_tests(request):
                 'status': 'ok',
                 'match_id': match_id,
                 'custom_bot': custom_bot.name,
-                'test_bot': test_bot.name if test_bot else 'BotTato',
+                'test_bot': test_bot.name,
                 'branch': branch or None,
             })
         except Exception as e:
@@ -1734,6 +1780,15 @@ def run_single_match(request):
         build = request.POST.get('build', 'randombuild')
         difficulty = request.POST.get('difficulty', 'CheatInsane')
 
+        # Resolve test subject bot
+        test_bot_id = request.POST.get('test_bot_id')
+        test_bot = None
+        if test_bot_id:
+            test_bot = CustomBot.objects.filter(id=test_bot_id, is_test_subject=True).first()
+        if test_bot is None:
+            messages.error(request, 'Please select a test bot.')
+            return redirect('run_match')
+
         docker_compose_path = DOCKER_COMPOSE_PATH
         _write_legacy_env()
         logs_dir = _get_logs_dir()
@@ -1741,12 +1796,11 @@ def run_single_match(request):
 
         try:
             # Create a pending match with test_group_id = -1 (not part of a test group)
-            match_id = create_pending_match(-1, race, build, difficulty)
+            match_id = create_pending_match(-1, race, build, difficulty, test_bot=test_bot)
             match_obj = Match.objects.get(id=match_id)
 
             log_file = os.path.join(logs_dir, f"{match_id}_{race}_{build}.log")
 
-            test_bot = match_obj.test_bot
             command = [
                 'docker', 'compose', '-p', f'match_{match_id}',
                 'run', '--rm', '--no-deps',
@@ -1954,13 +2008,15 @@ def run_custom_match(request):
     test_bot_id = request.POST.get('test_bot_id')
     if test_bot_id:
         test_bot = CustomBot.objects.filter(id=test_bot_id, is_test_subject=True).first()
+    if test_bot is None:
+        messages.error(request, 'Please select a test bot.')
+        return redirect('run_match')
 
     try:
         match_id = start_custom_bot_match(custom_bot, test_bot=test_bot)
-        test_name = test_bot.name if test_bot else 'BotTato'
         messages.success(
             request,
-            f'Custom match started: {test_name} vs {custom_bot.name} (match #{match_id})'
+            f'Custom match started: {test_bot.name} vs {custom_bot.name} (match #{match_id})'
         )
     except Exception as e:
         messages.error(request, f'Failed to start custom match: {e}')
@@ -2072,6 +2128,15 @@ def run_replay_match(request):
     race = request.POST.get('race', 'Random')
     bot_player_id = request.POST.get('bot_player_id', '1')
 
+    # Resolve test subject bot
+    test_bot = None
+    test_bot_id = request.POST.get('test_bot_id')
+    if test_bot_id:
+        test_bot = CustomBot.objects.filter(id=test_bot_id, is_test_subject=True).first()
+    if test_bot is None:
+        messages.error(request, 'Please select a test bot.')
+        return redirect('run_match')
+
     # Validate inputs
     if not replay_file:
         messages.error(request, 'Please upload a replay file.')
@@ -2108,6 +2173,7 @@ def run_replay_match(request):
             opponent_race=race,
             opponent_difficulty=difficulty,
             opponent_build=build,
+            test_bot=test_bot,
             result="Pending",
             replay_takeover_game_loop=game_loop,
         )
@@ -2147,8 +2213,7 @@ def run_replay_match(request):
             if duration_seconds and duration_seconds > 0:
                 command += ['-e', f'REPLAY_DURATION={duration_seconds / 22.4:.1f}']
 
-        default_test_bot = CustomBot.objects.filter(id=5).first()
-        command += _env_file_args(default_test_bot)
+        command += _env_file_args(test_bot)
         command += [
             'bot',
             'bash', '/root/runner/run_docker_continue_replay.sh',
@@ -2573,11 +2638,15 @@ def run_ticket_tests(request, ticket_id):
     test_suite = ticket.test_suite or (test_bot.default_test_suite if test_bot else None)
     branch = ticket.branch
 
+    if not test_bot:
+        messages.error(request, 'Ticket has no test bot set.')
+        return redirect('ticket_detail', ticket_id=ticket.id)
+
     if not branch:
         messages.error(request, 'Ticket has no branch set.')
         return redirect('ticket_detail', ticket_id=ticket.id)
 
-    if test_bot and test_bot.source_path:
+    if test_bot.source_path:
         try:
             worktrees.get_or_create_worktree(test_bot.source_path, branch)
         except ValueError as e:
@@ -2814,13 +2883,18 @@ def api_trigger_ticket_tests(request):
     test_suite = ticket.test_suite or (test_bot.default_test_suite if test_bot else None)
     branch = ticket.branch
 
+    if not test_bot:
+        return JsonResponse(
+            {'status': 'error', 'message': 'Ticket has no test bot set'}, status=400,
+        )
+
     if not branch:
         return JsonResponse(
             {'status': 'error', 'message': 'Ticket has no branch set'}, status=400,
         )
 
     # Validate the branch and create worktree if needed
-    if test_bot and test_bot.source_path:
+    if test_bot.source_path:
         try:
             worktrees.get_or_create_worktree(test_bot.source_path, branch)
         except ValueError as e:
@@ -2847,7 +2921,7 @@ def api_trigger_ticket_tests(request):
         'ticket_id': ticket.id,
         'test_group_id': test_group_id,
         'matches_started': count,
-        'test_bot': test_bot.name if test_bot else 'BotTato',
+        'test_bot': test_bot.name,
         'test_suite': test_suite.name if test_suite else 'default',
         'branch': branch,
     })

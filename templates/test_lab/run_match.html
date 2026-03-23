@@ -34,6 +34,14 @@ tr:nth-child(even) { background-color: #f2f2f2; }
             <form method="post" action="{% url 'run_single_match' %}" style="display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap;">
                 {% csrf_token %}
                 <div>
+                    <label for="test_bot_id_single">Test Bot (Player 1):</label><br>
+                    <select name="test_bot_id" id="test_bot_id_single" required>
+                        {% for bot in test_subject_bots %}
+                        <option value="{{ bot.id }}">{{ bot.name }} ({{ bot.race }})</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div>
                     <label for="difficulty">Difficulty:</label><br>
                     <select name="difficulty" id="difficulty">
                         <option value="Easy">Easy</option>
@@ -89,8 +97,7 @@ tr:nth-child(even) { background-color: #f2f2f2; }
                 {% if test_subject_bots %}
                 <div>
                     <label for="test_bot_id_custom">Test Bot (Player 1):</label><br>
-                    <select name="test_bot_id" id="test_bot_id_custom">
-                        <option value="">BotTato (default)</option>
+                    <select name="test_bot_id" id="test_bot_id_custom" required>
                         {% for bot in test_subject_bots %}
                         <option value="{{ bot.id }}">{{ bot.name }} ({{ bot.race }})</option>
                         {% endfor %}
@@ -193,9 +200,17 @@ tr:nth-child(even) { background-color: #f2f2f2; }
 
         <div class="utility-section">
             <h3>Continue from Replay</h3>
-            <p>Upload a replay file and specify a time — BotTato takes over at that point and plays out the game vs a Computer opponent.</p>
+            <p>Upload a replay file and specify a time — the test bot takes over at that point and plays out the game vs a Computer opponent.</p>
             <form method="post" action="{% url 'run_replay_match' %}" enctype="multipart/form-data" style="display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap;">
                 {% csrf_token %}
+                <div>
+                    <label for="test_bot_id_replay">Test Bot:</label><br>
+                    <select name="test_bot_id" id="test_bot_id_replay" required>
+                        {% for bot in test_subject_bots %}
+                        <option value="{{ bot.id }}">{{ bot.name }} ({{ bot.race }})</option>
+                        {% endfor %}
+                    </select>
+                </div>
                 <div>
                     <label for="replay_file">Replay File (.SC2Replay):</label><br>
                     <input type="file" name="replay_file" id="replay_file" accept=".SC2Replay" required>
@@ -239,7 +254,7 @@ tr:nth-child(even) { background-color: #f2f2f2; }
                     </select>
                 </div>
                 <div>
-                    <label for="bot_player_id">BotTato takes over as:</label><br>
+                    <label for="bot_player_id">Test bot takes over as:</label><br>
                     <select name="bot_player_id" id="bot_player_id">
                         <option value="1">Player 1</option>
                         <option value="2">Player 2</option>
@@ -252,7 +267,7 @@ tr:nth-child(even) { background-color: #f2f2f2; }
             <p style="margin-top: 8px; font-size: 12px; color: #666;">
                 The game state (units, buildings, resources on the map) is reconstructed at the specified time.
                 Limitations: upgrades are not restored; the Computer opponent resets its build logic;
-                hallucinated units become real. BotTato will have no memory of pre-takeover observations.
+                hallucinated units become real. The test bot will have no memory of pre-takeover observations.
             </p>
         </div>
     </div>
