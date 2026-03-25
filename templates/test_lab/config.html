@@ -902,6 +902,8 @@ td { text-align: left; }
                 var typeField = document.getElementById('aiarena_bot_type');
                 if (nameField) nameField.value = info.name;
                 if (dirField) dirField.value = info.directory;
+                var sourceField = document.getElementById('source_path');
+                if (sourceField) sourceField.value = '{{ aiarena_bots_dir|escapejs }}/' + info.directory;
                 if (raceField && info.race) {
                     for (var i = 0; i < raceField.options.length; i++) {
                         if (raceField.options[i].value.toLowerCase() === info.race.toLowerCase()) {

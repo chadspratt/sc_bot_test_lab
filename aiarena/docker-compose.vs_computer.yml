@@ -1,0 +1,23 @@
+# Compose file for vs-Computer matches using the aiarena bot environment.
+#
+# Single-container: runs the bot + SC2 in one container. The bot plays
+# against the built-in Blizzard AI via python_sc2's run_game().
+#
+# This uses the arenaclient-bot image extended with SC2, so bots run in
+# the exact same environment as aiarena bot-vs-bot matches.
+#
+# Bot code and runner scripts are bind-mounted via docker-compose.override.yml.
+# Maps are mounted from the host's SC2 maps directory.
+
+services:
+  bot:
+    build:
+      context: ..
+      dockerfile: aiarena/Dockerfile.vs_computer
+    network_mode: "host"
+    working_dir: /root
+    volumes:
+      - "../runner:/root/runner"
+      - "${SC2_MAPS_PATH}:/root/StarCraftII/Maps"
+      - "${REPLAYS_DIR}:/root/replays"
+    command: bash /root/runner/run_docker.sh

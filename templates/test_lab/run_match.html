@@ -274,8 +274,8 @@ tr:nth-child(even) { background-color: #f2f2f2; }
 </div>
 
 <!-- Custom match results table -->
-<h2>Custom Match Results</h2>
-<p>Matches against custom opponent bots, past versions, or continued from a replay. Most recent 50 shown.</p>
+<h2>Ad-Hoc Match Results</h2>
+<p>Single matches launched from this page (vs computer, custom bots, past versions, or replays). Most recent 50 shown.</p>
 
 <div style="margin-bottom: 15px;">
     <form method="get" action="" style="display: inline-block;">
@@ -313,13 +313,15 @@ tr:nth-child(even) { background-color: #f2f2f2; }
             <td>
                 {% if match.opponent_commit_hash %}Past Version
                 {% elif match.opponent_bot %}Custom Bot
-                {% else %}Replay
+                {% elif match.replay_file %}Replay
+                {% else %}Vs Computer
                 {% endif %}
             </td>
             <td>{{ match.test_bot_name }}</td>
             <td>
                 {% if match.opponent_commit_hash %}{{ match.test_bot_name }}@{{ match.opponent_short_hash }}
                 {% elif match.opponent_bot %}{{ match.opponent_bot.name }}
+                {% elif match.opponent_difficulty %}{{ match.opponent_difficulty }} {{ match.opponent_build }}
                 {% else %}-
                 {% endif %}
             </td>
@@ -364,7 +366,7 @@ tr:nth-child(even) { background-color: #f2f2f2; }
     </tbody>
 </table>
 {% else %}
-<p><em>No custom bot matches yet. Use the forms above to run one.</em></p>
+<p><em>No ad-hoc matches yet. Use the forms above to run one.</em></p>
 {% endif %}
 {% endblock %}
 

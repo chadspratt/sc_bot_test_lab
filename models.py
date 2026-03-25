@@ -107,6 +107,7 @@ class CustomBot(models.Model):
         related_name='default_for_bots',
         help_text="Default test suite used when triggering tests for this bot without specifying a suite",
     )
+    default_test_suite_id: int | None
     is_active = models.BooleanField(
         default=True,
         help_text="Inactive bots are excluded from all test suite runs",
@@ -433,6 +434,7 @@ class Ticket(models.Model):
         related_name='tickets',
         help_text="Prompt template to use when generating the .prompt.md file",
     )
+    prompt_template_id: int | None
     context_files = models.TextField(
         blank=True, default='',
         help_text="Newline-separated list of files the agent should focus on",

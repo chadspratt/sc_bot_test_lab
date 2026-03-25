@@ -139,7 +139,6 @@ thead tr:nth-child(2) th { top: 41px; }
         {% csrf_token %}
         <label for="run_test_bot">Test Bot:</label>
         <select name="test_bot" id="run_test_bot">
-            <option value="">Default</option>
             {% for bot in test_subject_bots %}
             <option value="{{ bot.id }}">{{ bot.name }}</option>
             {% endfor %}
@@ -147,7 +146,6 @@ thead tr:nth-child(2) th { top: 41px; }
 
         <label for="run_test_suite">Suite:</label>
         <select name="test_suite" id="run_test_suite">
-            <option value="">All</option>
             {% for suite in test_suites %}
             <option value="{{ suite.id }}">{{ suite.name }}</option>
             {% endfor %}

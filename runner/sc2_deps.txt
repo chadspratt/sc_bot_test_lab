@@ -1,0 +1,12 @@
+# Core python_sc2 dependencies needed by the runner scripts.
+# Installed before bot-specific requirements so that any bot's
+# bundled sc2/ library can import its transitive dependencies.
+s2clientprotocol>=5.0.14.93333.0
+protobuf<4.0.0
+aiohttp>=3.11.10
+mpyq>=0.2.5
+portpicker>=1.6.0
+loguru>=0.7.3
+numpy>=2.0.0
+scipy>=1.14.0
+pyyaml>=6.0.0

@@ -291,6 +291,59 @@ def _test_bot_volume_mounts(
     return mounts
 
 
+def _opponent_volume_mounts(
+    opponent_bot: CustomBot, aiarena_name: str,
+) -> list[str]:
+    """Generate Docker Compose volume mount lines for an opponent bot.
+
+    Resolves the opponent's full source directory (from ``source_path``,
+    ``other_bots/``, or ``aiarena/bots/`` as a last resort) and layers
+    aiarena overlay files on top — the same strategy used for test bots.
+
+    If ``source_path`` points inside ``aiarena/bots/`` it is treated as
+    an overlay directory rather than real source and the function falls
+    through to ``other_bots/`` discovery.
+    """
+    source = opponent_bot.source_path
+
+    # Ignore source_path when it points into the aiarena overlay tree —
+    # those directories hold only config files, not the full bot source.
+    if source and os.path.normcase(os.path.normpath(source)).startswith(
+        os.path.normcase(os.path.normpath(AIARENA_BOTS_DIR))
+    ):
+        source = ''
+
+    if not source:
+        # Prefer other_bots/<name>/ (full source) over aiarena/bots/<name>/ (overlay)
+        other_bots_path = os.path.join(REPO_ROOT, 'other_bots', aiarena_name)
+        if os.path.isdir(other_bots_path) and not _is_junction(other_bots_path):
+            source = os.path.normpath(other_bots_path)
+        elif os.path.isdir(other_bots_path):
+            source = os.path.normpath(other_bots_path)
+
+    if not source:
+        # Fall back to mounting aiarena/bots/<name>/ directly
+        bot_dir = os.path.join(AIARENA_BOTS_DIR, aiarena_name).replace('\\', '/')
+        return [f'      - "{bot_dir}:/bots/{aiarena_name}"']
+
+    source = source.replace('\\', '/')
+    mounts = [f'      - "{source}:/bots/{aiarena_name}"']
+
+    for link in opponent_bot.symlink_mounts or []:
+        name = link['name']
+        target = link['target'].replace('\\', '/')
+        mounts.append(f'      - "{target}:/bots/{aiarena_name}/{name}"')
+
+    overlay_dir = os.path.join(AIARENA_BOTS_DIR, aiarena_name)
+    for filename in ('run.py', 'requirements.txt', 'ladderbots.json'):
+        overlay_file = os.path.join(overlay_dir, filename)
+        if os.path.isfile(overlay_file):
+            f_unix = overlay_file.replace('\\', '/')
+            mounts.append(f'      - "{f_unix}:/bots/{aiarena_name}/{filename}"')
+
+    return mounts
+
+
 def _past_version_volume_mounts(
     test_bot: CustomBot, aiarena_name: str, cache_path: str,
 ) -> list[str]:
@@ -329,6 +382,7 @@ def _write_compose_override(
     bot2_host_path: str | None,
     bot2_type: str = 'python',
     bot2_dockerfile: str = '',
+    opponent_bot: CustomBot | None = None,
     is_mirror: bool = False,
     mirror_aiarena_name: str | None = None,
     is_past_version: bool = False,
@@ -339,7 +393,7 @@ def _write_compose_override(
 
     Bot 1 (test subject) uses live source mounts via
     ``_test_bot_volume_mounts``.  Bot 2 is either:
-    - A regular opponent (single directory mount)
+    - A regular opponent (source + overlay mounts via ``_opponent_volume_mounts``)
     - A mirror match (live mounts + optional custom Dockerfile)
     - A past version (cached source + symlink mounts + optional Dockerfile)
 
@@ -386,8 +440,6 @@ def _write_compose_override(
         lines += ['    volumes:']
         lines += _test_bot_volume_mounts(test_bot, mirror_aiarena_name, source_override=source_override)
     else:
-        assert bot2_host_path is not None
-        b2 = bot2_host_path.replace('\\', '/')
         if bot2_dockerfile:
             lines += [
                 '    build:',
@@ -400,10 +452,13 @@ def _write_compose_override(
                 '      context: .',
                 '      dockerfile: Dockerfile.proxy_fwd',
             ]
-        lines += [
-            '    volumes:',
-            f'      - "{b2}:/bots/{bot2_name}"',
-        ]
+        lines.append('    volumes:')
+        if opponent_bot is not None:
+            lines += _opponent_volume_mounts(opponent_bot, bot2_name)
+        else:
+            assert bot2_host_path is not None
+            b2 = bot2_host_path.replace('\\', '/')
+            lines.append(f'      - "{b2}:/bots/{bot2_name}"')
     lines.append('')  # trailing newline
 
     override_path = os.path.join(run_dir, 'docker-compose.override.yml')
@@ -758,6 +813,7 @@ def start_aiarena_match(
         bot2_host_path=opponent_path,
         bot2_type=opponent_type,
         bot2_dockerfile=opponent_bot.dockerfile if not is_mirror else '',
+        opponent_bot=opponent_bot if not is_mirror else None,
         is_mirror=is_mirror,
         mirror_aiarena_name=mirror_name,
         source_override=source_override,

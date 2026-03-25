@@ -1,0 +1,44 @@
+# Hybrid image for vs-Computer matches: arenaclient-bot + SC2.
+#
+# Bots run in the same environment they use for aiarena bot-vs-bot matches,
+# but with StarCraft II installed locally so the bot can play against the
+# built-in Blizzard AI via python_sc2's run_game().
+#
+# Build context should be the per-match run directory (or aiarena/).
+# Bot code is bind-mounted at runtime, not baked into the image.
+
+FROM aiarena/arenaclient-bot:v0.8.0
+
+USER root
+
+# Build tools needed for Cython extension compilation (many bots need this)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    libc6-dev \
+    unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv (fast Python package installer, used by run_docker.sh)
+RUN pip install --no-cache-dir uv
+
+# Download and install StarCraft II (Linux headless, same version as python_sc2)
+ARG SC2_VERSION=4.10
+RUN curl --retry 3 --retry-delay 5 -C - \
+    http://blzdistsc2-a.akamaihd.net/Linux/SC2.${SC2_VERSION}.zip \
+    -o /tmp/SC2.zip \
+    && unzip -q -P iagreetotheeula /tmp/SC2.zip -d /root/ \
+    && rm /tmp/SC2.zip \
+    && rm -rf /root/StarCraftII/Battle.net/* \
+    && rm -rf /root/StarCraftII/Versions/Shaders* \
+    && ln -sf /root/StarCraftII/Maps /root/StarCraftII/maps \
+    && rm -rf /root/StarCraftII/maps/*
+
+# Pre-install core sc2 library dependencies so the runner can start quickly
+COPY runner/sc2_deps.txt /root/runner/sc2_deps.txt
+RUN pip install --no-cache-dir -r /root/runner/sc2_deps.txt
+
+WORKDIR /root
+
+# Clear the base image's ENTRYPOINT (./bot_controller) so the compose
+# command runs directly instead of being passed as args to bot_controller.
+ENTRYPOINT []

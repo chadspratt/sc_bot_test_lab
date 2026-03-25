@@ -224,11 +224,21 @@ def _get_source_override(match) -> str | None:
     return worktrees.get_or_create_worktree(test_bot.source_path, tg.branch)
 
 
-def _add_source_override(command: list[str], match) -> None:
-    """Append a volume-mount flag for the branch worktree if applicable."""
-    override = _get_source_override(match)
-    if override:
-        command += ['-v', f'{override.replace(chr(92), "/")}:/root/bot']
+def _add_bot_volume_mounts(command: list[str], match) -> None:
+    """Append volume-mount flags for the bot directory.
+
+    Uses the same logic as ``views._bot_volume_args`` to mount the bot
+    source, symlink targets, and overlay files.  When the match belongs
+    to a branch test group, the worktree source is used instead.
+    """
+    from .views import _bot_volume_args
+
+    test_bot = match.test_bot
+    if test_bot is None:
+        return
+
+    source_override = _get_source_override(match)
+    command += _bot_volume_args(test_bot, source_override)
 
 
 def _rebuild_blizzard_ai_launcher(match) -> Callable[[], None]:
@@ -250,8 +260,9 @@ def _rebuild_blizzard_ai_launcher(match) -> Callable[[], None]:
         '-e', f'DIFFICULTY={difficulty}',
         '-e', f'MAP_NAME={match.map_name}',
     ]
-    _add_source_override(command, match)
-    from .views import _env_file_args
+    _add_bot_volume_mounts(command, match)
+    from .views import _bot_identity_args, _env_file_args
+    command += _bot_identity_args(match.test_bot)
     command += _env_file_args(match.test_bot)
     command.append('bot')
 
@@ -301,8 +312,9 @@ def _rebuild_replay_test_launcher(match) -> Callable[[], None] | None:
         duration_seconds = duration_loops / 22.4
         command += ['-e', f'REPLAY_DURATION={duration_seconds:.1f}']
 
-    _add_source_override(command, match)
-    from .views import _env_file_args
+    _add_bot_volume_mounts(command, match)
+    from .views import _bot_identity_args, _env_file_args
+    command += _bot_identity_args(match.test_bot)
     command += _env_file_args(match.test_bot)
     command += ['bot', 'bash', '/root/runner/run_docker_continue_replay.sh']
 

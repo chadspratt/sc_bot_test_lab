@@ -128,10 +128,10 @@ def _get_match_list_context(request):
 
     for match in matches:
         opp_bot = match.opponent_bot
-        if match.replay_test_id:
+        if match.replay_test:
             # Replay test match — key by replay test id
-            opponent_key = f"replay_{match.replay_test_id}"
-            replay_test_opponents[match.replay_test_id] = match.replay_test.name
+            opponent_key = f"replay_{match.replay_test.id}"
+            replay_test_opponents[match.replay_test.id] = match.replay_test.name
         elif match.opponent_commit_hash:
             # Past-version opponent — key by short hash
             short_hash = match.opponent_commit_hash[:7]
@@ -139,7 +139,7 @@ def _get_match_list_context(request):
             version_opponents[short_hash] = opponent_key
             # Track ordering: prefer highest test_group_id, then lowest match_id
             # (lower offset = more recent commit = created first in a group)
-            group_id = match.test_group_id
+            group_id = match.test_group.id
             prev = version_ordering.get(short_hash)
             if prev is None or group_id > prev[0] or (group_id == prev[0] and match.id < prev[1]):
                 version_ordering[short_hash] = (group_id, match.id)
@@ -476,6 +476,7 @@ def create_pending_match(
     return match.id
 
 DOCKER_COMPOSE_PATH = os.path.normpath(os.path.join(os.path.dirname(__file__)))
+AIARENA_COMPOSE_PATH = os.path.join(DOCKER_COMPOSE_PATH, 'aiarena')
 
 
 def _get_logs_dir() -> str:
@@ -490,13 +491,21 @@ def _get_replays_dir() -> str:
 
 
 def _write_sc_docker_env() -> None:
-    """Write a .env file for the single-container docker-compose with configured paths."""
+    """Write .env files for docker-compose with configured paths.
+
+    Writes to both the legacy single-container path and the aiarena
+    vs-computer path so either compose file can resolve variables.
+    """
     config = SystemConfig.load()
-    env_path = os.path.join(DOCKER_COMPOSE_PATH, '.env')
     replays_dir = config.replays_dir or config.logs_dir
-    with open(env_path, 'w') as f:
-        f.write(f'SC2_MAPS_PATH={config.sc2_maps_path}\n')
-        f.write(f'REPLAYS_DIR={replays_dir}\n')
+    env_content = (
+        f'SC2_MAPS_PATH={config.sc2_maps_path}\n'
+        f'REPLAYS_DIR={replays_dir}\n'
+    )
+    for directory in (DOCKER_COMPOSE_PATH, AIARENA_COMPOSE_PATH):
+        env_path = os.path.join(directory, '.env')
+        with open(env_path, 'w') as f:
+            f.write(env_content)
 
 
 def _env_file_args(test_bot: CustomBot | None) -> list[str]:
@@ -531,6 +540,67 @@ def _bot_identity_args(test_bot: CustomBot | None) -> list[str]:
         args += ['-e', f'BOT_RACE={test_bot.race}']
     if test_bot.name:
         args += ['-e', f'BOT_NAME={test_bot.name}']
+    return args
+
+
+def _bot_volume_args(
+    test_bot: CustomBot, source_override: str | None = None,
+) -> list[str]:
+    """Return ``['-v', '<host>:<container>', ...]`` to mount a bot directory.
+
+    Mirrors the volume mount strategy used by the aiarena runner:
+    - When a live source directory is available, mount it at ``/root/bot_dir``
+      with symlink targets and overlay files layered on top.
+    - When no source directory is configured, mount the bot's
+      ``aiarena/bots/<dir>/`` directory directly.
+    """
+    bot_dir = test_bot.bot_directory or test_bot.name
+    source = source_override or test_bot.source_path
+
+    # When source_path points inside the aiarena overlay tree it holds
+    # only config files (ladderbots.json, etc.), not full bot source.
+    # Fall through to other_bots/ discovery, same as _opponent_volume_mounts.
+    if source and not source_override:
+        norm_source = os.path.normcase(os.path.normpath(source))
+        norm_overlay = os.path.normcase(os.path.normpath(
+            aiarena_runner.AIARENA_BOTS_DIR
+        ))
+        if norm_source.startswith(norm_overlay):
+            other_bots = os.path.join(
+                aiarena_runner.REPO_ROOT, 'other_bots', bot_dir,
+            )
+            if os.path.isdir(other_bots):
+                source = os.path.normpath(other_bots)
+
+    args: list[str] = []
+    if source:
+        src = source.replace('\\', '/')
+        args += ['-v', f'{src}:/root/bot_dir']
+
+        # Mount symlink/junction targets explicitly (Docker on Windows
+        # cannot follow NTFS junctions inside bind mounts)
+        for link in test_bot.symlink_mounts or []:
+            name = link['name']
+            target = link['target'].replace('\\', '/')
+            args += ['-v', f'{target}:/root/bot_dir/{name}']
+
+        # Layer aiarena overlay files (requirements.txt, ladderbots.json)
+        # on top of the live source so the runner sees them.
+        overlay_dir = os.path.join(aiarena_runner.AIARENA_BOTS_DIR, bot_dir)
+        for filename in ('requirements.txt', 'ladderbots.json'):
+            overlay_file = os.path.join(overlay_dir, filename)
+            if os.path.isfile(overlay_file):
+                f = overlay_file.replace('\\', '/')
+                args += ['-v', f'{f}:/root/bot_dir/{filename}']
+    else:
+        # No live source — try aiarena/bots/<dir>/ then other_bots/<dir>/
+        bot_path = aiarena_runner._resolve_bot_host_path(bot_dir)
+        if bot_path:
+            bp = bot_path.replace('\\', '/')
+            args += ['-v', f'{bp}:/root/bot_dir']
+        else:
+            logger.warning('No bot source found for %s', bot_dir)
+
     return args
 
 
@@ -670,6 +740,57 @@ def start_custom_bot_match(
     return match_id
 
 
+def start_blizzard_ai_match(
+    race: str,
+    build: str,
+    difficulty: str,
+    test_bot: CustomBot,
+    test_group_id: int = -1,
+    source_override: str | None = None,
+) -> int:
+    """Launch a single Docker match against the built-in Blizzard AI.
+
+    Returns the match ID.
+
+    Uses the aiarena-based vs-computer image (arenaclient-bot + SC2)
+    so that all bots run in the same environment as bot-vs-bot matches.
+
+    *test_group_id* defaults to ``-1`` (ad-hoc match).  Pass a real
+    TestGroup id to include this match in a test group.
+
+    *source_override* overrides the test bot's source directory (e.g.
+    a git worktree path for branch-based testing).
+    """
+    _write_sc_docker_env()
+    logs_dir = _get_logs_dir()
+    os.makedirs(logs_dir, exist_ok=True)
+
+    match_id = create_pending_match(
+        test_group_id, race, build, difficulty, test_bot=test_bot,
+    )
+    match_obj = Match.objects.get(id=match_id)
+    log_file = os.path.join(logs_dir, f'{match_id}_{race}_{build}.log')
+
+    command = [
+        'docker', 'compose',
+        '-f', 'docker-compose.vs_computer.yml',
+        '-p', f'match_{match_id}',
+        'run', '--rm', '--no-deps',
+        '-e', f'RACE={race}',
+        '-e', f'BUILD={build}',
+        '-e', f'MATCH_ID={match_id}',
+        '-e', f'DIFFICULTY={difficulty}',
+        '-e', f'MAP_NAME={match_obj.map_name}',
+    ]
+    command += _bot_volume_args(test_bot, source_override)
+    command += _bot_identity_args(test_bot)
+    command += _env_file_args(test_bot)
+    command.append('bot')
+
+    _launch_sc_docker_match(match_id, command, AIARENA_COMPOSE_PATH, log_file)
+    return match_id
+
+
 def start_test_suite(
     description: str,
     test_bot: CustomBot,
@@ -694,13 +815,9 @@ def start_test_suite(
     *test_bot* is the Player-1 bot.
     Custom bot matches run regardless of difficulty.
     """
-    compose_file = os.path.join(DOCKER_COMPOSE_PATH, 'docker-compose.yml')
+    compose_file = os.path.join(AIARENA_COMPOSE_PATH, 'docker-compose.vs_computer.yml')
     if not os.path.exists(compose_file):
-        raise FileNotFoundError(f'docker-compose.yml not found at: {compose_file}')
-
-    _write_sc_docker_env()
-    logs_dir = _get_logs_dir()
-    os.makedirs(logs_dir, exist_ok=True)
+        raise FileNotFoundError(f'docker-compose.vs_computer.yml not found at: {compose_file}')
 
     # Resolve the test suite — fall back to "Blizzard AI" if none specified
     if test_suite is None:
@@ -736,25 +853,11 @@ def start_test_suite(
     if include_blizzard:
         for race in ('protoss', 'terran', 'zerg'):
             for build in ('rush', 'timing', 'macro', 'power', 'air'):
-                match_id = create_pending_match(test_group_id, race, build, difficulty, test_bot=test_bot)
-                match_obj = Match.objects.get(id=match_id)
-                log_file = os.path.join(logs_dir, f"{match_id}_{race}_{build}.log")
-                command = [
-                    'docker', 'compose', '-p', f'match_{match_id}',
-                    'run', '--rm', '--no-deps',
-                    '-e', f'RACE={race}',
-                    '-e', f'BUILD={build}',
-                    '-e', f'MATCH_ID={match_id}',
-                    '-e', f'DIFFICULTY={difficulty}',
-                    '-e', f'MAP_NAME={match_obj.map_name}',
-                ]
-                if source_override:
-                    override_src = source_override.replace('\\', '/')
-                    command += ['-v', f'{override_src}:/root/bot']
-                command += _bot_identity_args(test_bot)
-                command += _env_file_args(test_bot)
-                command.append('bot')
-                _launch_sc_docker_match(match_id, command, DOCKER_COMPOSE_PATH, log_file)
+                start_blizzard_ai_match(
+                    race, build, difficulty, test_bot,
+                    test_group_id=test_group_id,
+                    source_override=source_override,
+                )
                 count += 1
 
     # --- Custom bot matches ---
@@ -1460,16 +1563,12 @@ def run_match_page(request):
         for bot_id, commits in recent_commits_by_bot.items()
     }
 
-    # Custom match list data
+    # Custom match list data — all ad-hoc matches (not part of a test group)
     matches = (
         Match.objects
-        .filter(
-            Q(opponent_bot__isnull=False)
-            | Q(replay_file__gt='')
-            | Q(opponent_commit_hash__gt='')
-        )
+        .filter(test_group_id=-1)
         .select_related('opponent_bot', 'test_bot')
-        .order_by('-start_timestamp')[:50]
+        .order_by('-start_timestamp')
     )
 
     selected_test_bot = request.GET.get('test_bot', '')
@@ -1478,6 +1577,8 @@ def run_match_page(request):
             matches = matches.filter(test_bot__isnull=True)
         elif selected_test_bot.isdigit():
             matches = matches.filter(test_bot_id=int(selected_test_bot))
+
+    matches = matches[:50]
 
     return render(request, 'test_lab/run_match.html', {
         'active_page': 'run_match',
@@ -1540,6 +1641,7 @@ def config_page(request):
         'bots': bots,
         'aiarena_bots': available_bots,
         'aiarena_bots_json': _json.dumps(available_bots),
+        'aiarena_bots_dir': aiarena_runner.AIARENA_BOTS_DIR.replace('\\', '/'),
         'custom_bots': custom_bots_list,
         'test_suites': test_suites,
         'test_suites_json': test_suites_json,
@@ -1779,34 +1881,11 @@ def run_single_match(request):
             messages.error(request, 'Please select a test bot.')
             return redirect('run_match')
 
-        docker_compose_path = DOCKER_COMPOSE_PATH
-        _write_sc_docker_env()
-        logs_dir = _get_logs_dir()
-        os.makedirs(logs_dir, exist_ok=True)
-
         try:
-            # Create a pending match with test_group_id = -1 (not part of a test group)
-            match_id = create_pending_match(-1, race, build, difficulty, test_bot=test_bot)
-            match_obj = Match.objects.get(id=match_id)
-
-            log_file = os.path.join(logs_dir, f"{match_id}_{race}_{build}.log")
-
-            command = [
-                'docker', 'compose', '-p', f'match_{match_id}',
-                'run', '--rm', '--no-deps',
-                '-e', f'RACE={race}',
-                '-e', f'BUILD={build}',
-                '-e', f'DIFFICULTY={difficulty}',
-                '-e', f'MATCH_ID={match_id}',
-                '-e', f'MAP_NAME={match_obj.map_name}',
-            ] + _bot_identity_args(test_bot) + _env_file_args(test_bot) + ['bot']
-
-            started = _launch_sc_docker_match(match_id, command, docker_compose_path, log_file)
-
-            status = 'started' if started else 'queued'
+            match_id = start_blizzard_ai_match(race, build, difficulty, test_bot)
             messages.success(
                 request,
-                f'Single match {status}: {race} {build} @ {difficulty} (match #{match_id})'
+                f'Single match started: {race} {build} @ {difficulty} (match #{match_id})'
             )
         except Exception as e:
             messages.error(request, f'Failed to start match: {str(e)}')
@@ -1868,6 +1947,10 @@ def create_custom_bot(request):
         messages.error(request, error)
         return redirect(config_bots_url)
 
+    if is_test_subject and not source_path:
+        messages.error(request, 'Source path is required for test subject bots.')
+        return redirect(config_bots_url)
+
     if is_test_subject and source_path and not os.path.isdir(source_path):
         messages.error(request, f'Source path not found: {source_path}')
         return redirect(config_bots_url)
@@ -1919,7 +2002,7 @@ def update_custom_bot_test_suite(request, bot_id):
     if test_suite_id:
         try:
             suite = TestSuite.objects.get(id=int(test_suite_id))
-            bot.default_test_suite = suite
+            bot.default_test_suite_id = suite.id
         except (TestSuite.DoesNotExist, ValueError):
             return JsonResponse({'status': 'error', 'message': 'Test suite not found'}, status=404)
     else:
@@ -1952,7 +2035,10 @@ def update_custom_bot_test_subject(request, bot_id):
         archive_paths_raw = request.POST.get('archive_paths', '').strip()
         archive_paths = [p.strip() for p in archive_paths_raw.split(',') if p.strip()] if archive_paths_raw else []
 
-        if source_path and not os.path.isdir(source_path):
+        if not source_path:
+            return JsonResponse({'status': 'error', 'message': 'Source path is required for test subject bots.'}, status=400)
+
+        if not os.path.isdir(source_path):
             return JsonResponse({'status': 'error', 'message': f'Source path not found: {source_path}'}, status=400)
 
         symlink_mounts = aiarena_runner.scan_directory_symlinks(source_path)
@@ -2168,7 +2254,6 @@ def run_replay_match(request):
         messages.error(request, 'Bot player ID must be 1 or 2.')
         return redirect('run_match')
 
-    docker_compose_path = DOCKER_COMPOSE_PATH
     _write_sc_docker_env()
     logs_dir = _get_logs_dir()
     os.makedirs(logs_dir, exist_ok=True)
@@ -2204,7 +2289,9 @@ def run_replay_match(request):
         log_file = os.path.join(logs_dir, f"{match_id}_continue_replay.log")
 
         command = [
-            'docker', 'compose', '-p', f'match_{match_id}',
+            'docker', 'compose',
+            '-f', 'docker-compose.vs_computer.yml',
+            '-p', f'match_{match_id}',
             'run', '--rm', '--no-deps',
             '-e', f'REPLAY_PATH={container_replay_path}',
             '-e', f'TAKEOVER_GAME_LOOP={game_loop}',
@@ -2222,6 +2309,7 @@ def run_replay_match(request):
             if duration_seconds and duration_seconds > 0:
                 command += ['-e', f'REPLAY_DURATION={duration_seconds / 22.4:.1f}']
 
+        command += _bot_volume_args(test_bot) if test_bot else []
         command += _bot_identity_args(test_bot)
         command += _env_file_args(test_bot)
         command += [
@@ -2229,7 +2317,7 @@ def run_replay_match(request):
             'bash', '/root/runner/run_docker_continue_replay.sh',
         ]
 
-        _launch_sc_docker_match(match_id, command, docker_compose_path, log_file)
+        _launch_sc_docker_match(match_id, command, AIARENA_COMPOSE_PATH, log_file)
 
         takeover_seconds = game_loop / 22.4
         messages.success(
@@ -2290,7 +2378,9 @@ def _launch_replay_test_match(
     log_file = os.path.join(logs_dir, f'{match_id}_replay_test.log')
 
     command = [
-        'docker', 'compose', '-p', f'match_{match_id}',
+        'docker', 'compose',
+        '-f', 'docker-compose.vs_computer.yml',
+        '-p', f'match_{match_id}',
         'run', '--rm', '--no-deps',
         '-e', f'REPLAY_PATH={container_replay_path}',
         '-e', f'TAKEOVER_GAME_LOOP={game_loop}',
@@ -2306,10 +2396,7 @@ def _launch_replay_test_match(
         duration_seconds = duration_loops / 22.4
         command += ['-e', f'REPLAY_DURATION={duration_seconds:.1f}']
 
-    if source_override:
-        override_src = source_override.replace('\\', '/')
-        command += ['-v', f'{override_src}:/root/bot']
-
+    command += _bot_volume_args(test_bot, source_override) if test_bot else []
     command += _bot_identity_args(test_bot)
     command += _env_file_args(test_bot)
     command += [
@@ -2317,7 +2404,7 @@ def _launch_replay_test_match(
         'bash', '/root/runner/run_docker_continue_replay.sh',
     ]
 
-    _launch_sc_docker_match(match_id, command, DOCKER_COMPOSE_PATH, log_file)
+    _launch_sc_docker_match(match_id, command, AIARENA_COMPOSE_PATH, log_file)
 
     return match_id
 
@@ -2628,7 +2715,8 @@ def update_ticket(request, ticket_id):
 
     prompt_template_id = request.POST.get('prompt_template_id')
     if prompt_template_id:
-        ticket.prompt_template = PromptTemplate.objects.filter(id=prompt_template_id).first()
+        pt = PromptTemplate.objects.filter(id=prompt_template_id).first()
+        ticket.prompt_template_id = pt.id if pt else None
     elif prompt_template_id == '':
         ticket.prompt_template = None
 

@@ -4,11 +4,8 @@ services:
       context: ../../..
       dockerfile: ./python_sc2/dockerfiles/Dockerfile
     network_mode: "host"
-    working_dir: /root/bot
+    working_dir: /root
     volumes:
-      - ../../../python_sc2/sc2:/root/bot/sc2
-      - ../../../bot:/root/bot
-      - ../../../other_bots:/root/external_bots
       - ./runner:/root/runner
       - ${SC2_MAPS_PATH}:/root/StarCraftII/Maps
       - ${REPLAYS_DIR}:/root/replays

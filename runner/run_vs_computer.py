@@ -10,6 +10,9 @@ Environment variables:
   DIFFICULTY - Opponent difficulty (default: CheatInsane)
   MAP_NAME   - Map to play on (required)
   MATCH_ID   - Match row ID (required, used for replay naming)
+  BOT_DIR    - Absolute path to the bot directory inside the container
+               (default: /root/bot_dir). Must contain ladderbots.json
+               or BOT_MODULE/BOT_CLASS env vars.
   BOT_MODULE - Python module path to import the bot class from (e.g. 'bottato.bottato')
   BOT_CLASS  - Bot class name within the module (e.g. 'BotTato')
   BOT_RACE   - Bot race: Protoss, Terran, Zerg, or Random
@@ -19,8 +22,11 @@ Environment variables:
 from __future__ import annotations
 
 import importlib
+import json
+import logging
 import os
-from loguru import logger
+
+logger = logging.getLogger(__name__)
 
 from config import BUILD_DICT, DIFFICULTY_DICT, RACE_DICT
 from sc2 import maps
@@ -29,22 +35,49 @@ from sc2.main import run_game
 from sc2.player import Bot, Computer
 
 
+def _read_ladderbots(bot_dir: str) -> dict:
+    """Read ladderbots.json from the bot directory and return the first bot entry."""
+    lb_path = os.path.join(bot_dir, "ladderbots.json")
+    if not os.path.isfile(lb_path):
+        return {}
+    with open(lb_path) as f:
+        data = json.load(f)
+    bots = data.get("Bots", {})
+    if not bots:
+        return {}
+    _name, info = next(iter(bots.items()))
+    info["_bot_name"] = _name
+    return info
+
+
 def main() -> str:
     """Run a single match and return the result string.
 
     The result is also printed to stdout as ``MATCH_RESULT:<result>`` so
     the host-side monitoring thread can parse it from the container log.
     """
+    bot_dir = os.environ.get("BOT_DIR", "/root/bot_dir")
+    os.chdir(bot_dir)
+
     race = os.environ.get("RACE")
     build = os.environ.get("BUILD")
     difficulty_env = os.environ.get("DIFFICULTY")
     map_name = os.environ["MAP_NAME"]
     match_id = os.environ["MATCH_ID"]
 
-    bot_module_path = os.environ["BOT_MODULE"]
-    bot_class_name = os.environ["BOT_CLASS"]
-    bot_race_name = os.environ["BOT_RACE"]
-    bot_name = os.environ.get("BOT_NAME", bot_class_name)
+    # Read ladderbots.json for defaults
+    lb_info = _read_ladderbots(bot_dir)
+
+    bot_module_path = os.environ.get("BOT_MODULE") or ""
+    bot_class_name = os.environ.get("BOT_CLASS") or ""
+    bot_race_name = os.environ.get("BOT_RACE") or lb_info.get("Race", "Random")
+    bot_name = os.environ.get("BOT_NAME") or lb_info.get("_bot_name", bot_class_name)
+
+    if not bot_module_path or not bot_class_name:
+        raise RuntimeError(
+            "BOT_MODULE and BOT_CLASS environment variables are required for "
+            "Python bots. Set them on the CustomBot model in the admin panel."
+        )
 
     # Dynamically import the bot class
     bot_module = importlib.import_module(bot_module_path)

@@ -550,7 +550,7 @@ async def _play_game_with_reconstruction(
         except Exception as e:
             logger.exception(f"Caught unknown exception: {e}")
             raise
-        if not client.in_game:
+        if not client.in_game and client._game_result:
             return client._game_result.get(player_id, Result.Defeat)
         await ai._after_step()
 

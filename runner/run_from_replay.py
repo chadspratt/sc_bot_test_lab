@@ -22,9 +22,11 @@ Environment variables:
 from __future__ import annotations
 
 import importlib
+import logging
 import os
 import sys
-from loguru import logger
+
+logger = logging.getLogger(__name__)
 
 from config import BUILD_DICT, DIFFICULTY_DICT, RACE_DICT
 from replay_continuation import run_game_from_replay
@@ -46,9 +48,12 @@ def main() -> str:
     race_env = os.environ.get("RACE")
     match_id = os.environ["MATCH_ID"]
 
+    bot_dir = os.environ.get("BOT_DIR", "/root/bot_dir")
+    os.chdir(bot_dir)
+
     bot_module_path = os.environ["BOT_MODULE"]
     bot_class_name = os.environ["BOT_CLASS"]
-    bot_race_name = os.environ["BOT_RACE"]
+    bot_race_name = os.environ.get("BOT_RACE", "Random")
     bot_name = os.environ.get("BOT_NAME", bot_class_name)
 
     if not replay_path:
