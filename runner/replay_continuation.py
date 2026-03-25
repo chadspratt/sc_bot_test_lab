@@ -22,10 +22,9 @@ See: https://stephanzlatarev.github.io/vscode-starcraft/start-game/continue-repl
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from loguru import logger
 from pathlib import Path
-from typing import Any
 
 from sc2.bot_ai import BotAI
 from sc2.client import Client
@@ -34,9 +33,13 @@ from sc2.data import AIBuild, Race, Result
 from sc2.game_state import GameState
 from sc2.main import get_replay_version
 from sc2.player import AbstractPlayer, Bot, Computer
-from sc2.portconfig import Portconfig
-from sc2.protocol import ConnectionAlreadyClosedError, ProtocolError
 from sc2.sc2process import SC2Process
+
+try:
+    from sc2.protocol import ConnectionAlreadyClosedError
+except ImportError:
+    # Older versions of python-sc2 used a different name for this exception
+    from sc2.protocol import ConnectionAlreadyClosed as ConnectionAlreadyClosedError
 
 from s2clientprotocol import common_pb2 as common_pb
 from s2clientprotocol import debug_pb2 as debug_pb

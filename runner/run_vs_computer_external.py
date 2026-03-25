@@ -24,7 +24,6 @@ import asyncio
 import json
 import logging
 import os
-import subprocess
 import sys
 
 import aiohttp
@@ -33,11 +32,14 @@ logger = logging.getLogger(__name__)
 
 from config import BUILD_DICT, DIFFICULTY_DICT, RACE_DICT
 from sc2 import maps
-from sc2.data import Race
+from sc2.data import Race, Result
 from sc2.player import Computer
 from sc2.sc2process import KillSwitch, SC2Process
 
 import s2clientprotocol.sc2api_pb2 as sc_pb
+
+# Max seconds to wait for the bot process after game is expected to end.
+_BOT_PROCESS_TIMEOUT = 600
 
 # SC2 proto race values
 _RACE_NAME_TO_PROTO = {
@@ -259,33 +261,59 @@ async def _run_match(bot_type: str) -> str:
         cmd = _build_bot_command(bot_dir, lb_info, sc2_port, bot_type)
         logger.info(f"Bot command: {' '.join(cmd)}")
 
-        bot_proc = subprocess.Popen(
-            cmd,
+        bot_proc = await asyncio.create_subprocess_exec(
+            *cmd,
             cwd=bot_dir,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
         )
 
-        # Stream bot output and scan for result hints
+        # Stream bot output with a global timeout so a hanging bot
+        # doesn't block the container forever.
         bot_output_lines: list[str] = []
-        assert bot_proc.stdout is not None
-        for raw_line in bot_proc.stdout:
-            line = raw_line.decode("utf-8", errors="replace")
-            sys.stdout.write(line)
-            sys.stdout.flush()
-            bot_output_lines.append(line)
 
-        bot_proc.wait()
-        exit_code = bot_proc.returncode
+        async def _stream_and_wait() -> int:
+            assert bot_proc.stdout is not None
+            async for raw_line in bot_proc.stdout:
+                line = raw_line.decode("utf-8", errors="replace")
+                sys.stdout.write(line)
+                sys.stdout.flush()
+                bot_output_lines.append(line)
+            return await bot_proc.wait()
+
+        try:
+            exit_code = await asyncio.wait_for(
+                _stream_and_wait(), timeout=_BOT_PROCESS_TIMEOUT,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("Bot process did not exit in time — killing")
+            bot_proc.kill()
+            await bot_proc.wait()
+            exit_code = -1
         logger.info(f"Bot process exited with code {exit_code}")
 
-        # Try to reconnect and save the replay
+        # Reconnect to SC2 to query the game result and save the replay.
+        # The external bot has disconnected, so we can reclaim the WebSocket.
+        game_result: str | None = None
         try:
             sc2_proc._session = aiohttp.ClientSession()
             sc2_proc._ws = await sc2_proc._session.ws_connect(
                 sc2_proc.ws_url, timeout=10,
             )
             controller._ws = sc2_proc._ws
+
+            # Query observation — player_result is populated once the game ends
+            obs_resp = await controller._execute(
+                observation=sc_pb.RequestObservation(),
+            )
+            if obs_resp.observation.player_result:
+                for pr in obs_resp.observation.player_result:
+                    if pr.player_id == 1:  # the external bot is player 1
+                        game_result = Result(pr.result).name
+                        logger.info(f"SC2 reported result for player 1: {game_result}")
+                        break
+
+            # Save replay
             save_resp = await controller._execute(
                 save_replay=sc_pb.RequestSaveReplay(),
             )
@@ -295,28 +323,25 @@ async def _run_match(bot_type: str) -> str:
                     f.write(save_resp.save_replay.data)
                 logger.info(f"Replay saved to {replay_path}")
         except Exception:
-            logger.warning("Could not save replay (SC2 may have already quit)")
+            logger.warning("Could not reconnect to SC2 (may have already quit)",
+                           exc_info=True)
 
     finally:
         _rollback_patches(patches)
         await sc2_proc._close_connection()
         KillSwitch.kill_all()
 
-    # Determine result from exit code and bot output
-    result = _parse_external_result(exit_code, bot_output_lines)
-    return result
+    # Prefer the authoritative SC2 result; fall back to log parsing
+    if game_result:
+        return game_result
+    return _parse_external_result(exit_code, bot_output_lines)
 
 
 def _parse_external_result(exit_code: int, output_lines: list[str]) -> str:
-    """Best-effort result detection from an external bot's output.
+    """Fallback result detection when SC2 observation is unavailable.
 
-    External bots don't report results in a standard way.  We look for
-    common patterns:
-    - SC2 game-ended messages in the bot's log
-    - "gg" chat (often means the bot knows it lost)
-    - Non-zero exit code = crash
-
-    Falls back to "Unknown" when the result can't be determined.
+    Only used if we couldn't reconnect to SC2 after the game to query the
+    authoritative player_result via RequestObservation.
     """
     if exit_code != 0:
         return "Crash"

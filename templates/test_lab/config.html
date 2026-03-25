@@ -123,17 +123,17 @@ td { text-align: left; }
                     against opponents and past versions of itself.
                 </p>
                 <div class="form-group">
+                    <label for="source_path">Source Path:</label>
+                    <input type="text" name="source_path" id="source_path" placeholder="e.g. C:\Users\me\mybot">
+                    <small style="color: #666;">Absolute path to the bot's live development source on the host. May differ from the packaged version in the bots folder. Mounted into Docker at runtime.</small>
+                </div>
+                <div class="form-group">
                     <label>
                         <input type="checkbox" name="is_test_subject" id="is_test_subject" onchange="document.getElementById('test-subject-fields').style.display = this.checked ? 'block' : 'none';">
                         This bot is a test subject
                     </label>
                 </div>
                 <div id="test-subject-fields" style="display: none;">
-                    <div class="form-group">
-                        <label for="source_path">Source Path:</label>
-                        <input type="text" name="source_path" id="source_path" placeholder="e.g. C:\Users\me\mybot">
-                        <small style="color: #666;">Absolute path to the bot's live development source on the host. May differ from the packaged version in the bots folder. Mounted into Docker at runtime.</small>
-                    </div>
                     <div class="form-group">
                         <label>
                             <input type="checkbox" name="enable_version_history" id="enable_version_history">
