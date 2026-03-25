@@ -477,17 +477,12 @@ def create_pending_match(
 
 DOCKER_COMPOSE_PATH = os.path.normpath(os.path.join(os.path.dirname(__file__)))
 AIARENA_COMPOSE_PATH = os.path.join(DOCKER_COMPOSE_PATH, 'aiarena')
+BLIZZARD_AI_RUNS_DIR = os.path.join(AIARENA_COMPOSE_PATH, 'blizzard_ai_runs')
 
 
 def _get_logs_dir() -> str:
-    """Return the configured single-container Docker logs directory from SystemConfig."""
-    return SystemConfig.load().logs_dir
-
-
-def _get_replays_dir() -> str:
-    """Return the configured single-container Docker replays directory (falls back to logs_dir)."""
-    config = SystemConfig.load()
-    return config.replays_dir or config.logs_dir
+    """Return the directory for single-container Docker match logs and replays."""
+    return BLIZZARD_AI_RUNS_DIR
 
 
 def _write_sc_docker_env() -> None:
@@ -497,10 +492,9 @@ def _write_sc_docker_env() -> None:
     vs-computer path so either compose file can resolve variables.
     """
     config = SystemConfig.load()
-    replays_dir = config.replays_dir or config.logs_dir
     env_content = (
         f'SC2_MAPS_PATH={config.sc2_maps_path}\n'
-        f'REPLAYS_DIR={replays_dir}\n'
+        f'REPLAYS_DIR={BLIZZARD_AI_RUNS_DIR}\n'
     )
     for directory in (DOCKER_COMPOSE_PATH, AIARENA_COMPOSE_PATH):
         env_path = os.path.join(directory, '.env')
@@ -1667,10 +1661,8 @@ def update_system_config(request):
     max_concurrent = int(max_concurrent_raw)
     config = SystemConfig.load()
     config.max_concurrent_matches = max_concurrent
-    config.logs_dir = request.POST.get('logs_dir', '').strip()
     config.sc2_switcher_path = request.POST.get('sc2_switcher_path', '').strip()
     config.sc2_maps_path = request.POST.get('sc2_maps_path', '').strip()
-    config.replays_dir = request.POST.get('replays_dir', '').strip()
     config.save()
 
     label = 'unlimited' if max_concurrent == 0 else str(max_concurrent)
@@ -1698,17 +1690,15 @@ def save_setup(request):
     """Save first-run setup form and redirect to the results page."""
     config = SystemConfig.load()
 
-    config.logs_dir = request.POST.get('logs_dir', '').strip()
     config.sc2_maps_path = request.POST.get('sc2_maps_path', '').strip()
     config.sc2_switcher_path = request.POST.get('sc2_switcher_path', '').strip()
-    config.replays_dir = request.POST.get('replays_dir', '').strip()
 
     max_concurrent_raw = request.POST.get('max_concurrent_matches', '0').strip()
     if max_concurrent_raw.isdigit():
         config.max_concurrent_matches = int(max_concurrent_raw)
 
-    if not config.logs_dir or not config.sc2_maps_path:
-        messages.error(request, 'Logs Directory and SC2 Maps Path are required.')
+    if not config.sc2_maps_path:
+        messages.error(request, 'SC2 Maps Path is required.')
         return render(request, 'test_lab/setup.html', {
             'active_page': 'setup',
             'config': config,

@@ -17,17 +17,6 @@
         <h3>Required Paths</h3>
 
         <div class="form-group">
-            <label for="logs_dir">Logs / Replays Directory:</label>
-            <input type="text" name="logs_dir" id="logs_dir"
-                   value="{{ config.logs_dir }}" style="max-width: 600px;"
-                   required>
-            <small style="color: #666;">
-                Directory where single-container Docker match logs and replays are stored.
-                Example: <code>C:\Users\you\Documents\StarCraft II\Replays\Multiplayer\docker</code>
-            </small>
-        </div>
-
-        <div class="form-group">
             <label for="sc2_maps_path">StarCraft II Maps Path:</label>
             <input type="text" name="sc2_maps_path" id="sc2_maps_path"
                    value="{{ config.sc2_maps_path }}" style="max-width: 600px;"
@@ -48,16 +37,6 @@
                    value="{{ config.sc2_switcher_path }}" style="max-width: 600px;">
             <small style="color: #666;">
                 Path to SC2Switcher.exe (used to open replays). Leave default if your SC2 install is standard.
-            </small>
-        </div>
-
-        <div class="form-group">
-            <label for="replays_dir">Docker Replays Directory:</label>
-            <input type="text" name="replays_dir" id="replays_dir"
-                   value="{{ config.replays_dir }}" style="max-width: 600px;">
-            <small style="color: #666;">
-                Host path for Docker replays. Only needed if using the single-container runner.
-                If blank, defaults to the Logs Directory above.
             </small>
         </div>
 

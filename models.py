@@ -476,12 +476,6 @@ class SystemConfig(models.Model):
         default=0,
         help_text="Maximum number of matches that can run at the same time. 0 = unlimited.",
     )
-    logs_dir = models.CharField(
-        max_length=500,
-        blank=True,
-        default='',
-        help_text="Directory for single-container Docker match logs and replays.",
-    )
     sc2_switcher_path = models.CharField(
         max_length=500,
         blank=True,
@@ -494,17 +488,11 @@ class SystemConfig(models.Model):
         default=r'C:\Program Files (x86)\StarCraft II\Maps',
         help_text="Host path to StarCraft II Maps directory (mounted into Docker containers).",
     )
-    replays_dir = models.CharField(
-        max_length=500,
-        blank=True,
-        default='',
-        help_text="Host path for single-container Docker replays directory.",
-    )
 
     @property
     def is_configured(self) -> bool:
         """Return True if all required fields have been set."""
-        return bool(self.logs_dir and self.sc2_maps_path)
+        return bool(self.sc2_maps_path)
 
     def __str__(self):
         return f"SystemConfig (max_concurrent={self.max_concurrent_matches})"

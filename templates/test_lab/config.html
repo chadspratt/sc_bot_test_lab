@@ -535,20 +535,6 @@ td { text-align: left; }
                            value="{{ system_config.sc2_switcher_path }}" style="max-width: 600px; padding: 6px 8px;">
                     <small style="color: #666;">Path to SC2Switcher.exe for opening replays.</small>
                 </div>
-
-                <div class="form-group">
-                    <label for="logs_dir">Vs Blizzard Logs Directory:</label>
-                    <input type="text" name="logs_dir" id="logs_dir"
-                           value="{{ system_config.logs_dir }}" style="max-width: 600px; padding: 6px 8px;">
-                    <small style="color: #666;">Directory for Vs Blizzard Docker match logs and replays. <strong>Required.</strong></small>
-                </div>
-
-                <div class="form-group">
-                    <label for="replays_dir">Vs Blizzard Replays Directory:</label>
-                    <input type="text" name="replays_dir" id="replays_dir"
-                           value="{{ system_config.replays_dir }}" style="max-width: 600px; padding: 6px 8px;">
-                    <small style="color: #666;">Only needed for Vs Blizzard single-container runner. If blank, defaults to Logs Directory.</small>
-                </div>
             </div>
 
             <div class="utility-section">

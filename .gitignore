@@ -1,3 +1,4 @@
 *.pyc
 .env
 replay_test_files
+aiarena/blizzard_ai_runs
