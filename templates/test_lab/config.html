@@ -540,13 +540,15 @@ td { text-align: left; }
             <div class="utility-section">
                 <h3>Concurrency</h3>
                 <p>
-                    Control how many matches can run simultaneously. When the limit is reached,
+                    Control how many custom bot instances can run simultaneously. Each match
+                    uses one or two slots: vs Blizzard AI and replay tests count as 1;
+                    vs custom bot and vs past version count as 2. When the limit is reached,
                     new matches are queued and started automatically as running matches finish.
                 </p>
                 <div class="form-group">
-                    <label for="max_concurrent_matches">Max Concurrent Matches:</label>
-                    <input type="number" name="max_concurrent_matches" id="max_concurrent_matches"
-                           value="{{ system_config.max_concurrent_matches }}" min="0" style="width: 80px; padding: 6px 8px;">
+                    <label for="max_concurrent_custom_bots">Max Concurrent Custom Bots:</label>
+                    <input type="number" name="max_concurrent_custom_bots" id="max_concurrent_custom_bots"
+                           value="{{ system_config.max_concurrent_custom_bots }}" min="0" style="width: 80px; padding: 6px 8px;">
                     <small style="color: #666;">0 = unlimited (no limit on parallel matches)</small>
                 </div>
             </div>

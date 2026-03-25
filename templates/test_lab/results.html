@@ -16,7 +16,7 @@
 .race-border-right { border-right: 2px solid #666 !important; }
 .difficulty-header { background-color: #e9ecef; font-weight: bold; }
 .race-header { background-color: #f8f9fa; font-weight: bold; }
-.win-percentage-row { background-color: #f8f9fa; font-weight: bold; border-top: 2px solid #333; }
+.win-percentage-row { background-color: #f8f9fa; font-weight: bold; }
 .narrow-column { width: 80px; min-width: 80px; padding: 4px; }
 .test-group-column { width: 90px; min-width: 90px; padding: 4px; }
 th { position: sticky; z-index: 10; }
@@ -216,27 +216,31 @@ thead tr:nth-child(2) th { top: 41px; }
 {# ==================== MAPS TAB ==================== #}
 
 <div class="trigger-section">
-    <form method="get" action="" style="display: inline-block;">
+    <form method="get" action="" id="maps-filter-form" style="display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center;">
         <input type="hidden" name="tab" value="maps">
-        <label for="map_difficulty">Filter by Difficulty:</label>
-        <select name="difficulty" id="map_difficulty" onchange="this.form.submit()">
-            <option value="">All Difficulties</option>
-            <option value="Easy" {% if selected_difficulty == 'Easy' %}selected{% endif %}>Easy</option>
-            <option value="Medium" {% if selected_difficulty == 'Medium' %}selected{% endif %}>Medium</option>
-            <option value="MediumHard" {% if selected_difficulty == 'MediumHard' %}selected{% endif %}>MediumHard</option>
-            <option value="Hard" {% if selected_difficulty == 'Hard' %}selected{% endif %}>Hard</option>
-            <option value="Harder" {% if selected_difficulty == 'Harder' %}selected{% endif %}>Harder</option>
-            <option value="VeryHard" {% if selected_difficulty == 'VeryHard' %}selected{% endif %}>VeryHard</option>
-            <option value="CheatVision" {% if selected_difficulty == 'CheatVision' %}selected{% endif %}>CheatVision</option>
-            <option value="CheatMoney" {% if selected_difficulty == 'CheatMoney' %}selected{% endif %}>CheatMoney</option>
-            <option value="CheatInsane" {% if selected_difficulty == 'CheatInsane' %}selected{% endif %}>CheatInsane</option>
-        </select>
-        {% if selected_limit %}<input type="hidden" name="limit" value="{{ selected_limit }}">{% endif %}
-        <noscript><input type="submit" value="Filter"></noscript>
-    </form>
 
-    <form method="get" action="" style="display: inline-block; margin-left: 10px;">
-        <input type="hidden" name="tab" value="maps">
+        <label for="map_test_bot">Test Bot:</label>
+        <select name="test_bot" id="map_test_bot" onchange="this.form.submit()">
+            <option value="">All Bots</option>
+            {% for bot in test_subject_bots %}
+            <option value="{{ bot.id }}" {% if selected_test_bot == bot.id|stringformat:"d" %}selected{% endif %}>{{ bot.name }}</option>
+            {% endfor %}
+        </select>
+
+        <label for="map_difficulty">Blizzard:</label>
+        <select name="difficulty" id="map_difficulty" onchange="this.form.submit()">
+            <option value="" {% if selected_difficulty == '' %}selected{% endif %}>All</option>
+            <option value="CheatInsane" {% if selected_difficulty == 'CheatInsane' %}selected{% endif %}>CheatInsane</option>
+            <option value="CheatMoney" {% if selected_difficulty == 'CheatMoney' %}selected{% endif %}>CheatMoney</option>
+            <option value="CheatVision" {% if selected_difficulty == 'CheatVision' %}selected{% endif %}>CheatVision</option>
+            <option value="VeryHard" {% if selected_difficulty == 'VeryHard' %}selected{% endif %}>VeryHard</option>
+            <option value="Harder" {% if selected_difficulty == 'Harder' %}selected{% endif %}>Harder</option>
+            <option value="Hard" {% if selected_difficulty == 'Hard' %}selected{% endif %}>Hard</option>
+            <option value="MediumHard" {% if selected_difficulty == 'MediumHard' %}selected{% endif %}>MediumHard</option>
+            <option value="Medium" {% if selected_difficulty == 'Medium' %}selected{% endif %}>Medium</option>
+            <option value="Easy" {% if selected_difficulty == 'Easy' %}selected{% endif %}>Easy</option>
+        </select>
+
         <label for="map_limit">Show:</label>
         <select name="limit" id="map_limit" onchange="this.form.submit()">
             <option value="" {% if selected_limit == '' %}selected{% endif %}>All Test Groups</option>
@@ -245,44 +249,81 @@ thead tr:nth-child(2) th { top: 41px; }
             <option value="50" {% if selected_limit == '50' %}selected{% endif %}>Last 50</option>
             <option value="100" {% if selected_limit == '100' %}selected{% endif %}>Last 100</option>
         </select>
-        Divide by 5 to get approximate number of matches per map
-        {% if selected_difficulty %}<input type="hidden" name="difficulty" value="{{ selected_difficulty }}">{% endif %}
         <noscript><input type="submit" value="Filter"></noscript>
     </form>
 </div>
 
-{% if pivot_data %}
+{% if blizzard_rows or custom_bot_rows %}
     <table>
         <thead>
             <tr>
-                <th rowspan="3" class="map-column">Map</th>
-                <th rowspan="3" class="narrow-column">Win Rate</th>
-                <th rowspan="3" class="narrow-column">Avg Game Length</th>
-                {% for difficulty_group in header_structure %}
-                <th colspan="{{ difficulty_group.span }}" class="difficulty-header {% if not forloop.last %}difficulty-border-right{% endif %}">{{ difficulty_group.difficulty }} {{ difficulty_group.win_rate }}</th>
-                {% endfor %}
-            </tr>
-            <tr>
-                {% for difficulty_group in header_structure %}
-                    {% for race_group in difficulty_group.races %}
-                    <th colspan="{{ race_group.span }}" class="race-header {% if not forloop.last %}race-border-right{% elif not forloop.parentloop.last %}difficulty-border-right{% endif %}">{{ race_group.name }} {{ race_group.win_rate }}</th>
-                    {% endfor %}
-                {% endfor %}
-            </tr>
-            <tr>
-                {% for difficulty_group in header_structure %}
-                    {% for race_group in difficulty_group.races %}
-                        {% for build in race_group.builds %}
-                        <th class="{% if forloop.last and not forloop.parentloop.last %}race-border-right{% elif forloop.last and forloop.parentloop.last and not forloop.parentloop.parentloop.last %}difficulty-border-right{% endif %}">{{ build }}</th>
-                        {% endfor %}
-                    {% endfor %}
+                <th class="map-column">Opponent</th>
+                <th class="narrow-column">Win Rate</th>
+                <th class="narrow-column">Avg Time</th>
+                {% for map_name in sorted_maps %}
+                <th>{{ map_name }}</th>
                 {% endfor %}
             </tr>
         </thead>
         <tbody>
-            {% for row in pivot_data %}
+            {# --- Column totals row --- #}
+            <tr class="win-percentage-row">
+                <td><strong>All</strong></td>
+                <td>
+                    {% if grand_win_rate %}
+                        <span style="padding: 4px; border-radius: 3px;">{{ grand_win_rate }} ({{ grand_wins }}/{{ grand_games }})</span>
+                    {% else %}-{% endif %}
+                </td>
+                <td>{{ grand_avg_duration|format_duration|default:"-" }}</td>
+                {% for mt in map_totals %}
+                    {% if mt.win_rate %}
+                        {% with win_pct=mt.win_rate|slice:':-1'|add:'0' %}
+                        <td class="{% if win_pct >= 80 %}very-high-winrate{% elif win_pct >= 60 %}high-winrate{% elif win_pct >= 40 %}medium-winrate{% elif win_pct >= 20 %}low-winrate{% else %}very-low-winrate{% endif %}">
+                            {{ mt.win_rate }} ({{ mt.wins }}/{{ mt.games_played }})<br>
+                            <small>{{ mt.avg_duration|format_duration }}</small>
+                        </td>
+                        {% endwith %}
+                    {% else %}
+                    <td class="no-data">-</td>
+                    {% endif %}
+                {% endfor %}
+            </tr>
+
+            {# --- Race summary rows --- #}
+            {% for row in race_summary_rows %}
+            <tr class="win-percentage-row">
+                <td><strong>{{ row.label }}</strong></td>
+                <td>
+                    {% if row.overall_win_rate %}
+                        {% with win_pct=row.overall_win_rate|slice:':-1'|add:'0' %}
+                        <span class="{% if win_pct >= 80 %}very-high-winrate{% elif win_pct >= 60 %}high-winrate{% elif win_pct >= 40 %}medium-winrate{% elif win_pct >= 20 %}low-winrate{% else %}very-low-winrate{% endif %}" style="padding: 4px; border-radius: 3px;">
+                            {{ row.overall_win_rate }} ({{ row.overall_wins }}/{{ row.overall_games }})
+                        </span>
+                        {% endwith %}
+                    {% else %}-{% endif %}
+                </td>
+                <td>{{ row.overall_avg_duration|format_duration|default:"-" }}</td>
+                {% for cell_data in row.results %}
+                    {% if cell_data.win_rate %}
+                        {% with win_pct=cell_data.win_rate|slice:':-1'|add:'0' %}
+                        <td class="{% if win_pct >= 80 %}very-high-winrate{% elif win_pct >= 60 %}high-winrate{% elif win_pct >= 40 %}medium-winrate{% elif win_pct >= 20 %}low-winrate{% else %}very-low-winrate{% endif %}">
+                            {{ cell_data.win_rate }} ({{ cell_data.wins }}/{{ cell_data.games_played }})<br>
+                            <small>{{ cell_data.avg_duration|format_duration }}</small>
+                        </td>
+                        {% endwith %}
+                    {% else %}
+                    <td class="no-data">-</td>
+                    {% endif %}
+                {% endfor %}
+            </tr>
+            {% endfor %}
+
+            {# --- Blizzard AI rows --- #}
+            {% if blizzard_rows %}
+            <tr><td colspan="{{ sorted_maps|length|add:3 }}" style="background: #e9ecef; font-weight: bold; padding: 6px;">Blizzard AI</td></tr>
+            {% for row in blizzard_rows %}
             <tr>
-                <td class="map-column"><strong>{{ row.map_name }}</strong></td>
+                <td><strong>{{ row.label }}</strong></td>
                 <td>
                     {% if row.overall_win_rate %}
                         {% with win_pct=row.overall_win_rate|slice:':-1'|add:'0' %}
@@ -309,6 +350,41 @@ thead tr:nth-child(2) th { top: 41px; }
                 {% endfor %}
             </tr>
             {% endfor %}
+            {% endif %}
+
+            {# --- Custom bot rows --- #}
+            {% if custom_bot_rows %}
+            <tr><td colspan="{{ sorted_maps|length|add:3 }}" style="background: #e9ecef; font-weight: bold; padding: 6px;">Custom Bots</td></tr>
+            {% for row in custom_bot_rows %}
+            <tr>
+                <td><strong>{{ row.label }}</strong></td>
+                <td>
+                    {% if row.overall_win_rate %}
+                        {% with win_pct=row.overall_win_rate|slice:':-1'|add:'0' %}
+                        <span class="{% if win_pct >= 80 %}very-high-winrate{% elif win_pct >= 60 %}high-winrate{% elif win_pct >= 40 %}medium-winrate{% elif win_pct >= 20 %}low-winrate{% else %}very-low-winrate{% endif %}" style="padding: 4px; border-radius: 3px;">
+                            {{ row.overall_win_rate }} ({{ row.overall_wins }}/{{ row.overall_games }})
+                        </span>
+                        {% endwith %}
+                    {% else %}
+                        <span class="no-data" style="padding: 4px; border-radius: 3px;">-</span>
+                    {% endif %}
+                </td>
+                <td>{{ row.overall_avg_duration|format_duration|default:"-" }}</td>
+                {% for cell_data in row.results %}
+                    {% if cell_data.win_rate %}
+                        {% with win_pct=cell_data.win_rate|slice:':-1'|add:'0' %}
+                        <td class="{% if win_pct >= 80 %}very-high-winrate{% elif win_pct >= 60 %}high-winrate{% elif win_pct >= 40 %}medium-winrate{% elif win_pct >= 20 %}low-winrate{% else %}very-low-winrate{% endif %}">
+                            {{ cell_data.win_rate }} ({{ cell_data.wins }}/{{ cell_data.games_played }})<br>
+                            <small>{{ cell_data.avg_duration|format_duration }}</small>
+                        </td>
+                        {% endwith %}
+                    {% else %}
+                    <td class="no-data">-</td>
+                    {% endif %}
+                {% endfor %}
+            </tr>
+            {% endfor %}
+            {% endif %}
         </tbody>
     </table>
 {% else %}

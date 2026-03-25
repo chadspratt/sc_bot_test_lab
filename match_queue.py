@@ -1,4 +1,4 @@
-"""Match queue — enforces the max-concurrent-matches limit.
+"""Match queue — enforces the max-concurrent-custom-bots limit.
 
 Matches that cannot start immediately are saved in the DB with result
 ``'Queued'`` and launched automatically when capacity becomes available.
@@ -6,6 +6,10 @@ Matches that cannot start immediately are saved in the DB with result
 The database is the source of truth:
 - **Running** = ``result='Pending'`` with ``start_timestamp`` in the last 24 h.
 - **Queued**  = ``result='Queued'``.
+
+Each running match consumes "custom bot slots":
+- vs Blizzard AI or replay test (built-in AI) → 1 slot (one CPU core)
+- vs custom bot or vs past version → 2 slots (two CPU cores)
 
 Launcher closures are held in memory for the current process.  If the
 server restarts (e.g. Django dev-server reload), launchers are
@@ -30,25 +34,40 @@ _queued_launchers: dict[int, Callable[[], None]] = {}
 _queue_lock = threading.Lock()
 
 
-def get_running_match_count() -> int:
-    """Return the number of Pending matches started in the last 24 hours."""
+def match_custom_bot_cost(match) -> int:
+    """Return how many custom bot slots a match consumes.
+
+    Matches against a custom bot or a past version use 2 slots (two CPU
+    cores); everything else (vs Blizzard AI, replay tests with built-in
+    AI) uses 1 slot.
+    """
+    if match.opponent_bot_id or match.opponent_commit_hash:
+        return 2
+    return 1
+
+
+def get_running_custom_bot_count() -> int:
+    """Return the total custom bot slots used by running matches."""
     from .models import Match
     cutoff = timezone.now() - timedelta(hours=24)
-    return Match.objects.filter(result='Pending', start_timestamp__gte=cutoff).count()
+    running = Match.objects.filter(
+        result='Pending', start_timestamp__gte=cutoff,
+    ).only('opponent_bot_id', 'opponent_commit_hash')
+    return sum(match_custom_bot_cost(m) for m in running)
 
 
 def get_max_concurrent() -> int:
-    """Return the configured maximum concurrent matches (0 = unlimited)."""
+    """Return the configured max concurrent custom bots (0 = unlimited)."""
     from .models import SystemConfig
-    return SystemConfig.load().max_concurrent_matches
+    return SystemConfig.load().max_concurrent_custom_bots
 
 
-def has_capacity() -> bool:
-    """Return True if another match can be started right now."""
+def has_capacity(cost: int = 1) -> bool:
+    """Return True if a match with the given cost can be started now."""
     limit = get_max_concurrent()
     if limit <= 0:
         return True
-    return get_running_match_count() < limit
+    return get_running_custom_bot_count() + cost <= limit
 
 
 def enqueue(match_id: int, launcher: Callable[[], None]) -> bool:
@@ -76,14 +95,15 @@ def enqueue(match_id: int, launcher: Callable[[], None]) -> bool:
         except Match.DoesNotExist:
             return False
 
-        if has_capacity():
+        cost = match_custom_bot_cost(match)
+        if has_capacity(cost):
             match.result = 'Pending'
             match.save()
             launcher()
             return True
 
         _queued_launchers[match_id] = launcher
-        logger.info('Match %d: queued (at capacity, %d running)', match_id, get_running_match_count())
+        logger.info('Match %d: queued (at capacity, %d custom bot slots used)', match_id, get_running_custom_bot_count())
         return False
 
 
@@ -112,24 +132,33 @@ def _drain_unlocked() -> int:
     started = 0
 
     # 1) Drain matches that have in-memory launchers
+    from .models import Match as _Match
     while _queued_launchers and has_capacity():
         match_id, launcher = next(iter(_queued_launchers.items()))
+        try:
+            m = _Match.objects.get(id=match_id)
+            cost = match_custom_bot_cost(m)
+        except _Match.DoesNotExist:
+            del _queued_launchers[match_id]
+            continue
+        if not has_capacity(cost):
+            break
         del _queued_launchers[match_id]
         if _start_queued_match(match_id, launcher):
             started += 1
 
     # 2) Pick up DB-queued matches that lost their in-memory launcher
     if has_capacity():
-        from .models import Match
         orphaned = (
-            Match.objects
+            _Match.objects
             .filter(result='Queued')
             .exclude(id__in=list(_queued_launchers.keys()))
             .select_related('opponent_bot', 'test_bot', 'replay_test')
             .order_by('id')
         )
         for match_obj in orphaned:
-            if not has_capacity():
+            cost = match_custom_bot_cost(match_obj)
+            if not has_capacity(cost):
                 break
             launcher = _rebuild_launcher(match_obj)
             if launcher is None:

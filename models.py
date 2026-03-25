@@ -472,9 +472,11 @@ class SystemConfig(models.Model):
         db_table = 'system_config'
 
     id = models.AutoField(primary_key=True)
-    max_concurrent_matches = models.IntegerField(
+    max_concurrent_custom_bots = models.IntegerField(
         default=0,
-        help_text="Maximum number of matches that can run at the same time. 0 = unlimited.",
+        help_text="Maximum number of custom bot instances that can run at the same time. "
+                  "vs Blizzard AI and replay tests count as 1; vs custom bot and vs past version count as 2. "
+                  "0 = unlimited.",
     )
     sc2_switcher_path = models.CharField(
         max_length=500,
@@ -495,7 +497,7 @@ class SystemConfig(models.Model):
         return bool(self.sc2_maps_path)
 
     def __str__(self):
-        return f"SystemConfig (max_concurrent={self.max_concurrent_matches})"
+        return f"SystemConfig (max_concurrent_custom_bots={self.max_concurrent_custom_bots})"
 
     @classmethod
     def load(cls) -> 'SystemConfig':

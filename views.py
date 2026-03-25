@@ -1163,24 +1163,40 @@ def serve_aiarena_bot_log(request, match_id, bot_name):
     return FileResponse(open(log_path, 'rb'), content_type='text/plain')
 
 def _get_map_breakdown_context(request):
-    """Return context dict for the Maps tab."""
-    # Define difficulty order to match the filter dropdown
+    """Return context dict for the Maps tab.
+
+    The table is transposed compared to the old layout: maps are columns
+    and opponents are rows.  Blizzard AI opponents get one row per
+    difficulty/race/build combo; custom bots get one row each.
+    Only vs-blizzard and vs-custom-bot matches are included (replay tests
+    and past-version matches are excluded).
+    """
     difficulty_order = [
         'Easy', 'Medium', 'MediumHard', 'Hard', 'Harder', 'VeryHard',
         'CheatVision', 'CheatMoney', 'CheatInsane'
     ]
-    
-    # Get difficulty filter from request
-    selected_difficulty = request.GET.get('difficulty', '')
+
+    selected_test_bot = request.GET.get('test_bot', '')
+    selected_difficulty = request.GET.get('difficulty', 'CheatInsane')
     selected_limit = request.GET.get('limit', '10')
-    
-    matches = Match.objects.all().exclude(test_group_id=-1)
-    
-    # Apply difficulty filter if selected
+
+    # Only blizzard AI and custom bot matches (exclude replay & past-version & unknown maps)
+    matches = (
+        Match.objects.select_related('opponent_bot', 'test_bot')
+        .filter(replay_test__isnull=True)
+        .filter(opponent_commit_hash='')
+        .exclude(map_name='TBD (from replay)')
+    )
+
+    if selected_test_bot and selected_test_bot.isdigit():
+        matches = matches.filter(test_bot_id=int(selected_test_bot))
+
+    # Filter Blizzard AI matches by difficulty (custom bot matches pass through)
     if selected_difficulty:
-        matches = matches.filter(opponent_difficulty=selected_difficulty)
-    
-    # Apply test group limit if selected — only include matches from the N most recent test groups
+        matches = matches.filter(
+            Q(opponent_bot__isnull=False) | Q(opponent_difficulty=selected_difficulty)
+        )
+
     if selected_limit and selected_limit.isdigit():
         recent_group_ids = list(
             Match.objects.exclude(test_group_id=-1)
@@ -1188,197 +1204,179 @@ def _get_map_breakdown_context(request):
             .distinct()
             .order_by('-test_group_id')[:int(selected_limit)]
         )
-        matches = matches.filter(test_group_id__in=recent_group_ids)
-    
-    # Group matches by map and create pivot structure
-    grouped_matches = defaultdict(lambda: defaultdict(list))  # map -> opponent -> [matches]
-    all_opponents = set()
-    difficulty_groups = defaultdict(lambda: defaultdict(list))  # difficulty -> race -> builds
-    
-    # Track win/loss counts for each map/opponent combination
-    map_opponent_stats = defaultdict(lambda: {'victories': 0, 'total_games': 0, 'total_duration': 0, 'games_with_duration': 0})
-    
+        # Include ad-hoc matches (test_group_id=-1) alongside the N most recent groups
+        matches = matches.filter(
+            Q(test_group_id=-1) | Q(test_group_id__in=recent_group_ids)
+        )
+
+    # Collect stats keyed by (opponent_key, map_name)
+    stats = defaultdict(lambda: {
+        'victories': 0, 'total_games': 0,
+        'total_duration': 0, 'games_with_duration': 0,
+    })
+    all_maps: set[str] = set()
+    blizzard_keys: set[str] = set()
+    custom_bot_keys: dict[str, str] = {}  # key -> display name
+    custom_bot_race: dict[str, str] = {}  # key -> opponent race
+
     for match in matches:
-        if match.map_name == "TBD":
-            continue  # Skip matches without a valid map name
-        opponent_name = f"{match.opponent_race}-{match.opponent_difficulty}-{match.opponent_build}"
-        all_opponents.add(opponent_name)
-        
-        # Group by map
-        grouped_matches[match.map_name][opponent_name].append(match)
-        
-        # Track stats for this map/opponent combination
-        key = (match.map_name, opponent_name)
-        if match.result in ['Victory', 'Defeat']:
-            map_opponent_stats[key]['total_games'] += 1
+        if match.map_name == 'TBD':
+            continue
+        all_maps.add(match.map_name)
+
+        if match.opponent_bot is not None:
+            opp_key = f'bot_{match.opponent_bot.id}'
+            custom_bot_keys[opp_key] = match.opponent_bot.name
+            if match.opponent_race:
+                custom_bot_race[opp_key] = match.opponent_race
+        else:
+            opp_key = f'{match.opponent_race}/{match.opponent_build}'
+            blizzard_keys.add(opp_key)
+
+        cell = stats[(opp_key, match.map_name)]
+        if match.result in ('Victory', 'Defeat'):
+            cell['total_games'] += 1
             if match.result == 'Victory':
-                map_opponent_stats[key]['victories'] += 1
-        
-        if match.duration_in_game_time is not None and match.duration_in_game_time > 0:
-            map_opponent_stats[key]['total_duration'] += match.duration_in_game_time
-            map_opponent_stats[key]['games_with_duration'] += 1
-        
-        # Build hierarchical structure for headers
-        difficulty_groups[match.opponent_difficulty][match.opponent_race].append(match.opponent_build)
-    
-    # Sort and deduplicate builds within each race/difficulty group
-    for difficulty in difficulty_groups:
-        for race in difficulty_groups[difficulty]:
-            difficulty_groups[difficulty][race] = sorted(list(set(difficulty_groups[difficulty][race])))
-    
-    # Create ordered list of opponents for consistent column ordering
-    sorted_opponents = []
-    sorted_difficulties = sorted(difficulty_groups.keys(), key=lambda x: difficulty_order.index(x) if x in difficulty_order else 999)
-    
-    # Build header structure and opponent order
-    header_structure = []
-    for difficulty in sorted_difficulties:
-        races = sorted(difficulty_groups[difficulty].keys())
-        difficulty_span = sum(len(difficulty_groups[difficulty][race]) for race in races)
-        
-        race_headers = []
-        for race in races:
-            builds = difficulty_groups[difficulty][race]
-            for build in builds:
-                opponent_name = f"{race}-{difficulty}-{build}"
-                sorted_opponents.append(opponent_name)
-            
-            race_headers.append({
-                'name': race,
-                'span': len(builds),
-                'builds': builds
-            })
-        
-        header_structure.append({
-            'difficulty': difficulty,
-            'span': difficulty_span,
-            'races': race_headers
-        })
-    
-    # Sort maps alphabetically
-    sorted_maps = sorted(grouped_matches.keys())
-    
-    # Create the pivot table data
-    pivot_data = []
-    for map_name in sorted_maps:
-        row = {'map_name': map_name, 'results': [], 'overall_win_rate': None, 'overall_avg_duration': None, 'overall_wins': 0, 'overall_games': 0}
-        map_total_victories = 0
-        map_total_games = 0
-        map_total_duration = 0
-        map_games_with_duration = 0
-        for opponent in sorted_opponents:
-            key = (map_name, opponent)
-            stats = map_opponent_stats[key]
-            
-            # Calculate win percentage for this map/opponent combo
-            if stats['total_games'] > 0:
-                win_percentage = (stats['victories'] / stats['total_games']) * 100
-                win_rate_str = f"{win_percentage:.0f}%"
+                cell['victories'] += 1
+        if match.duration_in_game_time and match.duration_in_game_time > 0:
+            cell['total_duration'] += match.duration_in_game_time
+            cell['games_with_duration'] += 1
+
+    sorted_maps = sorted(all_maps)
+
+    def _make_row(opp_key, label):
+        row_victories = 0
+        row_games = 0
+        row_duration = 0
+        row_dur_count = 0
+        cells = []
+        for map_name in sorted_maps:
+            s = stats[(opp_key, map_name)]
+            if s['total_games'] > 0:
+                wp = (s['victories'] / s['total_games']) * 100
+                win_rate_str = f'{wp:.0f}%'
             else:
                 win_rate_str = None
-            
-            # Calculate average duration for this map/opponent combo
-            if stats['games_with_duration'] > 0:
-                avg_duration = int(stats['total_duration'] / stats['games_with_duration'])
-            else:
-                avg_duration = None
-            
-            cell_data = {
+            avg_dur = int(s['total_duration'] / s['games_with_duration']) if s['games_with_duration'] else None
+            cells.append({
                 'win_rate': win_rate_str,
-                'avg_duration': avg_duration,
-                'wins': stats['victories'],
-                'games_played': stats['total_games']
-            }
-            
-            row['results'].append(cell_data)
-            map_total_victories += stats['victories']
-            map_total_games += stats['total_games']
-            map_total_duration += stats['total_duration']
-            map_games_with_duration += stats['games_with_duration']
-        
-        if map_total_games > 0:
-            overall_win_percentage = (map_total_victories / map_total_games) * 100
-            row['overall_win_rate'] = f"{overall_win_percentage:.0f}%"
-            row['overall_wins'] = map_total_victories
-            row['overall_games'] = map_total_games
-        else:
-            row['overall_win_rate'] = None
-            row['overall_wins'] = 0
-            row['overall_games'] = 0
-        
-        if map_games_with_duration > 0:
-            row['overall_avg_duration'] = int(map_total_duration / map_games_with_duration)
-        else:
-            row['overall_avg_duration'] = None
+                'avg_duration': avg_dur,
+                'wins': s['victories'],
+                'games_played': s['total_games'],
+            })
+            row_victories += s['victories']
+            row_games += s['total_games']
+            row_duration += s['total_duration']
+            row_dur_count += s['games_with_duration']
 
-        pivot_data.append(row)
-    
-    # Calculate win rates for header structure (same as match_list)
-    opponent_stats = defaultdict(lambda: {'victories': 0, 'total_games': 0})
-    for opponent in sorted_opponents:
-        for map_name in sorted_maps:
-            key = (map_name, opponent)
-            stats = map_opponent_stats[key]
-            opponent_stats[opponent]['total_games'] += stats['total_games']
-            opponent_stats[opponent]['victories'] += stats['victories']
-    
-    # Calculate win rates by race within each difficulty
-    for difficulty_group in header_structure:
-        difficulty_name = difficulty_group['difficulty']
-        for race_group in difficulty_group['races']:
-            race_name = race_group['name']
-            race_victories = 0
-            race_total_games = 0
-            
-            for opponent in sorted_opponents:
-                if opponent.startswith(f"{race_name}-{difficulty_name}-"):
-                    stats = opponent_stats[opponent]
-                    race_total_games += stats['total_games']
-                    race_victories += stats['victories']
-            
-            if race_total_games > 0:
-                race_win_percentage = (race_victories / race_total_games) * 100
-                race_group['win_rate'] = f"{race_win_percentage:.0f}%"
-            else:
-                race_group['win_rate'] = "-"
-            
-            # Add win rates to individual builds
-            for i, build in enumerate(race_group['builds']):
-                opponent_name = f"{race_name}-{difficulty_name}-{build}"
-                stats = opponent_stats[opponent_name]
-                if stats['total_games'] > 0:
-                    build_win_percentage = (stats['victories'] / stats['total_games']) * 100
-                    race_group['builds'][i] = f"{build} {build_win_percentage:.0f}%"
-                else:
-                    race_group['builds'][i] = f"{build} -"
-    
-    # Calculate win rates by difficulty
-    difficulty_win_rates = {}
-    for difficulty in sorted_difficulties:
-        difficulty_victories = 0
-        difficulty_total_games = 0
-        for opponent in sorted_opponents:
-            if f"-{difficulty}-" in opponent:
-                stats = opponent_stats[opponent]
-                difficulty_total_games += stats['total_games']
-                difficulty_victories += stats['victories']
-        
-        if difficulty_total_games > 0:
-            difficulty_win_percentage = (difficulty_victories / difficulty_total_games) * 100
-            difficulty_win_rates[difficulty] = f"{difficulty_win_percentage:.0f}%"
+        if row_games > 0:
+            overall_wp = f'{(row_victories / row_games) * 100:.0f}%'
         else:
-            difficulty_win_rates[difficulty] = "-"
-    
-    # Add difficulty win rates to header structure
-    for difficulty_group in header_structure:
-        difficulty_group['win_rate'] = difficulty_win_rates.get(difficulty_group['difficulty'], "-")
-    
+            overall_wp = None
+
+        return {
+            'label': label,
+            'results': cells,
+            'overall_win_rate': overall_wp,
+            'overall_wins': row_victories,
+            'overall_games': row_games,
+            'overall_avg_duration': int(row_duration / row_dur_count) if row_dur_count else None,
+        }
+
+    # --- Blizzard AI rows (sorted by race, then build) ---
+    sorted_blizzard = sorted(blizzard_keys, key=lambda k: (
+        k.split('/')[0],
+        k.split('/')[1],
+    ))
+    blizzard_rows = [_make_row(k, k) for k in sorted_blizzard]
+
+    # --- Custom bot rows (sorted alphabetically by name) ---
+    sorted_custom = sorted(custom_bot_keys.items(), key=lambda item: item[1].lower())
+    custom_bot_rows = [_make_row(k, name) for k, name in sorted_custom]
+
+    # --- Race summary rows (aggregate all keys by opponent race) ---
+    race_keys: dict[str, list[str]] = defaultdict(list)
+    for k in blizzard_keys:
+        race = k.split('/')[0]
+        race_keys[race].append(k)
+    for k, race in custom_bot_race.items():
+        race_keys[race].append(k)
+
+    def _make_aggregate_row(keys: list[str], label: str):
+        row_v = row_g = row_d = row_dc = 0
+        cells = []
+        for map_name in sorted_maps:
+            mv = mg = md = mdc = 0
+            for k in keys:
+                s = stats[(k, map_name)]
+                mv += s['victories']
+                mg += s['total_games']
+                md += s['total_duration']
+                mdc += s['games_with_duration']
+            cells.append({
+                'win_rate': f'{(mv / mg) * 100:.0f}%' if mg else None,
+                'avg_duration': int(md / mdc) if mdc else None,
+                'wins': mv,
+                'games_played': mg,
+            })
+            row_v += mv; row_g += mg; row_d += md; row_dc += mdc
+        return {
+            'label': label,
+            'results': cells,
+            'overall_win_rate': f'{(row_v / row_g) * 100:.0f}%' if row_g else None,
+            'overall_wins': row_v,
+            'overall_games': row_g,
+            'overall_avg_duration': int(row_d / row_dc) if row_dc else None,
+        }
+
+    race_summary_rows = []
+    for race in ('Protoss', 'Terran', 'Zerg', 'Random'):
+        keys = race_keys.get(race, [])
+        if keys:
+            race_summary_rows.append(_make_aggregate_row(keys, race))
+
+    # --- Per-map column totals ---
+    all_opp_keys = list(blizzard_keys) + list(custom_bot_keys.keys())
+    map_totals = []
+    grand_victories = 0
+    grand_games = 0
+    grand_duration = 0
+    grand_dur_count = 0
+    for map_name in sorted_maps:
+        mv = mg = md = mdc = 0
+        for opp_key in all_opp_keys:
+            s = stats[(opp_key, map_name)]
+            mv += s['victories']
+            mg += s['total_games']
+            md += s['total_duration']
+            mdc += s['games_with_duration']
+        map_totals.append({
+            'win_rate': f'{(mv / mg) * 100:.0f}%' if mg else None,
+            'avg_duration': int(md / mdc) if mdc else None,
+            'wins': mv,
+            'games_played': mg,
+        })
+        grand_victories += mv
+        grand_games += mg
+        grand_duration += md
+        grand_dur_count += mdc
+
+    test_subject_bots = CustomBot.objects.filter(is_test_subject=True).order_by('name')
+
     return {
-        'pivot_data': pivot_data,
-        'opponents': sorted_opponents,
-        'header_structure': header_structure,
+        'sorted_maps': sorted_maps,
+        'blizzard_rows': blizzard_rows,
+        'custom_bot_rows': custom_bot_rows,
+        'race_summary_rows': race_summary_rows,
+        'map_totals': map_totals,
+        'grand_win_rate': f'{(grand_victories / grand_games) * 100:.0f}%' if grand_games else None,
+        'grand_wins': grand_victories,
+        'grand_games': grand_games,
+        'grand_avg_duration': int(grand_duration / grand_dur_count) if grand_dur_count else None,
+        'selected_limit': selected_limit,
+        'selected_test_bot': selected_test_bot,
         'selected_difficulty': selected_difficulty,
-        'selected_limit': selected_limit
+        'test_subject_bots': test_subject_bots,
     }
 
 
@@ -1529,7 +1527,7 @@ def run_match_page(request):
     """Run Match page with match type tabs and custom match results table."""
     custom_bots_list = CustomBot.objects.all().order_by('name')
     test_subject_bots = CustomBot.objects.filter(is_test_subject=True).order_by('name')
-    version_test_bots = CustomBot.objects.filter(source_path__gt='').order_by('name')
+    version_test_bots = CustomBot.objects.filter(enable_version_history=True).order_by('name')
 
     # Collect recent commits for each test-subject bot that has a git repo
     recent_commits_by_bot: dict[int, list] = {}
@@ -1653,20 +1651,20 @@ def update_system_config(request):
     """Update system-wide settings from the System tab."""
     config_url = f"{reverse('config_page')}#system"
 
-    max_concurrent_raw = request.POST.get('max_concurrent_matches', '0').strip()
+    max_concurrent_raw = request.POST.get('max_concurrent_custom_bots', '0').strip()
     if not max_concurrent_raw.isdigit():
-        messages.error(request, 'Max concurrent matches must be a non-negative integer.')
+        messages.error(request, 'Max concurrent custom bots must be a non-negative integer.')
         return redirect(config_url)
 
     max_concurrent = int(max_concurrent_raw)
     config = SystemConfig.load()
-    config.max_concurrent_matches = max_concurrent
+    config.max_concurrent_custom_bots = max_concurrent
     config.sc2_switcher_path = request.POST.get('sc2_switcher_path', '').strip()
     config.sc2_maps_path = request.POST.get('sc2_maps_path', '').strip()
     config.save()
 
     label = 'unlimited' if max_concurrent == 0 else str(max_concurrent)
-    messages.success(request, f'System config updated (max concurrent: {label}).')
+    messages.success(request, f'System config updated (max concurrent custom bots: {label}).')
 
     # Drain queue in case the new limit is higher
     match_queue.drain_queue()
@@ -1693,9 +1691,9 @@ def save_setup(request):
     config.sc2_maps_path = request.POST.get('sc2_maps_path', '').strip()
     config.sc2_switcher_path = request.POST.get('sc2_switcher_path', '').strip()
 
-    max_concurrent_raw = request.POST.get('max_concurrent_matches', '0').strip()
+    max_concurrent_raw = request.POST.get('max_concurrent_custom_bots', '0').strip()
     if max_concurrent_raw.isdigit():
-        config.max_concurrent_matches = int(max_concurrent_raw)
+        config.max_concurrent_custom_bots = int(max_concurrent_raw)
 
     if not config.sc2_maps_path:
         messages.error(request, 'SC2 Maps Path is required.')
