@@ -11,13 +11,21 @@ BOT_DIR="${BOT_DIR:-/root/bot_dir}"
 cd "$BOT_DIR"
 
 # ---------------------------------------------------------------------------
-# Detect bot type from ladderbots.json
+# Detect bot type from ladderbots.json (case-insensitive filename)
 # ---------------------------------------------------------------------------
 BOT_TYPE="python"
-if [ -f "ladderbots.json" ]; then
+LADDERBOTS_FILE=""
+for candidate in ladderbots.json LadderBots.json; do
+    if [ -f "$candidate" ]; then
+        LADDERBOTS_FILE="$candidate"
+        break
+    fi
+done
+
+if [ -n "$LADDERBOTS_FILE" ]; then
     BOT_TYPE=$(python3 -c "
 import json, sys
-with open('ladderbots.json') as f:
+with open('$LADDERBOTS_FILE') as f:
     data = json.load(f)
 bots = data.get('Bots', {})
 if bots:
@@ -69,28 +77,21 @@ case "$BOT_TYPE" in
         exec python3 /root/runner/run_vs_computer.py "$@"
         ;;
 
-    dotnetcore)
-        echo "ERROR: dotnetcore bots are not yet supported for vs-computer matches."
-        echo "MATCH_RESULT:Crash"
-        exit 1
-        ;;
+    dotnetcore|cpplinux|cppwin32|java|nodejs)
+        # External (non-Python) bots: launch SC2 + create game via Python,
+        # then spawn the bot process which connects via WebSocket.
+        echo "Installing sc2 runner dependencies..."
+        uv pip install --system -r /root/runner/sc2_deps.txt
 
-    cpplinux|cppwin32)
-        echo "ERROR: C++ bots are not yet supported for vs-computer matches."
-        echo "MATCH_RESULT:Crash"
-        exit 1
-        ;;
+        # Install bot-specific npm packages if present
+        if [ "$BOT_TYPE" = "nodejs" ] && [ -f "package.json" ]; then
+            echo "Installing npm dependencies..."
+            npm install --omit=dev 2>&1
+        fi
 
-    java)
-        echo "ERROR: Java bots are not yet supported for vs-computer matches."
-        echo "MATCH_RESULT:Crash"
-        exit 1
-        ;;
-
-    nodejs)
-        echo "ERROR: Node.js bots are not yet supported for vs-computer matches."
-        echo "MATCH_RESULT:Crash"
-        exit 1
+        export PYTHONPATH="/root/runner${PYTHONPATH:+:$PYTHONPATH}"
+        echo "PYTHONPATH=$PYTHONPATH"
+        exec python3 /root/runner/run_vs_computer_external.py "$BOT_TYPE"
         ;;
 
     *)

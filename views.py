@@ -62,7 +62,7 @@ def _get_match_list_context(request):
     show_custom_bots = request.GET.get('custom_bots', '1') != '0'
     show_past_versions = request.GET.get('past_versions', '1') != '0'
     show_replays = request.GET.get('replays', '1') != '0'
-    selected_limit = request.GET.get('limit', '')
+    selected_limit = request.GET.get('limit', '10')
     selected_branch = request.GET.get('branch', '')
 
     matches = Match.objects.select_related('opponent_bot', 'test_group', 'test_bot', 'replay_test').exclude(test_group_id=-1)
@@ -1178,7 +1178,7 @@ def _get_map_breakdown_context(request):
     
     # Get difficulty filter from request
     selected_difficulty = request.GET.get('difficulty', '')
-    selected_limit = request.GET.get('limit', '')
+    selected_limit = request.GET.get('limit', '10')
     
     matches = Match.objects.all().exclude(test_group_id=-1)
     

@@ -116,11 +116,11 @@ thead tr:nth-child(2) th { top: 41px; }
 
         <label for="limit">Row Limit:</label>
         <select name="limit" id="limit">
-            <option value="">All</option>
             <option value="10" {% if selected_limit == '10' %}selected{% endif %}>Last 10</option>
             <option value="25" {% if selected_limit == '25' %}selected{% endif %}>Last 25</option>
             <option value="50" {% if selected_limit == '50' %}selected{% endif %}>Last 50</option>
             <option value="100" {% if selected_limit == '100' %}selected{% endif %}>Last 100</option>
+            <option value="" {% if selected_limit == '' %}selected{% endif %}>All</option>
         </select>
 
         <label for="branch">Branch:</label>
@@ -239,7 +239,7 @@ thead tr:nth-child(2) th { top: 41px; }
         <input type="hidden" name="tab" value="maps">
         <label for="map_limit">Show:</label>
         <select name="limit" id="map_limit" onchange="this.form.submit()">
-            <option value="">All Test Groups</option>
+            <option value="" {% if selected_limit == '' %}selected{% endif %}>All Test Groups</option>
             <option value="10" {% if selected_limit == '10' %}selected{% endif %}>Last 10</option>
             <option value="25" {% if selected_limit == '25' %}selected{% endif %}>Last 25</option>
             <option value="50" {% if selected_limit == '50' %}selected{% endif %}>Last 50</option>
