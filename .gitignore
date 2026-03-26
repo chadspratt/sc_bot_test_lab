@@ -2,3 +2,6 @@
 .env
 replay_test_files
 aiarena/blizzard_ai_runs
+# Local plugins — tracked except for the discovery __init__.py
+plugins/*.py
+!plugins/__init__.py

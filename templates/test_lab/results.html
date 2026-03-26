@@ -31,30 +31,6 @@ thead tr:nth-child(2) th { top: 41px; }
 .very-low-winrate { background-color: #c49296; color: #541118; }
 .no-data { background-color: #e2e3e5; color: #383d41; }
 .map-column { width: 150px; min-width: 150px; padding: 4px; text-align: left; }
-
-/* Building timing */
-.header-row th {
-    writing-mode: vertical-rl;
-    text-orientation: mixed;
-    height: 150px;
-    white-space: nowrap;
-}
-.avg-row { background-color: #e9ecef; font-weight: bold; border-top: 2px solid #333; }
-.timing-cell {
-    font-family: monospace;
-    font-size: 11px;
-    line-height: 1.3;
-    padding: 4px;
-}
-.result-V { color: #28a745; font-weight: bold; }
-.result-D { color: #dc3545; }
-.much-faster { background-color: #d4edda; }
-.faster { background-color: #e9f5ec; }
-.slightly-faster { background-color: #f1f9f3; }
-.average { background-color: #ffffff; }
-.slightly-slower { background-color: #fff9f0; }
-.slower { background-color: #fff3e0; }
-.much-slower { background-color: #ffebee; }
 {% endblock %}
 
 {% block content %}
@@ -62,7 +38,6 @@ thead tr:nth-child(2) th { top: 41px; }
 <div class="tab-bar">
     <a href="?tab=test-groups{{ filter_qs }}" {% if active_tab == 'test-groups' %}class="active"{% endif %}>Test Groups</a>
     <a href="?tab=maps{{ filter_qs }}" {% if active_tab == 'maps' %}class="active"{% endif %}>Maps</a>
-    <a href="?tab=building-timing{{ filter_qs }}" {% if active_tab == 'building-timing' %}class="active"{% endif %}>Building Timing</a>
 </div>
 
 {% if active_tab == 'test-groups' %}
@@ -390,53 +365,6 @@ thead tr:nth-child(2) th { top: 41px; }
 {% else %}
     <p>No match data available.</p>
 {% endif %}
-
-{% elif active_tab == 'building-timing' %}
-{# ==================== BUILDING TIMING TAB ==================== #}
-
-<p>Shows the earliest time (in game seconds) each building type was completed in each test group.</p>
-
-<table>
-    <thead>
-        <tr class="header-row">
-            <th>Test Group</th>
-            {% for building_type in building_types %}
-            <th>{{ building_type }}</th>
-            {% endfor %}
-        </tr>
-    </thead>
-    <tbody>
-        <tr class="avg-row">
-            <td>Average</td>
-            {% for avg in avg_timings %}
-            <td class="timing-cell">
-                {% if avg is not None %}
-                    {{ avg|format_duration }}
-                {% else %}
-                    -
-                {% endif %}
-            </td>
-            {% endfor %}
-        </tr>
-
-        {% for row in pivot_data %}
-        <tr>
-            <td class="test-group-column">{{ row.test_group_id }}</td>
-            {% for timing in row.timings %}
-            <td class="timing-cell {% if timing.performance_class %}{{ timing.performance_class }}{% endif %}">
-                {% if timing %}
-                    <div class="result-{{ timing.min_result }}">{{ timing.min|format_duration }} ({{ timing.min_result }})</div>
-                    <div>{{ timing.avg|format_duration }}</div>
-                    <div class="result-{{ timing.max_result }}">{{ timing.max|format_duration }} ({{ timing.max_result }})</div>
-                {% else %}
-                    -
-                {% endif %}
-            </td>
-            {% endfor %}
-        </tr>
-        {% endfor %}
-    </tbody>
-</table>
 
 {% endif %}
 {% endblock %}

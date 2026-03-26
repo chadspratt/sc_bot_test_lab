@@ -166,20 +166,20 @@ Remove BotTato-specific defaults; use CustomBot fields instead.
 Replace the hardcoded `recompile_cython` view with a plugin discovery system
 for the Custom page.
 
-- [ ] Create `test_lab/plugins/` directory with a `__init__.py` that discovers
+- [x] Create `test_lab/plugins/` directory with a `__init__.py` that discovers
       plugin modules.
-- [ ] Add `plugins/` to `.gitignore` (except `__init__.py`).
-- [ ] Each plugin is a `.py` file in `plugins/` that defines:
+- [x] Add `plugins/` to `.gitignore` (except `__init__.py`).
+- [x] Each plugin is a `.py` file in `plugins/` that defines:
       - `name: str` — display name for the button/widget
       - `description: str` — short help text
       - `def execute(request) -> str` — runs the action, returns a status message
-- [ ] Plugin discovery: scan `plugins/` at startup (or on each request) for
+- [x] Plugin discovery: scan `plugins/` at startup (or on each request) for
       `.py` files, import them, collect their metadata.
-- [ ] `custom_page` view: render discovered plugins as action buttons/cards.
-- [ ] POST handler: dispatch to the matching plugin's `execute()`.
-- [ ] Move current `recompile_cython` logic into `plugins/recompile_cython.py`
+- [x] `custom_page` view: render discovered plugins as action buttons/cards.
+- [x] POST handler: dispatch to the matching plugin's `execute()`.
+- [x] Move current `recompile_cython` logic into `plugins/recompile_cython.py`
       as the first example plugin.
-- [ ] Remove the hardcoded `recompile_cython` view and URL.
+- [x] Remove the hardcoded `recompile_cython` view and URL.
 
 ---
 

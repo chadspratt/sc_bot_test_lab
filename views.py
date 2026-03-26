@@ -1380,123 +1380,8 @@ def _get_map_breakdown_context(request):
     }
 
 
-def _get_building_timing_context():
-    """View to display earliest building construction times per test group."""
-    from collections import defaultdict
-
-    # Get all building events with their match's test_group_id
-    # Using Django ORM: Get minimum game_timestamp for each (test_group_id, building_type) combination
-    building_events = (
-        MatchEvent.objects
-        .filter(type='Building')
-        .values('match__test_group_id', 'match_id', 'message', 'match__result')
-        .annotate(earliest_time=Min('game_timestamp'))
-        .order_by('match__test_group_id', 'message')
-    )
-    
-    # Organize data into a pivot structure
-    # {test_group_id: {building_type: {min, max, avg}}}
-    grouped_data = defaultdict(dict[str, dict[str, any]])
-    all_building_types = set()
-    
-    for event in building_events:
-        test_group_id = event['match__test_group_id']
-        building_type = event['message']
-        earliest_time = event['earliest_time']
-        result = event['match__result'][0]
-        
-        if building_type not in grouped_data[test_group_id]:
-            grouped_data[test_group_id][building_type] = { # type: ignore
-                "min": earliest_time,
-                "max": earliest_time,
-                "avg": earliest_time,
-                "count": 1,
-                "min_result": result,
-                "max_result": result,
-            }
-            all_building_types.add(building_type)
-        else:
-            current = grouped_data[test_group_id][building_type]
-            if earliest_time < current["min"]:
-                current["min"] = earliest_time
-                current["min_result"] = result
-            if earliest_time > current["max"]:
-                current["max"] = earliest_time
-                current["max_result"] = result
-            # For average, we will need to calculate it later
-            current["avg"] += earliest_time  # Temporarily sum for average calculation
-            current["count"] = current["count"] + 1 # type: ignore
-    for test_group_id in grouped_data:
-        for building_type in grouped_data[test_group_id]:
-            current = grouped_data[test_group_id][building_type]
-            current["avg"] = current["avg"] / current["count"] # type: ignore
-            del current["count"]  # Remove count as it's no longer needed
-
-    # Sort building types alphabetically for consistent column order
-    building_types_list = list(all_building_types)
-    
-    # Sort test groups in descending order (newest first)
-    sorted_groups = sorted(grouped_data.keys(), reverse=True)
-
-    # Calculate average timing for each building type across all test groups
-    avg_timings = []
-    for building_type in building_types_list:
-        timings: List[float | None] = [grouped_data[gid].get(building_type).get("avg") for gid in sorted_groups if grouped_data[gid].get(building_type) is not None] # type: ignore
-        if timings:
-            avg_timings.append(sum(timings) / len(timings)) # type: ignore
-        else:
-            avg_timings.append(None)
-
-    # Sort building types by average timing
-    sorted_building_types, avg_timings = zip(*sorted(zip(building_types_list, avg_timings), key=lambda x: x[1]))
-    
-    # Create a dict for quick lookup of average timings
-    avg_timing_dict = dict(zip(sorted_building_types, avg_timings))
-    
-    # Create pivot table data with performance class
-    pivot_data = []
-    for group_id in sorted_groups:
-        row = {
-            'test_group_id': group_id,
-            'timings': []
-        }
-        for building_type in sorted_building_types:
-            timing = grouped_data[group_id].get(building_type)
-            if timing and avg_timing_dict.get(building_type):
-                avg = avg_timing_dict[building_type]
-                diff = timing['avg'] - avg
-                
-                # Determine performance class
-                if diff < -10:
-                    performance_class = 'much-faster'
-                elif diff < -5:
-                    performance_class = 'faster'
-                elif diff < 0:
-                    performance_class = 'slightly-faster'
-                elif diff > 10:
-                    performance_class = 'much-slower'
-                elif diff > 5:
-                    performance_class = 'slower'
-                elif diff > 0:
-                    performance_class = 'slightly-slower'
-                else:
-                    performance_class = 'average'
-                
-                timing['performance_class'] = performance_class # type: ignore
-            
-            row['timings'].append(timing)
-        pivot_data.append(row)
-    
-    
-    return {
-        'pivot_data': pivot_data,
-        'building_types': sorted_building_types,
-        'avg_timings': avg_timings,
-    }
-
-
 def results_page(request):
-    """Combined Results page with tabs for Test Groups, Maps, Building Timing."""
+    """Combined Results page with tabs for Test Groups and Maps."""
     active_tab = request.GET.get('tab', 'test-groups')
 
     context = {
@@ -1506,8 +1391,6 @@ def results_page(request):
 
     if active_tab == 'maps':
         context.update(_get_map_breakdown_context(request))
-    elif active_tab == 'building-timing':
-        context.update(_get_building_timing_context())
     else:
         active_tab = 'test-groups'
         context['active_tab'] = active_tab
@@ -1708,10 +1591,54 @@ def save_setup(request):
 
 
 def custom_page(request):
-    """Custom page with Recompile Cython."""
+    """Custom page — fullpage plugins as subtabs, action plugins on "Other" tab."""
+    from test_lab.plugins import discover_plugins, is_fullpage
+
+    all_plugins = discover_plugins()
+    fullpage_plugins = []
+    action_plugins = []
+    for m in all_plugins:
+        info = {'module_name': m.__name__.split('.')[-1], 'name': m.name, 'description': m.description}
+        if is_fullpage(m):
+            fullpage_plugins.append(info)
+        else:
+            action_plugins.append(info)
+
     return render(request, 'test_lab/custom.html', {
         'active_page': 'custom',
+        'fullpage_plugins': fullpage_plugins,
+        'action_plugins': action_plugins,
     })
+
+
+def custom_plugin_page(request, plugin_name: str):
+    """Render a fullpage plugin as a subtab of the Custom page."""
+    from test_lab.plugins import discover_plugins, get_plugin, is_fullpage
+
+    plugin = get_plugin(plugin_name)
+    if plugin is None or not is_fullpage(plugin):
+        messages.error(request, f'Fullpage plugin {plugin_name!r} not found.')
+        return redirect('custom_page')
+
+    all_plugins = discover_plugins()
+    fullpage_plugins = []
+    action_plugins = []
+    for m in all_plugins:
+        info = {'module_name': m.__name__.split('.')[-1], 'name': m.name, 'description': m.description}
+        if is_fullpage(m):
+            fullpage_plugins.append(info)
+        else:
+            action_plugins.append(info)
+
+    context = {
+        'active_page': 'custom',
+        'fullpage_plugins': fullpage_plugins,
+        'action_plugins': action_plugins,
+        'active_plugin': plugin_name,
+        'plugin_template': plugin.template,
+    }
+    context.update(plugin.get_context(request))
+    return render(request, 'test_lab/custom.html', context)
 
 
 
@@ -1821,35 +1748,21 @@ def update_custom_bot_active(request, bot_id):
     return JsonResponse({'status': 'ok', 'is_active': bot.is_active})
 
 
-def recompile_cython(request):
-    """Trigger recompilation of Cython extensions."""
-    if request.method == 'POST':
-        cython_dir = os.path.normpath(os.path.join(
-            os.path.dirname(__file__), '..', '..', 'bot', 'cython_extensions'
-        ))
-        setup_py = os.path.join(cython_dir, 'setup.py')
-
-        if not os.path.exists(setup_py):
-            messages.error(request, f'setup.py not found at: {setup_py}')
-            return redirect('custom_page')
-
-        try:
-            result = subprocess.run(
-                ['python', 'setup.py', 'build_ext', '--inplace'],
-                cwd=cython_dir,
-                capture_output=True,
-                text=True,
-                timeout=120,
-            )
-            if result.returncode == 0:
-                messages.success(request, 'Cython extensions recompiled successfully.')
-            else:
-                messages.error(request, f'Cython compilation failed:\n{result.stderr}')
-        except subprocess.TimeoutExpired:
-            messages.error(request, 'Cython compilation timed out after 120 seconds.')
-        except Exception as e:
-            messages.error(request, f'Failed to recompile Cython extensions: {str(e)}')
-
+@require_POST
+def run_plugin(request, plugin_name: str):
+    """Dispatch a POST action to the named plugin."""
+    from test_lab.plugins import get_plugin
+    plugin = get_plugin(plugin_name)
+    if plugin is None:
+        messages.error(request, f'Plugin {plugin_name!r} not found.')
+        return redirect('custom_page')
+    try:
+        status = plugin.execute(request)
+        messages.success(request, status)
+    except subprocess.TimeoutExpired:
+        messages.error(request, f'{plugin.name} timed out.')
+    except Exception as e:
+        messages.error(request, f'{plugin.name} failed: {e}')
     return redirect('custom_page')
 
 

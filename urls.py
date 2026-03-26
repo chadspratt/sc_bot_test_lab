@@ -45,8 +45,9 @@ urlpatterns = [
     path('config/prompt-templates/<int:template_id>/delete/', views.delete_prompt_template, name='delete_prompt_template'),
     path('api/template-file-content/', views.get_template_file_content, name='get_template_file_content'),
 
-    # Custom actions
-    path('custom/recompile-cython/', views.recompile_cython, name='recompile_cython'),
+    # Custom actions — plugin dispatcher
+    path('custom/plugin/<str:plugin_name>/', views.run_plugin, name='run_plugin'),
+    path('custom/<str:plugin_name>/', views.custom_plugin_page, name='custom_plugin_page'),
 
     # API
     path('api/trigger-tests/', views.api_trigger_tests, name='api_trigger_tests'),

@@ -3,14 +3,29 @@
 {% block title %}Custom - Test Lab{% endblock %}
 
 {% block content %}
-<h1>Custom</h1>
-
-<div class="utility-section">
-    <h3>Recompile Cython Extensions</h3>
-    <p>Runs <code>python setup.py build_ext --inplace</code> in the cython_extensions directory to rebuild all .pyx modules.</p>
-    <form method="post" action="{% url 'recompile_cython' %}">
-        {% csrf_token %}
-        <button type="submit" class="utility-btn">Recompile Cython</button>
-    </form>
+<div class="tab-bar">
+    {% for plugin in fullpage_plugins %}
+    <a href="{% url 'custom_plugin_page' plugin.module_name %}" {% if active_plugin == plugin.module_name %}class="active"{% endif %}>{{ plugin.name }}</a>
+    {% endfor %}
+    <a href="{% url 'custom_page' %}" {% if not active_plugin %}class="active"{% endif %}>Other</a>
 </div>
+
+{% if active_plugin and plugin_template %}
+    {% include plugin_template %}
+{% else %}
+    {% if action_plugins %}
+        {% for plugin in action_plugins %}
+        <div class="utility-section">
+            <h3>{{ plugin.name }}</h3>
+            <p>{{ plugin.description }}</p>
+            <form method="post" action="{% url 'run_plugin' plugin.module_name %}">
+                {% csrf_token %}
+                <button type="submit" class="utility-btn">{{ plugin.name }}</button>
+            </form>
+        </div>
+        {% endfor %}
+    {% else %}
+        <p>No action plugins found. Add a <code>.py</code> file to the <code>test_lab/plugins/</code> directory.</p>
+    {% endif %}
+{% endif %}
 {% endblock %}
