@@ -4,6 +4,9 @@ Django app for automated StarCraft II bot testing. Runs matches via Docker
 using the [AI Arena local-play-bootstrap](https://github.com/aiarena/local-play-bootstrap)
 infrastructure and tracks results.
 
+Disclaimer: This is intended to work for all bot types but some types are untested.
+It's all very WIP so feel free to send a PR and I won't be too picky about merging it. 
+
 ## Setup (existing Django project)
 
 If you're adding test_lab to an existing Django project instead of using
@@ -196,7 +199,9 @@ JSON body:
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
+| `test_bot_id` | int | **required** | Custom bot ID for Player 1 (the test subject) |
 | `difficulty` | string | `"CheatInsane"` | AI difficulty level |
 | `description` | string | `""` | Test group description |
-| `test_bot_id` | int | *null* | Custom bot ID for Player 1 (omit for legacy BotTato) |
-| `custom_bot_id` | int | *null* | When set, runs a single match vs this bot instead of the full 15-match suite |
+| `custom_bot_id` | int | *null* | When set, runs a single match vs this bot instead of the full test suite |
+| `test_suite_id` | int | *null* | Run a specific test suite (falls back to the bot's default suite, then "Blizzard AI") |
+| `branch` | string | `""` | Git branch name — creates a worktree so the bot source is mounted from that branch |
