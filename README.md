@@ -4,6 +4,20 @@ Django app for automated StarCraft II bot testing. Runs matches via Docker
 using the [AI Arena local-play-bootstrap](https://github.com/aiarena/local-play-bootstrap)
 infrastructure and tracks results.
 
+## Setup (existing Django project)
+
+If you're adding test_lab to an existing Django project instead of using
+the quickstart, follow these steps.
+
+### Database
+
+test_lab uses its own MySQL database (`sc2bot_test_lab_db_2`). Run migrations with:
+
+```bash
+python manage.py migrate test_lab --database sc_bot_test_lab
+```
+
+
 ## Quickstart (standalone setup)
 
 Use this if you've cloned test_lab on its own and want to get it running
@@ -36,7 +50,6 @@ development server. It works on Windows, Linux, and macOS.
 
 <details>
 <summary>Click to expand manual steps</summary>
-
 #### 1. Clone into the right directory structure
 
 Django needs `test_lab` to be an importable Python package, so clone it
@@ -97,6 +110,16 @@ python test_lab/quickstart/manage.py runserver
 
 Open <http://localhost:8000/test_lab/> in your browser.
 
+### Stopping / resetting
+
+```bash
+# Stop MySQL (data is preserved in a Docker volume)
+docker compose -f test_lab/quickstart/docker-compose.yml down
+
+# Stop MySQL and delete all data
+docker compose -f test_lab/quickstart/docker-compose.yml down -v
+```
+
 </details>
 
 ### 6. Basic Configuratio
@@ -107,6 +130,18 @@ Also enter the path to SC2Switcher.exe, which enables launching replays from the
 ### 7. Register bots
 
 Go to `Config > Custom Bots` and follow the instructions for adding a bot.
+
+A bot marked as a **test subject** can act as Player 1 in matches. When
+registering, fill in:
+
+| Field | Purpose |
+|-------|---------|
+| **Source Path** | Absolute host path to the bot source — mounted into Docker at runtime |
+| **Git Repo Path** | Path to the bot's git repo (enables past-version matches) |
+| **Dockerfile** | Custom Dockerfile name for build steps (e.g. Cython compilation) |
+
+Symlinks/junctions in the source directory are auto-detected and stored so
+Docker volume mounts resolve correctly.
 
 On `Run Match > Vs Blizzard AI` you can trigger a test run of the bot vs the Blizzard AI. This may take a while for it to build docker images
 
@@ -127,50 +162,7 @@ After finishing the work, the agent is instructed to commit and trigger the tick
 
 `Config > Prompt Templates` Allows for creating custom templates for working on specific bots. There are forms for creating and editing them but they are stored in actual files so it's probably easier to edit them outside the app. In the app you can edit them to register them for specific bots.
 
-### Stopping / resetting
-
-```bash
-# Stop MySQL (data is preserved in a Docker volume)
-docker compose -f test_lab/quickstart/docker-compose.yml down
-
-# Stop MySQL and delete all data
-docker compose -f test_lab/quickstart/docker-compose.yml down -v
-```
-
 ---
-
-## Setup (existing Django project)
-
-If you're adding test_lab to an existing Django project instead of using
-the quickstart, follow these steps.
-
-### Database
-
-test_lab uses its own MySQL database (`sc2bot_test_lab_db_2`). Run migrations with:
-
-```bash
-python manage.py migrate test_lab --database sc_bot_test_lab
-```
-
-### Custom Bots
-
-Register bots through the **Custom Bots** page. Place AI Arena bot directories
-(containing `ladderbots.json`) in `test_lab/aiarena/bots/`.
-
-#### Test Subject Bots
-
-A bot marked as a **test subject** can act as Player 1 in matches. When
-registering, fill in:
-
-| Field | Purpose |
-|-------|---------|
-| **Source Path** | Absolute host path to the bot source — mounted into Docker at runtime |
-| **Git Repo Path** | Path to the bot's git repo (enables past-version matches) |
-| **Dockerfile** | Custom Dockerfile name for build steps (e.g. Cython compilation) |
-
-Symlinks/junctions in the source directory are auto-detected and stored so
-Docker volume mounts resolve correctly.
-
 ### Git Commit Hook
 
 To automatically trigger a test suite on every commit, add a `post-commit`
