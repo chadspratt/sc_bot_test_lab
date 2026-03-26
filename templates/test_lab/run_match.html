@@ -20,16 +20,16 @@ tr:nth-child(even) { background-color: #f2f2f2; }
 <!-- Match type tabs (client-side) -->
 <div id="match-type-tabs">
     <div class="tab-bar">
-        <a data-tab="vs-computer">Vs Computer</a>
+        <a data-tab="vs-computer">Vs Blizzard AI</a>
         <a data-tab="vs-custom-bot">Vs Custom Bot</a>
         <a data-tab="vs-past-version">Vs Past Version</a>
         <a data-tab="from-replay">From Replay</a>
     </div>
 
-    <!-- Vs Computer -->
+    <!-- Vs Blizzard AI -->
     <div id="vs-computer" class="tab-panel">
         <div class="utility-section">
-            <h3>Run Single Match vs Computer</h3>
+            <h3>Run Single Match vs Blizzard AI</h3>
             <p>Launch a single match in Docker (not part of a test group).</p>
             <form method="post" action="{% url 'run_single_match' %}" style="display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap;">
                 {% csrf_token %}
@@ -275,7 +275,7 @@ tr:nth-child(even) { background-color: #f2f2f2; }
 
 <!-- Custom match results table -->
 <h2>Ad-Hoc Match Results</h2>
-<p>Single matches launched from this page (vs computer, custom bots, past versions, or replays). Most recent 50 shown.</p>
+<p>Single matches launched from this page (not part of a test suite run). Most recent 50 shown.</p>
 
 <div style="margin-bottom: 15px;">
     <form method="get" action="" style="display: inline-block;">
@@ -314,7 +314,7 @@ tr:nth-child(even) { background-color: #f2f2f2; }
                 {% if match.opponent_commit_hash %}Past Version
                 {% elif match.opponent_bot %}Custom Bot
                 {% elif match.replay_file %}Replay
-                {% else %}Vs Computer
+                {% else %}Vs Blizzard AI
                 {% endif %}
             </td>
             <td>{{ match.test_bot_name }}</td>

@@ -48,7 +48,7 @@ _RACE_NAME_TO_PROTO = {
 
 # ES module wrapper: connects via CLI args, joins WITHOUT multi-player port
 # config.  Ladder bots (e.g. norman) always send sharedPort/serverPorts/
-# clientPorts in joinGame, which hangs SC2 in single-player (vs Computer) mode.
+# clientPorts in joinGame, which hangs SC2 in single-player (vs Blizzard AI) mode.
 _GAME_VS_COMPUTER_JS = """\
 import Game from "./game.js";
 

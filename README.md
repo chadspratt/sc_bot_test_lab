@@ -99,23 +99,33 @@ Open <http://localhost:8000/test_lab/> in your browser.
 
 </details>
 
-### 6. Configure StarCraft II map path
+### 6. Basic Configuratio
 
-Edit `test_lab/aiarena/docker-compose.yml` and update the SC2 maps volume
-mount to point to your local StarCraft II installation:
+In the app, go to `Config > System` and enter the path for the directory containing the maps.
+Also enter the path to SC2Switcher.exe, which enables launching replays from the app.
 
-```yaml
-# Change this line to match your Maps directory:
-- "C:\\Program Files (x86)\\StarCraft II\\Maps:/root/StarCraftII/maps"
-```
+### 7. Register bots
 
-### 7. Register your bot
+Go to `Config > Custom Bots` and follow the instructions for adding a bot.
 
-1. Place your bot directory (containing `ladderbots.json`) in
-   `test_lab/aiarena/bots/`.
-2. Open <http://localhost:8000/test_lab/custom-bots/> and register it — see
-   [Custom Bots](#custom-bots) below for field details.
-3. Navigate to <http://localhost:8000/test_lab/utilities/> to run a match.
+On `Run Match > Vs Blizzard AI` you can trigger a test run of the bot vs the Blizzard AI. This may take a while for it to build docker images
+
+### 8. Matches
+There are 4 kinds of matches that can be run. the `Run Match` page allows running an individual match
+* Blizzard AI - custom bot vs in-game bot
+* Custom Bot - custom bot vs custom bot
+* Past Version - custom bot vs itself. can be use a past version or the current version for a true mirror match
+* Replay - custom bot vs in-game bot, but you start from a game state that is pulled from a replay. Will require some edits for a custom bot to make use of this, since the misleading clock and lack of state can trip it up.
+
+### 9. Test Suites
+`Config > Test Suites` allows you to bundle different tests together. There is a default suite for running vs 15 variants of the Blizzard AI. These can be attached to Tickets
+
+### 10. Tickets
+`Tickets` Allows you to create a ticket for doing work on a bot. You can specify various details and then it will generate a prompt that can be used by the editor of your choice.
+The prompt instructs the agent to work in a git worktree so that multiple tickets can be worked on concurrently.
+After finishing the work, the agent is instructed to commit and trigger the ticket tests, which will run against the code in the worktree
+
+`Config > Prompt Templates` Allows for creating custom templates for working on specific bots. There are forms for creating and editing them but they are stored in actual files so it's probably easier to edit them outside the app. In the app you can edit them to register them for specific bots.
 
 ### Stopping / resetting
 

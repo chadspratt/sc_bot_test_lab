@@ -1,4 +1,4 @@
-"""Run a bot against a built-in Computer opponent (Bot vs Computer).
+"""Run a bot against a built-in Computer opponent (Bot vs Blizzard AI).
 
 Runs inside a Docker container.  The match and map are created by the
 Django API before launch; this script only needs to play the game and
