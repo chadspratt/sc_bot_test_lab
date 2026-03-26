@@ -125,7 +125,7 @@ docker compose -f test_lab/quickstart/docker-compose.yml down -v
 
 </details>
 
-### 6. Basic Configuratio
+### 6. Basic Configurationn
 
 In the app, go to `Config > System` and enter the path for the directory containing the maps.
 Also enter the path to SC2Switcher.exe, which enables launching replays from the app.
