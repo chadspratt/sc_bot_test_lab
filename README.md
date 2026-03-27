@@ -128,46 +128,39 @@ docker compose -f test_lab/quickstart/docker-compose.yml down -v
 ### 6. Basic Configuration
 
 In the app, go to `Config > System` and enter the path for the directory containing the maps.
-Also enter the path to SC2Switcher.exe, which enables launching replays from the app.
+Also enter the path to SC2Switcher.exe to enable launching replays from the app.
 
 ### 7. Register bots
 
 Go to `Config > Custom Bots` and follow the instructions for adding a bot.
 
-A bot marked as a **test subject** can act as Player 1 in matches. When
-registering, fill in:
-
-| Field | Purpose |
-|-------|---------|
-| **Source Path** | Absolute host path to the bot source — mounted into Docker at runtime |
-| **Git Repo Path** | Path to the bot's git repo (enables past-version matches) |
-| **Dockerfile** | Custom Dockerfile name for build steps (e.g. Cython compilation) |
+A bot marked as a **test subject** can act as Player 1 in matches. 
+**Source Path** defaults to the aiarena package but you can change this to point to your live development code
 
 Symlinks/junctions in the source directory are auto-detected and stored so
 Docker volume mounts resolve correctly.
 
-On `Run Match > Vs Blizzard AI` you can trigger a test run of the bot vs the Blizzard AI. This may take a while for it to build docker images
+On `Run Match > Vs Blizzard AI` you can trigger a test run of the bot vs the Blizzard AI. The first run may take a while to build docker images
 
 ### 8. Matches
 There are 4 kinds of matches that can be run. the `Run Match` page allows running an individual match
 * Blizzard AI - custom bot vs in-game bot
 * Custom Bot - custom bot vs custom bot
 * Past Version - custom bot vs itself. can be use a past version or the current version for a true mirror match
-* Replay - custom bot vs in-game bot, but you start from a game state that is pulled from a replay. Will require some edits for a custom bot to make use of this, since the misleading clock and lack of state can trip it up.
+* Replay - custom bot vs in-game bot, but you start from a game state that is pulled from a replay. Will require some edits for a custom bot to make good use of this, since the misleading clock and lack of game state will probably trip up all but the simplest bots.
 
 ### 9. Test Suites
-`Config > Test Suites` allows you to bundle different tests together. There is a default suite for running vs 15 variants of the Blizzard AI. These can be attached to Tickets
+`Config > Test Suites` allows you to bundle different matchups in to a suite that can be run. There is a default **Blizzard AI** suite for running vs 15 variants of the Blizzard AI (3 races * 5 builds). Test Suites can be attached to Tickets to be run automatically
 
 ### 10. Tickets
-`Tickets` Allows you to create a ticket for doing work on a bot. You can specify various details and then it will generate a prompt that can be used by the editor of your choice.
+`Tickets` is a system for generating agent prompts that can be run in the editor of your choice.
 The prompt instructs the agent to work in a git worktree so that multiple tickets can be worked on concurrently.
 After finishing the work, the agent is instructed to commit and trigger the ticket tests, which will run against the code in the worktree
 
-`Config > Prompt Templates` Allows for creating custom templates for working on specific bots. There are forms for creating and editing them but they are stored in actual files so it's probably easier to edit them outside the app. In the app you can edit them to register them for specific bots.
+`Config > Prompt Templates` Allows for creating custom templates for working on specific bots. There are forms for creating and editing them but they are stored in actual files so it's probably easier to edit manage them with a normal text editor. In the app you can register them to specific bots. When creating a ticket you can choose from registered templates for the bot or, if there are none, the default prompt.
 
 ---
 ### Git Commit Hook
-
 To automatically trigger a test suite on every commit, add a `post-commit`
 hook to the bot's git repo:
 
