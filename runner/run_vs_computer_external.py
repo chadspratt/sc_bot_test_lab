@@ -193,8 +193,8 @@ def _build_bot_command(
         raise RuntimeError(f"Unsupported bot type: {bot_type}")
 
 
-async def _run_match(bot_type: str) -> str:
-    """Launch SC2, create the game, run the bot, and return the result.
+async def _run_match(bot_type: str) -> tuple[str, int | None]:
+    """Launch SC2, create the game, run the bot, and return the result and duration.
 
     SC2 only allows one WebSocket client at a time, so we must disconnect
     Python's WebSocket after creating the game, before spawning the bot.
@@ -295,6 +295,7 @@ async def _run_match(bot_type: str) -> str:
         # Reconnect to SC2 to query the game result and save the replay.
         # The external bot has disconnected, so we can reclaim the WebSocket.
         game_result: str | None = None
+        game_duration: int | None = None
         try:
             sc2_proc._session = aiohttp.ClientSession()
             sc2_proc._ws = await sc2_proc._session.ws_connect(
@@ -312,6 +313,12 @@ async def _run_match(bot_type: str) -> str:
                         game_result = Result(pr.result).name
                         logger.info(f"SC2 reported result for player 1: {game_result}")
                         break
+
+            # Extract game duration from the observation
+            game_loop = obs_resp.observation.observation.game_loop
+            if game_loop:
+                game_duration = int(game_loop / 22.4)
+                logger.info(f"Game duration: {game_duration}s ({game_loop} loops)")
 
             # Save replay
             save_resp = await controller._execute(
@@ -332,9 +339,8 @@ async def _run_match(bot_type: str) -> str:
         KillSwitch.kill_all()
 
     # Prefer the authoritative SC2 result; fall back to log parsing
-    if game_result:
-        return game_result
-    return _parse_external_result(exit_code, bot_output_lines)
+    result = game_result if game_result else _parse_external_result(exit_code, bot_output_lines)
+    return result, game_duration
 
 
 def _parse_external_result(exit_code: int, output_lines: list[str]) -> str:
@@ -362,8 +368,9 @@ def _parse_external_result(exit_code: int, output_lines: list[str]) -> str:
 
 def main(bot_type: str) -> None:
     result_str = "Crash"
+    duration: int | None = None
     try:
-        result_str = asyncio.run(_run_match(bot_type))
+        result_str, duration = asyncio.run(_run_match(bot_type))
     except Exception:
         logger.exception("Match crashed")
         result_str = "Crash"
@@ -374,6 +381,8 @@ def main(bot_type: str) -> None:
         f"================================"
     )
     print(f"MATCH_RESULT:{result_str}", flush=True)
+    if duration is not None:
+        print(f"MATCH_DURATION:{duration}", flush=True)
 
 
 if __name__ == "__main__":

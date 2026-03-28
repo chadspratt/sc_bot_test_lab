@@ -95,10 +95,13 @@ def main() -> str:
 
     os.environ["TEST_MATCH_ID"] = match_id
 
+    bot_instance = bot_cls()
+    duration: int | None = None
+
     try:
         result: Result | list[Result | None] = run_game(
             map_data,
-            [Bot(bot_race, bot_cls(), bot_name), opponent],
+            [Bot(bot_race, bot_instance, bot_name), opponent],
             realtime=False,
             save_replay_as=replay_path,
             game_time_limit=3600,
@@ -106,6 +109,13 @@ def main() -> str:
 
         bottato_result = result[0] if isinstance(result, list) else result
         result_str = bottato_result.name if bottato_result else "Crash"
+
+        # Extract game duration from the bot's state (BotAI.time = game_loop / 22.4)
+        if hasattr(bot_instance, 'time'):
+            try:
+                duration = int(bot_instance.time)
+            except Exception:
+                pass
 
     except Exception:
         logger.exception("Match crashed")
@@ -117,6 +127,8 @@ def main() -> str:
         f"================================"
     )
     print(f"MATCH_RESULT:{result_str}", flush=True)
+    if duration is not None:
+        print(f"MATCH_DURATION:{duration}", flush=True)
     return result_str
 
 

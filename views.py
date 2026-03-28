@@ -613,6 +613,21 @@ def _parse_sc_docker_result(log_file_path: str) -> str | None:
     return None
 
 
+def _parse_sc_docker_duration(log_file_path: str) -> int | None:
+    """Parse the match duration from a single-container Docker log file.
+
+    Looks for a ``MATCH_DURATION:<seconds>`` line printed by the run script.
+    """
+    try:
+        with open(log_file_path, 'r') as f:
+            for line in f:
+                if line.startswith('MATCH_DURATION:'):
+                    return int(line.strip().split(':', 1)[1])
+    except (OSError, ValueError):
+        pass
+    return None
+
+
 def _recover_stale_sc_docker_matches() -> dict[int, str]:
     """Scan for pending single-container Docker matches whose log file contains a result.
 
@@ -646,6 +661,9 @@ def _recover_stale_sc_docker_matches() -> dict[int, str]:
         if result:
             match_obj.result = result
             match_obj.end_timestamp = timezone.now()
+            duration = _parse_sc_docker_duration(log_files[0])
+            if duration is not None:
+                match_obj.duration_in_game_time = duration
             match_obj.save()
             recovered[match_obj.id] = result
 
@@ -672,6 +690,9 @@ def _launch_sc_docker_match(match_id: int, command: list[str], cwd: str, log_fil
                     match = Match.objects.get(id=match_id)
                     match.result = result or 'Crash'
                     match.end_timestamp = timezone.now()
+                    duration = _parse_sc_docker_duration(log_file_path)
+                    if duration is not None:
+                        match.duration_in_game_time = duration
                     match.save()
                 except Match.DoesNotExist:
                     logger.error('Single-container match %d: Match record not found', match_id)
@@ -2924,4 +2945,90 @@ def api_trigger_ticket_tests(request):
         'test_bot': test_bot.name,
         'test_suite': test_suite.name if test_suite else 'default',
         'branch': branch,
+    })
+
+
+def list_branches(request, ticket_id):
+    """Return recently-updated branches (excluding the ticket's own branch)."""
+    try:
+        ticket = Ticket.objects.select_related('test_bot').get(id=ticket_id)
+    except Ticket.DoesNotExist:
+        return JsonResponse({'error': 'Ticket not found'}, status=404)
+
+    cwd = ticket.test_bot.source_path if ticket.test_bot and ticket.test_bot.source_path else None
+    if not cwd:
+        return JsonResponse({'error': 'Bot has no source_path configured'}, status=400)
+
+    try:
+        result = subprocess.run(
+            ['git', 'branch', '--sort=-committerdate', '--format=%(refname:short)'],
+            cwd=cwd, capture_output=True, text=True, timeout=10,
+        )
+        branches = [
+            b.strip() for b in result.stdout.strip().splitlines()
+            if b.strip() and b.strip() != ticket.branch
+        ]
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return JsonResponse({'error': 'Failed to list branches'}, status=500)
+
+    return JsonResponse({'branches': branches[:30]})
+
+
+@require_POST
+def merge_branch(request, ticket_id):
+    """Merge the ticket's branch into the selected target branch."""
+    try:
+        ticket = Ticket.objects.select_related('test_bot').get(id=ticket_id)
+    except Ticket.DoesNotExist:
+        return JsonResponse({'error': 'Ticket not found'}, status=404)
+
+    target_branch = request.POST.get('target_branch', '').strip()
+    if not target_branch:
+        return JsonResponse({'error': 'No target branch specified'}, status=400)
+
+    if not ticket.branch:
+        return JsonResponse({'error': 'Ticket has no branch'}, status=400)
+
+    cwd = ticket.test_bot.source_path if ticket.test_bot and ticket.test_bot.source_path else None
+    if not cwd:
+        return JsonResponse({'error': 'Bot has no source_path configured'}, status=400)
+
+    try:
+        # Checkout the target branch
+        checkout = subprocess.run(
+            ['git', 'checkout', target_branch],
+            cwd=cwd, capture_output=True, text=True, timeout=15,
+        )
+        if checkout.returncode != 0:
+            return JsonResponse({
+                'error': f'Failed to checkout {target_branch}',
+                'detail': checkout.stderr.strip(),
+            }, status=400)
+
+        # Merge the ticket branch into it
+        merge = subprocess.run(
+            ['git', 'merge', ticket.branch],
+            cwd=cwd, capture_output=True, text=True, timeout=30,
+        )
+        if merge.returncode != 0:
+            # Abort the failed merge to leave the repo clean
+            subprocess.run(
+                ['git', 'merge', '--abort'],
+                cwd=cwd, capture_output=True, text=True, timeout=10,
+            )
+            return JsonResponse({
+                'error': 'Merge conflict or failure',
+                'detail': merge.stdout.strip() + '\n' + merge.stderr.strip(),
+            }, status=409)
+
+    except subprocess.TimeoutExpired:
+        return JsonResponse({'error': 'Git command timed out'}, status=500)
+    except FileNotFoundError:
+        return JsonResponse({'error': 'Git not found'}, status=500)
+
+    messages.success(request, f'Merged {ticket.branch} into {target_branch}.')
+    return JsonResponse({
+        'status': 'ok',
+        'message': f'Merged {ticket.branch} into {target_branch}',
+        'output': merge.stdout.strip(),
     })

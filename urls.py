@@ -62,6 +62,8 @@ urlpatterns = [
     path('tickets/<int:ticket_id>/generate-prompt/', views.generate_ticket_prompt, name='generate_ticket_prompt'),
     path('tickets/<int:ticket_id>/run-tests/', views.run_ticket_tests, name='run_ticket_tests'),
     path('tickets/<int:ticket_id>/delete/', views.delete_ticket, name='delete_ticket'),
+    path('tickets/<int:ticket_id>/branches/', views.list_branches, name='list_branches'),
+    path('tickets/<int:ticket_id>/merge/', views.merge_branch, name='merge_branch'),
 
     # Geometry (standalone tool page)
     path('geometry/position-is-between/', views.position_is_between, name='position_is_between'),

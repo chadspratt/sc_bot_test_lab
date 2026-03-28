@@ -30,6 +30,20 @@
     background: #f0f0f0; padding: 8px 12px; border-radius: 4px;
     font-family: monospace; font-size: 14px; display: inline-block; margin: 5px 0;
 }
+.modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; justify-content: center; align-items: center; }
+.modal-overlay.active { display: flex; }
+.modal-box { background: white; border-radius: 8px; padding: 24px; width: 500px; max-width: 90%; max-height: 80vh; overflow-y: auto; box-shadow: 0 4px 20px rgba(0,0,0,0.3); }
+.modal-box h3 { margin-top: 0; margin-bottom: 16px; }
+.modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 16px; }
+.modal-actions .btn-cancel { background: #6c757d; color: white; border: none; padding: 8px 16px; border-radius: 5px; cursor: pointer; font-size: 14px; }
+.modal-actions .btn-cancel:hover { background: #5a6268; }
+.branch-list { list-style: none; padding: 0; margin: 10px 0; max-height: 300px; overflow-y: auto; }
+.branch-list li { padding: 8px 12px; cursor: pointer; border-radius: 4px; font-family: monospace; font-size: 14px; }
+.branch-list li:hover { background: #e8f5e9; }
+.branch-list li.selected { background: #28a745; color: white; }
+.merge-status { margin-top: 10px; padding: 8px; border-radius: 4px; display: none; }
+.merge-status.error { display: block; background: #fce4ec; color: #c62828; }
+.merge-status.success { display: block; background: #e8f5e9; color: #2e7d32; }
 {% endblock %}
 
 {% block content %}
@@ -95,7 +109,7 @@
     </form>
     {% endif %}
 
-    {% if ticket.status == 'review' %}
+    {% if ticket.status == 'review' or ticket.status == 'testing' %}
     <form method="post" action="{% url 'update_ticket_status' ticket.id %}">
         {% csrf_token %}
         <input type="hidden" name="status" value="done">
@@ -108,11 +122,16 @@
     </form>
     {% endif %}
 
+
     <form method="post" action="{% url 'delete_ticket' ticket.id %}"
           onsubmit="return confirm('Delete this ticket?')">
         {% csrf_token %}
         <button type="submit" class="btn-danger" style="padding:8px 16px; font-size:14px;">Delete</button>
     </form>
+
+    {% if ticket.branch and ticket.status == 'done' %}
+    <button type="button" class="btn" style="background-color:#6f42c1" onclick="openMergeModal()">Merge Branch</button>
+    {% endif %}
 </div>
 
 <!-- Prompt file info -->
@@ -193,6 +212,23 @@
 </div>
 {% endif %}
 
+{# ==================== MERGE BRANCH MODAL ==================== #}
+{% if ticket.branch %}
+<div class="modal-overlay" id="merge-modal">
+    <div class="modal-box">
+        <h3>Merge <code>{{ ticket.branch }}</code> into&hellip;</h3>
+        <p style="color:#666; font-size:13px;">Select a target branch:</p>
+        <div id="merge-branch-loading" style="color:#666;">Loading branches&hellip;</div>
+        <ul class="branch-list" id="merge-branch-list" style="display:none;"></ul>
+        <div class="merge-status" id="merge-status"></div>
+        <div class="modal-actions">
+            <button type="button" class="btn-cancel" onclick="closeMergeModal()">Cancel</button>
+            <button type="button" class="btn btn-primary" id="merge-confirm-btn" disabled onclick="executeMerge()">Merge</button>
+        </div>
+    </div>
+</div>
+{% endif %}
+
 {% endblock %}
 
 {% block extra_js %}
@@ -248,6 +284,107 @@
         }
     }
     container.innerHTML = html;
+})();
+</script>
+{% endif %}
+{% if ticket.branch %}
+<script>
+(function() {
+    var selectedBranch = null;
+    var csrfToken = '{{ csrf_token }}';
+    var branchesUrl = '{% url "list_branches" ticket.id %}';
+    var mergeUrl = '{% url "merge_branch" ticket.id %}';
+
+    window.openMergeModal = function() {
+        var modal = document.getElementById('merge-modal');
+        var list = document.getElementById('merge-branch-list');
+        var loading = document.getElementById('merge-branch-loading');
+        var status = document.getElementById('merge-status');
+        var btn = document.getElementById('merge-confirm-btn');
+
+        selectedBranch = null;
+        list.innerHTML = '';
+        list.style.display = 'none';
+        loading.style.display = 'block';
+        status.className = 'merge-status';
+        status.style.display = 'none';
+        btn.disabled = true;
+        modal.classList.add('active');
+
+        fetch(branchesUrl)
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                loading.style.display = 'none';
+                if (data.error) {
+                    status.textContent = data.error;
+                    status.className = 'merge-status error';
+                    return;
+                }
+                if (data.branches.length === 0) {
+                    status.textContent = 'No other branches found.';
+                    status.className = 'merge-status error';
+                    return;
+                }
+                list.style.display = 'block';
+                data.branches.forEach(function(branch) {
+                    var li = document.createElement('li');
+                    li.textContent = branch;
+                    li.onclick = function() {
+                        var prev = list.querySelector('.selected');
+                        if (prev) prev.classList.remove('selected');
+                        li.classList.add('selected');
+                        selectedBranch = branch;
+                        btn.disabled = false;
+                    };
+                    list.appendChild(li);
+                });
+            })
+            .catch(function() {
+                loading.style.display = 'none';
+                status.textContent = 'Failed to fetch branches.';
+                status.className = 'merge-status error';
+            });
+    };
+
+    window.closeMergeModal = function() {
+        document.getElementById('merge-modal').classList.remove('active');
+    };
+
+    window.executeMerge = function() {
+        if (!selectedBranch) return;
+        if (!confirm('Merge {{ ticket.branch }} into ' + selectedBranch + '?')) return;
+
+        var btn = document.getElementById('merge-confirm-btn');
+        var status = document.getElementById('merge-status');
+        btn.disabled = true;
+        btn.textContent = 'Merging\u2026';
+
+        var body = new FormData();
+        body.append('target_branch', selectedBranch);
+        body.append('csrfmiddlewaretoken', csrfToken);
+
+        fetch(mergeUrl, { method: 'POST', body: body })
+            .then(function(r) { return r.json().then(function(d) { return {ok: r.ok, data: d}; }); })
+            .then(function(resp) {
+                btn.textContent = 'Merge';
+                if (resp.ok) {
+                    status.textContent = resp.data.message;
+                    status.className = 'merge-status success';
+                    setTimeout(function() { location.reload(); }, 1500);
+                } else {
+                    status.textContent = resp.data.error + (resp.data.detail ? '\n' + resp.data.detail : '');
+                    status.className = 'merge-status error';
+                    status.style.whiteSpace = 'pre-wrap';
+                    btn.disabled = false;
+                }
+            })
+            .catch(function() {
+                btn.textContent = 'Merge';
+                btn.disabled = false;
+                status.textContent = 'Network error.';
+                status.className = 'merge-status error';
+            });
+    };
 })();
 </script>
 {% endif %}
