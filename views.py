@@ -604,7 +604,7 @@ def _parse_sc_docker_result(log_file_path: str) -> str | None:
     Looks for a ``MATCH_RESULT:<result>`` line printed by the run script.
     """
     try:
-        with open(log_file_path, 'r') as f:
+        with open(log_file_path, 'r', encoding='utf-8', errors='replace') as f:
             for line in f:
                 if line.startswith('MATCH_RESULT:'):
                     return line.strip().split(':', 1)[1]
@@ -619,7 +619,7 @@ def _parse_sc_docker_duration(log_file_path: str) -> int | None:
     Looks for a ``MATCH_DURATION:<seconds>`` line printed by the run script.
     """
     try:
-        with open(log_file_path, 'r') as f:
+        with open(log_file_path, 'r', encoding='utf-8', errors='replace') as f:
             for line in f:
                 if line.startswith('MATCH_DURATION:'):
                     return int(line.strip().split(':', 1)[1])
@@ -646,26 +646,29 @@ def _recover_stale_sc_docker_matches() -> dict[int, str]:
     pending = Match.objects.filter(result='Pending')
 
     for match_obj in pending:
-        # Skip matches that have an aiarena run directory (handled separately)
-        aiarena_run_dir = aiarena_runner.get_run_dir(match_obj.id)
-        if os.path.isdir(aiarena_run_dir):
-            continue
+        try:
+            # Skip matches that have an aiarena run directory (handled separately)
+            aiarena_run_dir = aiarena_runner.get_run_dir(match_obj.id)
+            if os.path.isdir(aiarena_run_dir):
+                continue
 
-        # Look for a log file matching this match ID
-        pattern = os.path.join(logs_dir, f"{match_obj.id}_*.log")
-        log_files = glob.glob(pattern)
-        if not log_files:
-            continue
+            # Look for a log file matching this match ID
+            pattern = os.path.join(logs_dir, f"{match_obj.id}_*.log")
+            log_files = glob.glob(pattern)
+            if not log_files:
+                continue
 
-        result = _parse_sc_docker_result(log_files[0])
-        if result:
-            match_obj.result = result
-            match_obj.end_timestamp = timezone.now()
-            duration = _parse_sc_docker_duration(log_files[0])
-            if duration is not None:
-                match_obj.duration_in_game_time = duration
-            match_obj.save()
-            recovered[match_obj.id] = result
+            result = _parse_sc_docker_result(log_files[0])
+            if result:
+                match_obj.result = result
+                match_obj.end_timestamp = timezone.now()
+                duration = _parse_sc_docker_duration(log_files[0])
+                if duration is not None:
+                    match_obj.duration_in_game_time = duration
+                match_obj.save()
+                recovered[match_obj.id] = result
+        except Exception:
+            logger.exception('Error recovering single-container match %d', match_obj.id)
 
     return recovered
 
@@ -3027,8 +3030,15 @@ def merge_branch(request, ticket_id):
         return JsonResponse({'error': 'Git not found'}, status=500)
 
     messages.success(request, f'Merged {ticket.branch} into {target_branch}.')
+
+    # Optionally remove the worktree for the ticket branch
+    worktree_removed = False
+    if request.POST.get('remove_worktree'):
+        worktree_removed = worktrees.remove_worktree(cwd, ticket.branch)
+
     return JsonResponse({
         'status': 'ok',
         'message': f'Merged {ticket.branch} into {target_branch}',
         'output': merge.stdout.strip(),
+        'worktree_removed': worktree_removed,
     })
