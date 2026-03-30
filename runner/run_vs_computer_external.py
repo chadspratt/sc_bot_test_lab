@@ -383,6 +383,10 @@ def main(bot_type: str) -> None:
     print(f"MATCH_RESULT:{result_str}", flush=True)
     if duration is not None:
         print(f"MATCH_DURATION:{duration}", flush=True)
+    # For external bots, report the configured race (can't detect resolved Random)
+    bot_race_name = os.environ.get('BOT_RACE', '')
+    if bot_race_name:
+        print(f"BOT_RACE:{bot_race_name}", flush=True)
 
 
 if __name__ == "__main__":

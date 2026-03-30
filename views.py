@@ -628,6 +628,22 @@ def _parse_sc_docker_duration(log_file_path: str) -> int | None:
     return None
 
 
+def _parse_sc_docker_bot_race(log_file_path: str) -> str:
+    """Parse the bot's actual race from a single-container Docker log file.
+
+    Looks for a ``BOT_RACE:<race>`` line printed by the run script.
+    Returns the race string (e.g. 'Terran') or empty string if not found.
+    """
+    try:
+        with open(log_file_path, 'r', encoding='utf-8', errors='replace') as f:
+            for line in f:
+                if line.startswith('BOT_RACE:'):
+                    return line.strip().split(':', 1)[1]
+    except OSError:
+        pass
+    return ''
+
+
 def _recover_stale_sc_docker_matches() -> dict[int, str]:
     """Scan for pending single-container Docker matches whose log file contains a result.
 
@@ -665,6 +681,9 @@ def _recover_stale_sc_docker_matches() -> dict[int, str]:
                 duration = _parse_sc_docker_duration(log_files[0])
                 if duration is not None:
                     match_obj.duration_in_game_time = duration
+                bot_race = _parse_sc_docker_bot_race(log_files[0])
+                if bot_race:
+                    match_obj.bot_actual_race = bot_race
                 match_obj.save()
                 recovered[match_obj.id] = result
         except Exception:
@@ -696,6 +715,9 @@ def _launch_sc_docker_match(match_id: int, command: list[str], cwd: str, log_fil
                     duration = _parse_sc_docker_duration(log_file_path)
                     if duration is not None:
                         match.duration_in_game_time = duration
+                    bot_race = _parse_sc_docker_bot_race(log_file_path)
+                    if bot_race:
+                        match.bot_actual_race = bot_race
                     match.save()
                 except Match.DoesNotExist:
                     logger.error('Single-container match %d: Match record not found', match_id)

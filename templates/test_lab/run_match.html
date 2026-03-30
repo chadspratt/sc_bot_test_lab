@@ -299,6 +299,7 @@ tr:nth-child(even) { background-color: #f2f2f2; }
             <th>Test Bot</th>
             <th>Opponent</th>
             <th>Race</th>
+            <th>Bot Race</th>
             <th>Map</th>
             <th>Result</th>
             <th>Duration</th>
@@ -326,6 +327,7 @@ tr:nth-child(even) { background-color: #f2f2f2; }
                 {% endif %}
             </td>
             <td>{{ match.opponent_race }}</td>
+            <td>{{ match.bot_actual_race|default:"-" }}</td>
             <td>{{ match.map_name }}</td>
             <td class="
                 {% if match.result == 'Victory' %}result-victory

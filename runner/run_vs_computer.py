@@ -129,6 +129,12 @@ def main() -> str:
     print(f"MATCH_RESULT:{result_str}", flush=True)
     if duration is not None:
         print(f"MATCH_DURATION:{duration}", flush=True)
+    # Report the resolved race (useful when bot was set to Random)
+    if hasattr(bot_instance, 'race') and bot_instance.race is not None:
+        try:
+            print(f"BOT_RACE:{bot_instance.race.name}", flush=True)
+        except Exception:
+            pass
     return result_str
 
 

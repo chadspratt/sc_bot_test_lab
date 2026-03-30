@@ -730,6 +730,22 @@ def get_bot_log_path(match_id: int, bot_name: str) -> str | None:
     return None
 
 
+def _parse_bot_race_from_log(log_path: str) -> str:
+    """Parse the bot's actual race from its stderr log.
+
+    Looks for a ``BOT_RACE:<race>`` line emitted by the bot during on_start.
+    Returns the race string (e.g. 'Terran') or empty string if not found.
+    """
+    try:
+        with open(log_path, 'r', encoding='utf-8', errors='replace') as f:
+            for line in f:
+                if line.startswith('BOT_RACE:'):
+                    return line.strip().split(':', 1)[1]
+    except OSError:
+        pass
+    return ''
+
+
 def start_aiarena_match(
     match: Match,
     opponent_bot: CustomBot,
@@ -1064,6 +1080,15 @@ def _collect_and_save_result(run_dir: str, match_id: int) -> None:
         match_obj.result = 'Crash'
 
     match_obj.end_timestamp = timezone.now()
+
+    # Try to extract the test bot's resolved race from its stderr log
+    if match_obj.test_bot:
+        bot_log = get_bot_log_path(match_id, match_obj.test_bot.bot_directory)
+        if bot_log:
+            bot_race = _parse_bot_race_from_log(bot_log)
+            if bot_race:
+                match_obj.bot_actual_race = bot_race
+
     match_obj.save()
     logger.info(
         'Match %d: saved result=%s duration=%s',

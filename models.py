@@ -240,6 +240,10 @@ class Match(models.Model):
     )
     result = models.CharField(max_length=50, choices=Result)
     duration_in_game_time = models.IntegerField(null=True, blank=True)
+    bot_actual_race = models.CharField(
+        max_length=7, blank=True, default='',
+        help_text="Resolved race when bot was set to Random (Protoss/Terran/Zerg)",
+    )
     replay_file = models.CharField(
         max_length=500, blank=True, default='',
         help_text="Path to uploaded replay file for continue-from-replay matches"

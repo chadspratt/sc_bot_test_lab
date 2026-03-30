@@ -174,6 +174,7 @@ thead tr:nth-child(2) th { top: 41px; }
                             {% if match_data.opponent_bot or match_data.opponent_commit_hash %}<a href="{% url 'serve_aiarena_bot_log' match_id=match_data.id bot_name=match_data.test_bot_directory %}" target="_blank" class="checkmark-link">{{ match_data.duration_in_game_time|format_duration }}</a>{% else %}<a href="{% url 'serve_log' match_id=match_data.id %}" target="_blank" class="checkmark-link">{{ match_data.duration_in_game_time|format_duration }}</a>{% endif %}{% if match_data.is_best_time %} <span title="Fastest win or slowest loss on map">⭐</span>{% endif %}
                         {% endif %}<br>
                         <small>{{ match_data.map_name }}</small>
+                        {% if match_data.bot_actual_race %}<br><small title="Resolved race (bot was Random)">🎲{{ match_data.bot_actual_race }}</small>{% endif %}
                     </td>
                     {% else %}
                     <td>-</td>
