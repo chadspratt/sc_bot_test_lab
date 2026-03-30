@@ -4,8 +4,10 @@ import os
 import random
 import subprocess
 import threading
+import tkinter as tk
 from collections import defaultdict
 from datetime import datetime
+from tkinter import filedialog
 
 from django.contrib import messages
 from django.db.models import Count, Max, Min, Q
@@ -1575,7 +1577,20 @@ def config_page(request):
     })
 
 
-@require_POST
+def browse_path(request):
+    """Open a native OS file dialog and return the selected path as JSON."""
+    mode = request.GET.get('mode', 'directory')
+    root = tk.Tk()
+    root.withdraw()
+    root.attributes('-topmost', True)
+    if mode == 'file':
+        path = filedialog.askopenfilename(parent=root)
+    else:
+        path = filedialog.askdirectory(parent=root)
+    root.destroy()
+    return JsonResponse({'path': path or ''})
+
+
 def update_system_config(request):
     """Update system-wide settings from the System tab."""
     config_url = f"{reverse('config_page')}#system"

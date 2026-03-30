@@ -18,12 +18,16 @@
 
         <div class="form-group">
             <label for="sc2_maps_path">StarCraft II Maps Path:</label>
-            <input type="text" name="sc2_maps_path" id="sc2_maps_path"
-                   value="{{ config.sc2_maps_path }}" style="max-width: 600px;"
-                   required>
+            <div style="display: flex; gap: 6px; align-items: center;">
+                <input type="text" name="sc2_maps_path" id="sc2_maps_path"
+                       value="{{ config.sc2_maps_path }}" style="max-width: 600px; flex: 1;"
+                       required>
+                <button type="button" class="utility-btn" onclick="browsePath('sc2_maps_path', 'directory')" style="padding: 6px 12px; white-space: nowrap;">Browse&hellip;</button>
+            </div>
             <small style="color: #666;">
-                Host path to your StarCraft II Maps directory. Mounted into Docker containers.
+                <strong>Required.</strong>Host path to your StarCraft II Maps directory.
                 Example: <code>C:\Program Files (x86)\StarCraft II\Maps</code>
+                Not required to have a local install of SC2 to use framework, but should use that Maps dir if it exists, for replay watching.
             </small>
         </div>
     </div>
@@ -33,10 +37,13 @@
 
         <div class="form-group">
             <label for="sc2_switcher_path">SC2Switcher Path:</label>
-            <input type="text" name="sc2_switcher_path" id="sc2_switcher_path"
-                   value="{{ config.sc2_switcher_path }}" style="max-width: 600px;">
+            <div style="display: flex; gap: 6px; align-items: center;">
+                <input type="text" name="sc2_switcher_path" id="sc2_switcher_path"
+                       value="{{ config.sc2_switcher_path }}" style="max-width: 600px; flex: 1;">
+                <button type="button" class="utility-btn" onclick="browsePath('sc2_switcher_path', 'file')" style="padding: 6px 12px; white-space: nowrap;">Browse&hellip;</button>
+            </div>
             <small style="color: #666;">
-                Path to SC2Switcher.exe (used to open replays). Leave default if your SC2 install is standard.
+                Path to SC2Switcher.exe for watching replays. Inside the Support folder (next to Maps) of SC2 local install.
             </small>
         </div>
 
@@ -52,4 +59,14 @@
         Save &amp; Continue
     </button>
 </form>
+
+<script>
+function browsePath(inputId, mode) {
+    fetch(`{% url 'browse_path' %}?mode=${mode}`)
+        .then(r => r.json())
+        .then(data => {
+            if (data.path) document.getElementById(inputId).value = data.path;
+        });
+}
+</script>
 {% endblock %}

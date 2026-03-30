@@ -50,7 +50,17 @@ td { text-align: left; }
             <p>
                 Place the bot directory (containing <code>ladderbots.json</code> or <code>run.py</code>) in
                 <code>test_lab/aiarena/bots/</code>. You can download bots from
-                <a href="https://aiarena.net" target="_blank">aiarena.net</a>.
+                <a href="https://aiarena.net/bots" target="_blank">aiarena.net</a> (toggle "Only downloadable").
+            </p>
+            <p>
+                Known working bots: <a href="#" onclick="toggleKnownBots(); return false;">toggle list</a>
+                <div id="known-bots-list" style="display: none;">
+                    <ul>
+                        <li><a href="https://aiarena.net/bots/1030" target="_blank">who (Random)</a></li>
+                        <li><a href="https://aiarena.net/bots/201" target="_blank">QueenBot (Zerg)</a></li>
+                        <li><a href="https://aiarena.net/bots/518" target="_blank">norman (Protoss)</a></li>
+                    </ul>
+                </div>
             </p>
             <p>
                 To add a bot:
@@ -528,16 +538,26 @@ td { text-align: left; }
 
                 <div class="form-group">
                     <label for="sc2_maps_path">StarCraft II Maps Path:</label>
-                    <input type="text" name="sc2_maps_path" id="sc2_maps_path"
-                           value="{{ system_config.sc2_maps_path }}" style="max-width: 600px; padding: 6px 8px;">
-                    <small style="color: #666;">Host Maps directory mounted into Docker containers. <strong>Required.</strong></small>
+                    <div style="display: flex; gap: 6px; align-items: center;">
+                        <input type="text" name="sc2_maps_path" id="sc2_maps_path"
+                               value="{{ system_config.sc2_maps_path }}" style="max-width: 600px; padding: 6px 8px; flex: 1;">
+                        <button type="button" class="utility-btn" onclick="browsePath('sc2_maps_path', 'directory')" style="padding: 6px 12px; white-space: nowrap;">Browse&hellip;</button>
+                    </div>
+                    <small style="color: #666;">
+                        <strong>Required.</strong>Host path to your StarCraft II Maps directory.
+                        Example: <code>C:\Program Files (x86)\StarCraft II\Maps</code>
+                        Not required to have a local install of SC2 to use framework, but should use that Maps dir if it exists, for replay watching.
+                    </small>
                 </div>
 
                 <div class="form-group">
                     <label for="sc2_switcher_path">SC2Switcher Path:</label>
-                    <input type="text" name="sc2_switcher_path" id="sc2_switcher_path"
-                           value="{{ system_config.sc2_switcher_path }}" style="max-width: 600px; padding: 6px 8px;">
-                    <small style="color: #666;">Path to SC2Switcher.exe for opening replays.</small>
+                    <div style="display: flex; gap: 6px; align-items: center;">
+                        <input type="text" name="sc2_switcher_path" id="sc2_switcher_path"
+                               value="{{ system_config.sc2_switcher_path }}" style="max-width: 600px; padding: 6px 8px; flex: 1;">
+                        <button type="button" class="utility-btn" onclick="browsePath('sc2_switcher_path', 'file')" style="padding: 6px 12px; white-space: nowrap;">Browse&hellip;</button>
+                    </div>
+                    <small style="color: #666;">Path to SC2Switcher.exe for watching replays. Inside the Support folder (next to Maps) of SC2 local install</small>
                 </div>
             </div>
 
@@ -845,6 +865,11 @@ td { text-align: left; }
         if (e.target === this) closeEditSuiteModal();
     });
 
+    function toggleKnownBots() {
+        var list = document.getElementById('known-bots-list');
+        list.style.display = list.style.display === 'none' ? 'block' : 'none';
+    }
+
     function toggleEditBotCheckboxes(allChecked) {
         var list = document.getElementById('edit-suite-bot-list');
         list.style.opacity = allChecked ? '0.5' : '1';
@@ -1066,5 +1091,13 @@ td { text-align: left; }
     document.getElementById('edit-template-modal').addEventListener('click', function(e) {
         if (e.target === this) closeEditTemplateModal();
     });
+
+    function browsePath(inputId, mode) {
+        fetch(`{% url 'browse_path' %}?mode=${mode}`)
+            .then(r => r.json())
+            .then(data => {
+                if (data.path) document.getElementById(inputId).value = data.path;
+            });
+    }
 </script>
 {% endblock %}

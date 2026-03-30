@@ -40,6 +40,7 @@ urlpatterns = [
     path('config/replay-tests/create/', views.create_replay_test, name='create_replay_test'),
     path('config/replay-tests/<int:test_id>/delete/', views.delete_replay_test, name='delete_replay_test'),
     path('config/system/', views.update_system_config, name='update_system_config'),
+    path('config/browse-path/', views.browse_path, name='browse_path'),
     path('config/prompt-templates/create/', views.create_prompt_template, name='create_prompt_template'),
     path('config/prompt-templates/<int:template_id>/update/', views.update_prompt_template, name='update_prompt_template'),
     path('config/prompt-templates/<int:template_id>/delete/', views.delete_prompt_template, name='delete_prompt_template'),

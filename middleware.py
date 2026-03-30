@@ -14,7 +14,7 @@ class SetupRequiredMiddleware:
 
     def __call__(self, request):
         path = request.path
-        if path.startswith('/test_lab/') and not path.startswith('/test_lab/setup/'):
+        if path.startswith('/test_lab/') and not path.startswith('/test_lab/setup/') and not path.startswith('/test_lab/config/browse-path/'):
             from .models import SystemConfig
             config = SystemConfig.load()
             if not config.is_configured:
