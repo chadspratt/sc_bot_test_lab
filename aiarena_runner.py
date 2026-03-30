@@ -39,6 +39,7 @@ if TYPE_CHECKING:
 AIARENA_DIR = os.path.normpath(os.path.join(os.path.dirname(__file__), 'aiarena'))
 AIARENA_BOTS_DIR = os.path.join(AIARENA_DIR, 'bots')
 AIARENA_RUNS_DIR = os.path.join(AIARENA_DIR, 'runs')
+AIARENA_PATCHES_DIR = os.path.join(AIARENA_DIR, 'patches')
 
 # Repo root (for finding bots in other_bots/ and live source mounts)
 REPO_ROOT = os.path.normpath(os.path.join(AIARENA_DIR, '..', '..', '..', '..'))
@@ -49,10 +50,20 @@ _BASE_FILES = (
     'Dockerfile.proxy_fwd', 'entrypoint_proxy_fwd.sh',
 )
 
-# Bot types whose SC2 client library connects to localhost:GamePort instead of
-# LadderServer:GamePort.  These need a socat proxy inside bot_controller2 so
-# that localhost:<proxy_port> reaches the proxy_controller container.
-_NEEDS_PROXY_FWD: set[str] = {'dotnetcore'}
+# Bot types that need a delayed socat proxy inside bot_controller2.
+#
+# In the aiarena multi-container setup the proxy_controller allocates SC2
+# WebSocket URLs to bots on first connect.  Fast-starting bots (C++, .NET)
+# can connect to the proxy *before* SC2 instances finish starting, causing
+# the proxy's WebSocket connection to SC2 to silently fail.  Python bots
+# are slow enough to avoid this race.
+#
+# The fix has two parts:
+# 1. Override ACBOT_PROXY_HOST=127.0.0.1 so bot_controller passes
+#    --LadderServer 127.0.0.1, forcing the bot through a local socat.
+# 2. socat starts after a delay (PROXY_FWD_DELAY seconds), giving SC2
+#    time to become ready before the bot's connection reaches the proxy.
+_NEEDS_PROXY_FWD: set[str] = {'cpplinux', 'dotnetcore'}
 
 # Maps available for aiarena matches (same as the test_lab map pool)
 AIARENA_MAP_LIST = [
@@ -451,6 +462,9 @@ def _write_compose_override(
                 '    build:',
                 '      context: .',
                 '      dockerfile: Dockerfile.proxy_fwd',
+                '    environment:',
+                '      - "PROXY_FWD_DELAY=5"',
+                '      - "ACBOT_PROXY_HOST=127.0.0.1"',
             ]
         lines.append('    volumes:')
         if opponent_bot is not None:
@@ -474,6 +488,35 @@ def _has_bot_config(bot_path: str) -> bool:
     )
 
 
+def _detect_bot_type(bot_path: str) -> str:
+    """Detect the bot type from the contents of a bot directory.
+
+    Priority:
+    1. ladderbots.json — read the Type from the first bot entry
+    2. run.py present — ``python``
+    3. Folder contains a single file — ``cpplinux``
+    4. Default — ``wine``
+    """
+    ladderbots_path = os.path.join(bot_path, 'ladderbots.json')
+    if os.path.isfile(ladderbots_path):
+        try:
+            with open(ladderbots_path) as f:
+                data = json.load(f)
+            bots = data.get('Bots', {})
+            if bots:
+                bot_info = next(iter(bots.values()))
+                return bot_info.get('Type', 'wine').lower()
+        except (json.JSONDecodeError, StopIteration):
+            pass
+        return 'wine'
+    if os.path.isfile(os.path.join(bot_path, 'run.py')):
+        return 'python'
+    files = [f for f in os.listdir(bot_path) if os.path.isfile(os.path.join(bot_path, f))]
+    if len(files) == 1:
+        return 'cpplinux'
+    return 'wine'
+
+
 def _default_ladderbots_data(bot_name: str) -> dict:
     """Generate a default ladderbots.json dict for a Python bot with run.py."""
     return {
@@ -489,7 +532,7 @@ def _default_ladderbots_data(bot_name: str) -> dict:
 
 
 def get_available_aiarena_bots() -> list[str]:
-    """Return directory names under aiarena/bots/ that have a ladderbots.json or run.py.
+    """Return directory names under aiarena/bots/.
 
     Excludes internal mirror/version copies (names ending with ``_p2`` or
     matching ``*_v_*``) which are implementation details of self-play and
@@ -503,7 +546,7 @@ def get_available_aiarena_bots() -> list[str]:
             not d.endswith('_p2')
             and '_v_' not in d
             and os.path.isdir(os.path.join(AIARENA_BOTS_DIR, d))
-            and _has_bot_config(os.path.join(AIARENA_BOTS_DIR, d))
+            and not d == 'runtimes'
         )
     )
 
@@ -513,8 +556,8 @@ def get_available_aiarena_bot_details() -> list[dict]:
 
     Each entry is a dict with keys: ``directory``, ``name``, ``race``,
     ``type``.  When a ``ladderbots.json`` exists the name, race, and type
-    are extracted from the first bot entry; otherwise they default to the
-    directory name and empty strings.
+    are extracted from the first bot entry; otherwise type is detected by
+    heuristic (run.py → python, single file → cpplinux, else wine).
 
     Excludes internal copies (``_p2`` / ``_v_``).
     """
@@ -522,12 +565,12 @@ def get_available_aiarena_bot_details() -> list[dict]:
         return []
     results: list[dict] = []
     for d in sorted(os.listdir(AIARENA_BOTS_DIR)):
-        if d.endswith('_p2') or '_v_' in d:
+        if d.endswith('_p2') or '_v_' in d or d == 'runtimes':
             continue
         bot_path = os.path.join(AIARENA_BOTS_DIR, d)
-        if not os.path.isdir(bot_path) or not _has_bot_config(bot_path):
+        if not os.path.isdir(bot_path):
             continue
-        info: dict = {'directory': d, 'name': d, 'race': '', 'type': ''}
+        info: dict = {'directory': d, 'name': d, 'race': '', 'type': _detect_bot_type(bot_path)}
         ladderbots_path = os.path.join(bot_path, 'ladderbots.json')
         if os.path.isfile(ladderbots_path):
             try:
@@ -538,7 +581,6 @@ def get_available_aiarena_bot_details() -> list[dict]:
                     bot_name, bot_info = next(iter(bots.items()))
                     info['name'] = bot_name
                     info['race'] = bot_info.get('Race', '')
-                    info['type'] = bot_info.get('Type', '').lower()
             except (json.JSONDecodeError, StopIteration):
                 pass
         results.append(info)
@@ -546,7 +588,7 @@ def get_available_aiarena_bot_details() -> list[dict]:
 
 
 def validate_bot_directory(bot_dir_name: str) -> str | None:
-    """Check that a bot directory exists and has ladderbots.json or run.py.
+    """Check that a bot directory exists under aiarena/bots/.
 
     Returns None if valid, or an error message string.
     """
@@ -554,10 +596,33 @@ def validate_bot_directory(bot_dir_name: str) -> str | None:
     if not os.path.isdir(bot_path):
         return f'Bot directory not found: {bot_dir_name}'
 
-    if not _has_bot_config(bot_path):
-        return f'Neither ladderbots.json nor run.py found in {bot_dir_name}/'
-
     return None
+
+
+def apply_bot_patches(bot_dir_name: str) -> list[str]:
+    """Copy patch files from aiarena/patches/<bot_dir_name>/ into the bot directory.
+
+    If a matching patch folder exists, all files within it are copied
+    (recursively) into aiarena/bots/<bot_dir_name>/, overwriting existing
+    files.  Returns a list of relative paths that were copied.
+    """
+    patch_dir = os.path.join(AIARENA_PATCHES_DIR, bot_dir_name)
+    if not os.path.isdir(patch_dir):
+        return []
+
+    bot_dir = os.path.join(AIARENA_BOTS_DIR, bot_dir_name)
+    copied: list[str] = []
+    for root, _dirs, files in os.walk(patch_dir):
+        for filename in files:
+            src = os.path.join(root, filename)
+            rel = os.path.relpath(src, patch_dir)
+            dst = os.path.join(bot_dir, rel)
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.copy2(src, dst)
+            copied.append(rel)
+    if copied:
+        logger.info('Applied %d patch file(s) to %s: %s', len(copied), bot_dir_name, copied)
+    return copied
 
 
 def read_ladderbots_json(bot_dir_name: str) -> dict | None:
@@ -970,7 +1035,7 @@ def _run_docker_match(run_dir: str, match_id: int, log_file_path: str) -> None:
                 '-f', 'docker-compose.yml',
                 '-f', 'docker-compose.override.yml',
                 '-p', f'aiarena_{match_id}',
-                'up', '--abort-on-container-exit',
+                'up', '--build', '--abort-on-container-exit',
             ],
             cwd=run_dir,
             stdout=log_file,

@@ -48,7 +48,7 @@ td { text-align: left; }
                 Docker infrastructure. They can be written in any language.
             </p>
             <p>
-                Place the bot directory (containing <code>ladderbots.json</code> or <code>run.py</code>) in
+                Place the bot directory in
                 <code>test_lab/aiarena/bots/</code>. You can download bots from
                 <a href="https://aiarena.net/bots" target="_blank">aiarena.net</a> (toggle "Only downloadable").
             </p>
@@ -57,8 +57,17 @@ td { text-align: left; }
                 <div id="known-bots-list" style="display: none;">
                     <ul>
                         <li><a href="https://aiarena.net/bots/1030" target="_blank">who (Random)</a></li>
-                        <li><a href="https://aiarena.net/bots/201" target="_blank">QueenBot (Zerg)</a></li>
+                        <li><a href="https://aiarena.net/bots/117" target="_blank">Chance (Random)</a></li>
+                        <li><a href="https://aiarena.net/bots/655" target="_blank">AresRandomExample (Random)</a></li>
+                        <li><a href="https://aiarena.net/bots/623" target="_blank">a_move_bot (Terran)</a></li>
+                        <li><a href="https://aiarena.net/bots/901" target="_blank">clone (Terran)</a></li>
+                        <li><a href="https://aiarena.net/bots/718" target="_blank">Mulebot (Terran)</a></li>
+                        <li><a href="https://aiarena.net/bots/939" target="_blank">RustyNikolaj (Terran)</a></li>
                         <li><a href="https://aiarena.net/bots/518" target="_blank">norman (Protoss)</a></li>
+                        <li><a href="https://aiarena.net/bots/357" target="_blank">12PoolBot (Zerg)</a></li>
+                        <li><a href="https://aiarena.net/bots/699" target="_blank">Clicadinha (Zerg)</a></li>
+                        <li><a href="https://aiarena.net/bots/201" target="_blank">QueenBot (Zerg)</a></li>
+                        <li><a href="https://aiarena.net/bots/922" target="_blank">Thessaloniki (Zerg)</a></li>
                     </ul>
                 </div>
             </p>
@@ -156,29 +165,35 @@ td { text-align: left; }
                         <small style="color: #666;">Allow running matches against past versions of this bot (requires Source Path to point to a git repo).</small>
                     </div>
                     <div class="form-group">
-                        <label for="archive_paths">Archive Paths (optional):</label>
+                        <label for="archive_paths">Historical folders (Optional):</label>
                         <input type="text" name="archive_paths" id="archive_paths" placeholder="e.g. src/, bot.py, config/">
-                        <small style="color: #666;">Comma-separated list of paths to extract from git history for past-version tests. If empty, the entire tree is archived.</small>
+                        <small style="color: #666;">Comma-separated list of folders to pull from git history for past-version tests. If empty, will use the entire contents of repo at selected commit.</small>
                     </div>
-                    <div class="form-group">
-                        <label for="dockerfile">Custom Dockerfile (optional):</label>
-                        <input type="text" name="dockerfile" id="dockerfile" placeholder="e.g. Dockerfile.mybot">
-                        <small style="color: #666;">Dockerfile (relative to test_lab/aiarena/) that builds an image with extra dependencies pre-installed. Saves time when running this bot repeatedly. Leave blank for vanilla image.</small>
+                    <div>
+                        <p>Python Only</p>
+                        <div class="form-group">
+                            <label for="bot_module">Bot Module (optional):</label>
+                            <input type="text" name="bot_module" id="bot_module" placeholder="e.g. bottato.bottato">
+                            <small style="color: #666;">Python module path for the bot class (e.g. 'bottato.bottato'). Used by the single-container Docker runner for dynamic import. Leave blank if not using single-container runner.</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="bot_class">Bot Class (optional):</label>
+                            <input type="text" name="bot_class" id="bot_class" placeholder="e.g. BotTato">
+                            <small style="color: #666;">Python class name that inherits from BotAI (e.g. 'BotTato'). Used by the single-container Docker runner for dynamic import.</small>
+                        </div>
                     </div>
-                    <div class="form-group">
-                        <label for="env_file">Env File (optional):</label>
-                        <input type="text" name="env_file" id="env_file" placeholder="e.g. C:\Users\me\mybot\.env">
-                        <small style="color: #666;">Absolute path to a .env file on the host. Provides environment variables (e.g. DB credentials) to the Docker container via --env-file.</small>
-                    </div>
-                    <div class="form-group">
-                        <label for="bot_module">Bot Module (optional):</label>
-                        <input type="text" name="bot_module" id="bot_module" placeholder="e.g. bottato.bottato">
-                        <small style="color: #666;">Python module path for the bot class (e.g. 'bottato.bottato'). Used by the single-container Docker runner for dynamic import. Leave blank if not using single-container runner.</small>
-                    </div>
-                    <div class="form-group">
-                        <label for="bot_class">Bot Class (optional):</label>
-                        <input type="text" name="bot_class" id="bot_class" placeholder="e.g. BotTato">
-                        <small style="color: #666;">Python class name that inherits from BotAI (e.g. 'BotTato'). Used by the single-container Docker runner for dynamic import.</small>
+                    <div>
+                        <p>Advanced</p>
+                        <div class="form-group">
+                            <label for="dockerfile">Custom Dockerfile (optional):</label>
+                            <input type="text" name="dockerfile" id="dockerfile" placeholder="e.g. Dockerfile.mybot">
+                            <small style="color: #666;">Dockerfile (relative to test_lab/aiarena/) that builds an image with extra dependencies pre-installed. Saves time when running this bot repeatedly. Leave blank for vanilla image.</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="env_file">Env File (optional):</label>
+                            <input type="text" name="env_file" id="env_file" placeholder="e.g. C:\Users\me\mybot\.env">
+                            <small style="color: #666;">Absolute path to a .env file on the host. Provides environment variables (e.g. DB credentials) to the Docker container via --env-file.</small>
+                        </div>
                     </div>
                 </div>
                 <button type="submit" class="btn btn-primary" style="padding: 8px 16px;">Register Bot</button>

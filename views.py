@@ -1941,6 +1941,9 @@ def create_custom_bot(request):
             description=description,
         )
         msg = f'Bot "{name}" registered successfully.'
+        patched_files = aiarena_runner.apply_bot_patches(bot_directory)
+        if patched_files:
+            msg += f' Applied patches: {", ".join(patched_files)}'
         if symlink_mounts:
             link_names = ', '.join(m['name'] for m in symlink_mounts)
             msg += f' Detected symlinks: {link_names}'
