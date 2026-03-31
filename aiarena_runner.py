@@ -50,21 +50,6 @@ _BASE_FILES = (
     'Dockerfile.proxy_fwd', 'entrypoint_proxy_fwd.sh',
 )
 
-# Bot types that need a delayed socat proxy inside bot_controller2.
-#
-# In the aiarena multi-container setup the proxy_controller allocates SC2
-# WebSocket URLs to bots on first connect.  Fast-starting bots (C++, .NET)
-# can connect to the proxy *before* SC2 instances finish starting, causing
-# the proxy's WebSocket connection to SC2 to silently fail.  Python bots
-# are slow enough to avoid this race.
-#
-# The fix has two parts:
-# 1. Override ACBOT_PROXY_HOST=127.0.0.1 so bot_controller passes
-#    --LadderServer 127.0.0.1, forcing the bot through a local socat.
-# 2. socat starts after a delay (PROXY_FWD_DELAY seconds), giving SC2
-#    time to become ready before the bot's connection reaches the proxy.
-_NEEDS_PROXY_FWD: set[str] = {'cpplinux', 'dotnetcore'}
-
 # Maps available for aiarena matches (same as the test_lab map pool)
 AIARENA_MAP_LIST = [
     "PersephoneAIE_v4",
@@ -451,20 +436,16 @@ def _write_compose_override(
         lines += ['    volumes:']
         lines += _test_bot_volume_mounts(test_bot, mirror_aiarena_name, source_override=source_override)
     else:
-        if bot2_dockerfile:
+        # Non-Python bots need the proxy_fwd image (installs libs
+        # required for C++/Go bots to establish TCP connections).
+        effective_dockerfile = bot2_dockerfile
+        if not effective_dockerfile and bot2_type != 'python':
+            effective_dockerfile = 'Dockerfile.proxy_fwd'
+        if effective_dockerfile:
             lines += [
                 '    build:',
                 '      context: .',
-                f'      dockerfile: {bot2_dockerfile}',
-            ]
-        elif bot2_type in _NEEDS_PROXY_FWD:
-            lines += [
-                '    build:',
-                '      context: .',
-                '      dockerfile: Dockerfile.proxy_fwd',
-                '    environment:',
-                '      - "PROXY_FWD_DELAY=5"',
-                '      - "ACBOT_PROXY_HOST=127.0.0.1"',
+                f'      dockerfile: {effective_dockerfile}',
             ]
         lines.append('    volumes:')
         if opponent_bot is not None:
@@ -497,6 +478,10 @@ def _detect_bot_type(bot_path: str) -> str:
     3. Folder contains a single file — ``cpplinux``
     4. Default — ``wine``
     """
+    # Normalize aiarena.ai ladder type aliases to internal arenaclient type names
+    _TYPE_ALIASES: dict[str, str] = {
+        'binarycpp': 'cpplinux',
+    }
     ladderbots_path = os.path.join(bot_path, 'ladderbots.json')
     if os.path.isfile(ladderbots_path):
         try:
@@ -505,7 +490,8 @@ def _detect_bot_type(bot_path: str) -> str:
             bots = data.get('Bots', {})
             if bots:
                 bot_info = next(iter(bots.values()))
-                return bot_info.get('Type', 'wine').lower()
+                raw_type: str = bot_info.get('Type', 'wine').lower()
+                return _TYPE_ALIASES.get(raw_type) or raw_type
         except (json.JSONDecodeError, StopIteration):
             pass
         return 'wine'

@@ -1,0 +1,10 @@
+{
+    "who": {
+        "bot_module": "bot.main",
+        "bot_class": "MyBot"
+    },
+    "Thessaloniki": {
+        "bot_module": "bot.bot",
+        "bot_class": "CompetitiveBot"
+    }
+}

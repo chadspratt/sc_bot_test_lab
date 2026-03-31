@@ -1521,6 +1521,13 @@ def config_page(request):
     """Config page with Custom Bots, Test Suites, and System tabs."""
     import json as _json
 
+    bot_config_path = os.path.join(os.path.dirname(__file__), 'bot_config.json')
+    try:
+        with open(bot_config_path) as f:
+            bot_config = _json.load(f)
+    except (FileNotFoundError, _json.JSONDecodeError):
+        bot_config = {}
+
     bots = CustomBot.objects.all().order_by('-created_at')
     all_bot_details = aiarena_runner.get_available_aiarena_bot_details()
     used_directories = set(
@@ -1565,6 +1572,7 @@ def config_page(request):
         'aiarena_bots': available_bots,
         'aiarena_bots_json': _json.dumps(available_bots),
         'aiarena_bots_dir': aiarena_runner.AIARENA_BOTS_DIR.replace('\\', '/'),
+        'bot_config_json': _json.dumps(bot_config),
         'custom_bots': custom_bots_list,
         'test_suites': test_suites,
         'test_suites_json': test_suites_json,
@@ -1909,18 +1917,15 @@ def create_custom_bot(request):
         messages.error(request, error)
         return redirect(config_bots_url)
 
-    if is_test_subject and not source_path:
-        messages.error(request, 'Source path is required for test subject bots.')
+    if not source_path:
+        messages.error(request, 'Source path is required.')
         return redirect(config_bots_url)
-
-    if is_test_subject and source_path and not os.path.isdir(source_path):
+    elif not os.path.isdir(source_path):
         messages.error(request, f'Source path not found: {source_path}')
         return redirect(config_bots_url)
 
     # Auto-detect symlinks/junctions in the source directory
-    symlink_mounts: list[dict[str, str]] = []
-    if is_test_subject and source_path:
-        symlink_mounts = aiarena_runner.scan_directory_symlinks(source_path)
+    symlink_mounts = aiarena_runner.scan_directory_symlinks(source_path)
 
     try:
         bot = CustomBot.objects.create(
@@ -1987,11 +1992,19 @@ def update_custom_bot_test_subject(request, bot_id):
         return JsonResponse({'status': 'error', 'message': 'Bot not found'}, status=404)
 
     is_test_subject = request.POST.get('is_test_subject') == 'on'
+    source_path = request.POST.get('source_path', '').strip()
 
-    update_fields = ['is_test_subject']
+    update_fields = ['is_test_subject', 'source_path']
+
+    if source_path:
+        if not os.path.isdir(source_path):
+            return JsonResponse({'status': 'error', 'message': f'Source path not found: {source_path}'}, status=400)
+        bot.symlink_mounts = aiarena_runner.scan_directory_symlinks(source_path)
+        update_fields.append('symlink_mounts')
+
+    bot.source_path = source_path
 
     if is_test_subject:
-        source_path = request.POST.get('source_path', '').strip()
         enable_version_history = request.POST.get('enable_version_history') == 'on'
         dockerfile = request.POST.get('dockerfile', '').strip()
         env_file = request.POST.get('env_file', '').strip()
@@ -2003,32 +2016,23 @@ def update_custom_bot_test_subject(request, bot_id):
         if not source_path:
             return JsonResponse({'status': 'error', 'message': 'Source path is required for test subject bots.'}, status=400)
 
-        if not os.path.isdir(source_path):
-            return JsonResponse({'status': 'error', 'message': f'Source path not found: {source_path}'}, status=400)
-
-        symlink_mounts = aiarena_runner.scan_directory_symlinks(source_path)
-
         bot.is_test_subject = True
-        bot.source_path = source_path
         bot.enable_version_history = enable_version_history
         bot.archive_paths = archive_paths
         bot.dockerfile = dockerfile
         bot.env_file = env_file
         bot.bot_module = bot_module
         bot.bot_class = bot_class
-        bot.symlink_mounts = symlink_mounts
-        update_fields += ['source_path', 'enable_version_history', 'archive_paths', 'dockerfile', 'env_file', 'bot_module', 'bot_class', 'symlink_mounts']
+        update_fields += ['enable_version_history', 'archive_paths', 'dockerfile', 'env_file', 'bot_module', 'bot_class']
     else:
         bot.is_test_subject = False
-        bot.source_path = ''
         bot.enable_version_history = False
         bot.archive_paths = []
         bot.dockerfile = ''
         bot.env_file = ''
         bot.bot_module = ''
         bot.bot_class = ''
-        bot.symlink_mounts = []
-        update_fields += ['source_path', 'enable_version_history', 'archive_paths', 'dockerfile', 'env_file', 'bot_module', 'bot_class', 'symlink_mounts']
+        update_fields += ['enable_version_history', 'archive_paths', 'dockerfile', 'env_file', 'bot_module', 'bot_class']
 
     bot.save(update_fields=update_fields)
     return JsonResponse({'status': 'ok'})
