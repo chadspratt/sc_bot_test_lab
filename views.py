@@ -518,16 +518,18 @@ def _env_file_args(test_bot: CustomBot | None) -> list[str]:
 
 
 def _bot_identity_args(test_bot: CustomBot | None) -> list[str]:
-    """Return ``['-e', 'K=V', ...]`` flags for BOT_MODULE/CLASS/RACE/NAME.
+    """Return ``['-e', 'K=V', ...]`` flags identifying the bot to the runner.
 
-    These env vars tell ``run_vs_computer.py`` which bot class to import
-    and which race to play.  When the fields are not configured on the
-    CustomBot, the args are omitted and the runner falls back to its
-    built-in defaults.
+    Passes bot type, entry point, module/class, race, and name from the
+    database so the Docker runner doesn't need to read ladderbots.json.
     """
     if test_bot is None:
         return []
     args: list[str] = []
+    if test_bot.aiarena_bot_type:
+        args += ['-e', f'BOT_TYPE={test_bot.aiarena_bot_type}']
+    if test_bot.bot_file:
+        args += ['-e', f'BOT_ENTRY={test_bot.bot_file}']
     if test_bot.bot_module:
         args += ['-e', f'BOT_MODULE={test_bot.bot_module}']
     if test_bot.bot_class:
@@ -1900,6 +1902,7 @@ def create_custom_bot(request):
     env_file = request.POST.get('env_file', '').strip()
     bot_module = request.POST.get('bot_module', '').strip()
     bot_class = request.POST.get('bot_class', '').strip()
+    bot_file = request.POST.get('bot_file', '').strip()
 
     # Parse archive_paths: comma-separated list of paths
     archive_paths = [p.strip() for p in archive_paths_raw.split(',') if p.strip()] if archive_paths_raw else []
@@ -1943,6 +1946,7 @@ def create_custom_bot(request):
             env_file=env_file,
             bot_module=bot_module,
             bot_class=bot_class,
+            bot_file=bot_file,
             description=description,
         )
         msg = f'Bot "{name}" registered successfully.'
@@ -2010,6 +2014,7 @@ def update_custom_bot_test_subject(request, bot_id):
         env_file = request.POST.get('env_file', '').strip()
         bot_module = request.POST.get('bot_module', '').strip()
         bot_class = request.POST.get('bot_class', '').strip()
+        bot_file = request.POST.get('bot_file', '').strip()
         archive_paths_raw = request.POST.get('archive_paths', '').strip()
         archive_paths = [p.strip() for p in archive_paths_raw.split(',') if p.strip()] if archive_paths_raw else []
 
@@ -2023,7 +2028,8 @@ def update_custom_bot_test_subject(request, bot_id):
         bot.env_file = env_file
         bot.bot_module = bot_module
         bot.bot_class = bot_class
-        update_fields += ['enable_version_history', 'archive_paths', 'dockerfile', 'env_file', 'bot_module', 'bot_class']
+        bot.bot_file = bot_file
+        update_fields += ['enable_version_history', 'archive_paths', 'dockerfile', 'env_file', 'bot_module', 'bot_class', 'bot_file']
     else:
         bot.is_test_subject = False
         bot.enable_version_history = False
@@ -2032,7 +2038,8 @@ def update_custom_bot_test_subject(request, bot_id):
         bot.env_file = ''
         bot.bot_module = ''
         bot.bot_class = ''
-        update_fields += ['enable_version_history', 'archive_paths', 'dockerfile', 'env_file', 'bot_module', 'bot_class']
+        bot.bot_file = ''
+        update_fields += ['enable_version_history', 'archive_paths', 'dockerfile', 'env_file', 'bot_module', 'bot_class', 'bot_file']
 
     bot.save(update_fields=update_fields)
     return JsonResponse({'status': 'ok'})

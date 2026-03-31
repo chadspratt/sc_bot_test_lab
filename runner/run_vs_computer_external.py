@@ -1,8 +1,12 @@
-"""Launch an external (non-Python) bot against a built-in Computer opponent.
+"""Launch an external bot against a built-in Computer opponent.
 
-Works for any bot type that speaks the SC2 client protocol (Node.js, C++,
-.NET, Java, etc.).  The bot connects to a locally launched SC2 instance
-via WebSocket rather than being imported as a Python module.
+Works for any bot type that speaks the SC2 client protocol: Python,
+Node.js, C++, .NET, Java, etc.  The bot connects to a locally launched
+SC2 instance via WebSocket rather than being imported as a Python module.
+
+Python bots use their own ``run.py`` entry point (the standard ladder
+runner that handles ``--LadderServer`` / ``--GamePort`` args), removing
+the need for the separate dynamic-import path in ``run_vs_computer.py``.
 
 Flow:
   1. Launch SC2 headless via python_sc2's SC2Process
@@ -34,7 +38,13 @@ from config import BUILD_DICT, DIFFICULTY_DICT, RACE_DICT
 from sc2 import maps
 from sc2.data import Race, Result
 from sc2.player import Computer
-from sc2.sc2process import KillSwitch, SC2Process
+from sc2.sc2process import SC2Process
+
+try:
+    from sc2.sc2process import KillSwitch
+except ImportError:
+    # Older python-sc2 versions use lowercase name
+    from sc2.sc2process import kill_switch as KillSwitch # type: ignore
 
 import s2clientprotocol.sc2api_pb2 as sc_pb
 
@@ -154,13 +164,36 @@ def _build_bot_command(
     """Build the command to launch the external bot process."""
     entry = os.environ.get("BOT_ENTRY") or lb_info.get("FileName", "")
     if not entry:
-        raise RuntimeError(
-            "No bot entry point found. Set BOT_ENTRY or FileName in ladderbots.json."
-        )
+        # No explicit entry point — look for a run.py in the bot directory.
+        if bot_type == "python" and os.path.isfile(os.path.join(bot_dir, "run.py")):
+            entry = "run.py"
+        else:
+            raise RuntimeError(
+                "No bot entry point found. Set BOT_ENTRY or FileName in "
+                "ladderbots.json, or provide a run.py in the bot directory."
+            )
 
     entry_path = os.path.join(bot_dir, entry)
 
-    if bot_type == "nodejs":
+    if bot_type == "python":
+        # Python bots use their own run.py which handles --LadderServer/
+        # --GamePort args via run_ladder_game().  Do NOT pass --StartPort:
+        # if set, the bot's ladder runner populates server_ports/client_ports
+        # in joinGame, which makes SC2 treat it as a multi-player game and
+        # wait for additional players — hanging the vs-computer match.
+        # The bot must handle StartPort=None (set portconfig=None).
+        cmd = ["python3"]
+        # Interpreter flags from ladderbots.json (e.g. "-O")
+        args_str = lb_info.get("Args", "")
+        if args_str:
+            cmd += args_str.split()
+        cmd += [
+            entry_path,
+            "--GamePort", str(port),
+            "--LadderServer", "127.0.0.1",
+        ]
+        return cmd
+    elif bot_type == "nodejs":
         return [
             "node", entry_path,
             "--GamePort", str(port),
@@ -258,6 +291,9 @@ async def _run_match(bot_type: str) -> tuple[str, int | None]:
         if bot_type == "nodejs":
             patches = _patch_nodejs_for_vs_computer(bot_dir, lb_info)
 
+        # set for bots to use if they want to write match events to the database
+        os.environ["TEST_MATCH_ID"] = match_id
+
         cmd = _build_bot_command(bot_dir, lb_info, sc2_port, bot_type)
         logger.info(f"Bot command: {' '.join(cmd)}")
 
@@ -299,7 +335,8 @@ async def _run_match(bot_type: str) -> tuple[str, int | None]:
         try:
             sc2_proc._session = aiohttp.ClientSession()
             sc2_proc._ws = await sc2_proc._session.ws_connect(
-                sc2_proc.ws_url, timeout=10,
+                sc2_proc.ws_url,
+                timeout=aiohttp.ClientWSTimeout(ws_close=10),
             )
             controller._ws = sc2_proc._ws
 

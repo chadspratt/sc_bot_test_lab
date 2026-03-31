@@ -13,17 +13,20 @@ cd "$BOT_DIR"
 # ---------------------------------------------------------------------------
 # Detect bot type from ladderbots.json (case-insensitive filename)
 # ---------------------------------------------------------------------------
-BOT_TYPE="python"
-LADDERBOTS_FILE=""
-for candidate in ladderbots.json LadderBots.json; do
-    if [ -f "$candidate" ]; then
-        LADDERBOTS_FILE="$candidate"
-        break
-    fi
-done
+# BOT_TYPE may already be set via env var from the database.
+# Only fall back to ladderbots.json detection if not set.
+if [ -z "$BOT_TYPE" ]; then
+    BOT_TYPE="python"
+    LADDERBOTS_FILE=""
+    for candidate in ladderbots.json LadderBots.json; do
+        if [ -f "$candidate" ]; then
+            LADDERBOTS_FILE="$candidate"
+            break
+        fi
+    done
 
-if [ -n "$LADDERBOTS_FILE" ]; then
-    BOT_TYPE=$(python3 -c "
+    if [ -n "$LADDERBOTS_FILE" ]; then
+        BOT_TYPE=$(python3 -c "
 import json, sys
 with open('$LADDERBOTS_FILE') as f:
     data = json.load(f)
@@ -33,6 +36,7 @@ if bots:
 else:
     print('python')
 " 2>/dev/null || echo "python")
+    fi
 fi
 
 echo "Bot type: $BOT_TYPE"
@@ -74,7 +78,16 @@ case "$BOT_TYPE" in
 
         export PYTHONPATH="${BOT_DIR}${EXTRA_PATHS:+:$EXTRA_PATHS}:/root/runner${PYTHONPATH:+:$PYTHONPATH}"
         echo "PYTHONPATH=$PYTHONPATH"
-        exec python3 /root/runner/run_vs_computer.py "$@"
+
+        # If BOT_MODULE and BOT_CLASS are set, use the dynamic-import runner
+        # (works for any Python bot). Otherwise fall back to the external
+        # runner which launches the bot's own run.py via --LadderServer args
+        # (requires the bot to handle StartPort=None for vs-computer mode).
+        if [ -n "$BOT_MODULE" ] && [ -n "$BOT_CLASS" ]; then
+            exec python3 /root/runner/run_vs_computer.py "$@"
+        else
+            exec python3 /root/runner/run_vs_computer_external.py python
+        fi
         ;;
 
     dotnetcore|cpplinux|cppwin32|java|nodejs)

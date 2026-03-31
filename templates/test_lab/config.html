@@ -60,7 +60,7 @@ td { text-align: left; }
                         <li><a href="https://aiarena.net/bots/117" target="_blank">Chance (Random)</a></li>
                         <li><a href="https://aiarena.net/bots/655" target="_blank">AresRandomExample (Random)</a></li>
                         <li><a href="https://aiarena.net/bots/623" target="_blank">a_move_bot (Terran)</a></li>
-                        <li><a href="https://aiarena.net/bots/901" target="_blank">clone (Terran)</a></li>
+                        <li><a href="https://aiarena.net/bots/901" target="_blank">clone (Terran)</a> - be sure to also download the data and unzip into unzipped clone/data</li>
                         <li><a href="https://aiarena.net/bots/718" target="_blank">Mulebot (Terran)</a></li>
                         <li><a href="https://aiarena.net/bots/939" target="_blank">RustyNikolaj (Terran)</a></li>
                         <li><a href="https://aiarena.net/bots/518" target="_blank">norman (Protoss)</a></li>
@@ -165,22 +165,30 @@ td { text-align: left; }
                         <small style="color: #666;">Allow running matches against past versions of this bot (requires Source Path to point to a git repo).</small>
                     </div>
                     <div class="form-group">
-                        <label for="archive_paths">Historical folders (Optional):</label>
+                        For playing against past versions of itself, you can specify which folders to pull from git history.
+                        <label for="archive_paths">Folders to pull from git history (Optional):</label>
                         <input type="text" name="archive_paths" id="archive_paths" placeholder="e.g. src/, bot.py, config/">
                         <small style="color: #666;">Comma-separated list of folders to pull from git history for past-version tests. If empty, will use the entire contents of repo at selected commit.</small>
                     </div>
                     <div>
                         <p>Python Only</p>
+                        For matches vs Blizzard AI, the path to the custom bot main class is used to import the bot. Not required but if not setting these, may need to fix ladder.py to accept StartPort=None.
                         <div class="form-group">
                             <label for="bot_module">Bot Module (optional):</label>
-                            <input type="text" name="bot_module" id="bot_module" placeholder="e.g. bottato.bottato">
-                            <small style="color: #666;">Python module path for the bot class (e.g. 'bottato.bottato'). Used by the single-container Docker runner for dynamic import. Leave blank if not using single-container runner.</small>
+                            <input type="text" name="bot_module" id="bot_module" placeholder="e.g. bot.main">
+                            <small style="color: #666;">Python module path for the bot class (e.g. 'bot.main'). Used by the single-container Docker runner for dynamic import. Leave blank if not using single-container runner.</small>
                         </div>
                         <div class="form-group">
                             <label for="bot_class">Bot Class (optional):</label>
-                            <input type="text" name="bot_class" id="bot_class" placeholder="e.g. BotTato">
-                            <small style="color: #666;">Python class name that inherits from BotAI (e.g. 'BotTato'). Used by the single-container Docker runner for dynamic import.</small>
+                            <input type="text" name="bot_class" id="bot_class" placeholder="e.g. MyBot">
+                            <small style="color: #666;">Python class name that inherits from BotAI (e.g. 'MyBot'). Used by the single-container Docker runner for dynamic import.</small>
                         </div>
+                    </div>
+                    <div class="form-group">
+                        <p>Non-Python Only</p>
+                        <label for="bot_file">Entry Point (optional):</label>
+                        <input type="text" name="bot_file" id="bot_file" placeholder="e.g. RustyNikolaj">
+                        <small style="color: #666;">Entry point filename from ladderbots.json FileName. Used by the external runner to launch the bot.</small>
                     </div>
                     <div>
                         <p>Advanced</p>
@@ -782,13 +790,13 @@ td { text-align: left; }
             </div>
             <div class="form-group">
                 <label for="ts-modal-bot-module">Bot Module (optional):</label>
-                <input type="text" id="ts-modal-bot-module" placeholder="e.g. bottato.bottato">
-                <small style="color: #666;">Python module path for dynamic import in single-container Docker runner (e.g. 'bottato.bottato').</small>
+                <input type="text" id="ts-modal-bot-module" placeholder="e.g. bot.main">
+                <small style="color: #666;">Python module path for dynamic import in single-container Docker runner (e.g. 'bot.main').</small>
             </div>
             <div class="form-group">
                 <label for="ts-modal-bot-class">Bot Class (optional):</label>
-                <input type="text" id="ts-modal-bot-class" placeholder="e.g. BotTato">
-                <small style="color: #666;">Python class name that inherits from BotAI (e.g. 'BotTato').</small>
+                <input type="text" id="ts-modal-bot-class" placeholder="e.g. MyBot">
+                <small style="color: #666;">Python class name that inherits from BotAI (e.g. 'MyBot').</small>
             </div>
         </div>
         <div id="ts-modal-error" style="display: none; color: red; background: #f8d7da; border: 1px solid #f5c6cb; padding: 8px; border-radius: 4px; margin-top: 10px;"></div>
@@ -957,6 +965,8 @@ td { text-align: left; }
                 var cfg = botConfig[info.name];
                 var moduleField = document.getElementById('bot_module');
                 var classField = document.getElementById('bot_class');
+                var botFileField = document.getElementById('bot_file');
+                if (botFileField && info.file_name) botFileField.value = info.file_name;
                 if (cfg) {
                     if (moduleField && cfg.bot_module) moduleField.value = cfg.bot_module;
                     if (classField && cfg.bot_class) classField.value = cfg.bot_class;

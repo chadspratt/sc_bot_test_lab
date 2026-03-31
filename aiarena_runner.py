@@ -541,9 +541,10 @@ def get_available_aiarena_bot_details() -> list[dict]:
     """Return detailed info for bot directories under aiarena/bots/.
 
     Each entry is a dict with keys: ``directory``, ``name``, ``race``,
-    ``type``.  When a ``ladderbots.json`` exists the name, race, and type
-    are extracted from the first bot entry; otherwise type is detected by
-    heuristic (run.py → python, single file → cpplinux, else wine).
+    ``type``, ``file_name``.  When a ``ladderbots.json`` exists the name,
+    race, type, and file_name are extracted from the first bot entry;
+    otherwise type is detected by heuristic (run.py → python, single
+    file → cpplinux, else wine).
 
     Excludes internal copies (``_p2`` / ``_v_``).
     """
@@ -556,7 +557,7 @@ def get_available_aiarena_bot_details() -> list[dict]:
         bot_path = os.path.join(AIARENA_BOTS_DIR, d)
         if not os.path.isdir(bot_path):
             continue
-        info: dict = {'directory': d, 'name': d, 'race': '', 'type': _detect_bot_type(bot_path)}
+        info: dict = {'directory': d, 'name': d, 'race': '', 'type': _detect_bot_type(bot_path), 'file_name': ''}
         ladderbots_path = os.path.join(bot_path, 'ladderbots.json')
         if os.path.isfile(ladderbots_path):
             try:
@@ -567,6 +568,7 @@ def get_available_aiarena_bot_details() -> list[dict]:
                     bot_name, bot_info = next(iter(bots.items()))
                     info['name'] = bot_name
                     info['race'] = bot_info.get('Race', '')
+                    info['file_name'] = bot_info.get('FileName', '')
             except (json.JSONDecodeError, StopIteration):
                 pass
         results.append(info)

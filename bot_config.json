@@ -6,5 +6,9 @@
     "Thessaloniki": {
         "bot_module": "bot.bot",
         "bot_class": "CompetitiveBot"
+    },
+    "clone": {
+        "bot_module": "clone",
+        "bot_class": "Clone"
     }
 }

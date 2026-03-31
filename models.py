@@ -21,7 +21,7 @@ class CustomBot(models.Model):
         max_length=255,
         blank=True,
         default='',
-        help_text="Deprecated: kept for backward compatibility with older bot registrations.",
+        help_text="Entry point filename (e.g. 'run.py', 'RustyNikolaj'). Passed as BOT_ENTRY to the Docker runner.",
     )
     bot_class_name = models.CharField(
         max_length=100,
