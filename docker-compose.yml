@@ -1,8 +1,8 @@
 services:
   bot:
     build:
-      context: ../../..
-      dockerfile: ./python_sc2/dockerfiles/Dockerfile
+      context: .
+      dockerfile: Dockerfile.sc2
     network_mode: "host"
     working_dir: /root
     volumes:
