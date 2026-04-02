@@ -20,7 +20,8 @@ import subprocess
 logger = logging.getLogger('test_lab')
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-WORKTREE_BASE_DIR = os.path.join(SCRIPT_DIR, 'aiarena', 'worktrees')
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(SCRIPT_DIR)))
+WORKTREE_BASE_DIR = os.path.join(_REPO_ROOT, 'bot', 'worktrees')
 
 
 def _sanitize_branch_name(branch: str) -> str:

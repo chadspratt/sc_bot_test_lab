@@ -41,7 +41,7 @@ AIARENA_BOTS_DIR = os.path.join(AIARENA_DIR, 'bots')
 AIARENA_RUNS_DIR = os.path.join(AIARENA_DIR, 'runs')
 AIARENA_PATCHES_DIR = os.path.join(AIARENA_DIR, 'patches')
 
-# Repo root (for finding bots in other_bots/ and live source mounts)
+# Repo root (for finding live source mounts)
 REPO_ROOT = os.path.normpath(os.path.join(AIARENA_DIR, '..', '..', '..', '..'))
 
 # Base files in AIARENA_DIR that are copied into each per-match run directory
@@ -122,23 +122,17 @@ def scan_directory_symlinks(source_path: str) -> list[dict[str, str]]:
 def _resolve_bot_host_path(bot_dir_name: str) -> str | None:
     """Resolve the actual host filesystem path for a bot directory.
 
-    Checks multiple known locations in priority order, skipping NTFS
-    junctions (which Docker on Windows cannot follow inside bind mounts).
+    Looks in ``aiarena/bots/<bot_dir_name>/``, skipping NTFS junctions
+    (which Docker on Windows cannot follow inside bind mounts).
 
     Returns the absolute path, or None if not found.
     """
-    candidates = [
-        os.path.join(AIARENA_BOTS_DIR, bot_dir_name),
-        os.path.join(REPO_ROOT, 'other_bots', bot_dir_name),
-    ]
-    # Prefer real directories over junctions
-    for path in candidates:
-        if os.path.isdir(path) and not _is_junction(path):
-            return os.path.normpath(path)
+    path = os.path.join(AIARENA_BOTS_DIR, bot_dir_name)
+    if os.path.isdir(path) and not _is_junction(path):
+        return os.path.normpath(path)
     # Fallback: accept junctions (they work on host, just not in Docker)
-    for path in candidates:
-        if os.path.isdir(path):
-            return os.path.normpath(path)
+    if os.path.isdir(path):
+        return os.path.normpath(path)
     return None
 
 
@@ -292,13 +286,13 @@ def _opponent_volume_mounts(
 ) -> list[str]:
     """Generate Docker Compose volume mount lines for an opponent bot.
 
-    Resolves the opponent's full source directory (from ``source_path``,
-    ``other_bots/``, or ``aiarena/bots/`` as a last resort) and layers
-    aiarena overlay files on top — the same strategy used for test bots.
+    Resolves the opponent's full source directory (from ``source_path``
+    or ``aiarena/bots/`` as a fallback) and layers aiarena overlay files
+    on top — the same strategy used for test bots.
 
     If ``source_path`` points inside ``aiarena/bots/`` it is treated as
     an overlay directory rather than real source and the function falls
-    through to ``other_bots/`` discovery.
+    through to ``aiarena/bots/`` discovery.
     """
     source = opponent_bot.source_path
 
@@ -308,14 +302,6 @@ def _opponent_volume_mounts(
         os.path.normcase(os.path.normpath(AIARENA_BOTS_DIR))
     ):
         source = ''
-
-    if not source:
-        # Prefer other_bots/<name>/ (full source) over aiarena/bots/<name>/ (overlay)
-        other_bots_path = os.path.join(REPO_ROOT, 'other_bots', aiarena_name)
-        if os.path.isdir(other_bots_path) and not _is_junction(other_bots_path):
-            source = os.path.normpath(other_bots_path)
-        elif os.path.isdir(other_bots_path):
-            source = os.path.normpath(other_bots_path)
 
     if not source:
         # Fall back to mounting aiarena/bots/<name>/ directly
@@ -855,8 +841,7 @@ def start_aiarena_match(
         if not opponent_path:
             raise FileNotFoundError(
                 f'Bot directory not found for "{opponent_dir_name}". '
-                f'Expected in aiarena/bots/{opponent_dir_name}/ or '
-                f'other_bots/{opponent_dir_name}/'
+                f'Expected in aiarena/bots/{opponent_dir_name}/'
             )
 
     match_id = match.id

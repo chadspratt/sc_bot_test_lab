@@ -58,16 +58,17 @@ case "$BOT_TYPE" in
         fi
 
         # Build Cython extensions if the bot ships a setup.py (e.g. BotTato)
+        # Build in a container-local temp directory to avoid races — the bot
+        # source dir is a bind-mount shared by all concurrent containers.
+        CYTHON_BUILD=""
         if [ -d "cython_extensions" ] && [ -f "cython_extensions/setup.py" ]; then
             PYTHON_VERSION=$(python3 -c 'import sys; print(f"{sys.version_info.major}{sys.version_info.minor}")')
-            SO_FILES=$(ls cython_extensions/*.cpython-${PYTHON_VERSION}*.so 2>/dev/null | wc -l)
-            if [ "$SO_FILES" -lt 13 ]; then
-                echo "Building Cython extensions for Python ${PYTHON_VERSION}..."
-                uv pip install --system cython numpy setuptools
-                (cd cython_extensions && python3 setup.py build_ext --inplace)
-            else
-                echo "Cython extensions already built for Python ${PYTHON_VERSION}"
-            fi
+            echo "Building Cython extensions for Python ${PYTHON_VERSION}..."
+            uv pip install --system cython numpy setuptools
+            CYTHON_BUILD="/tmp/cython_build"
+            mkdir -p "$CYTHON_BUILD"
+            cp -a cython_extensions "$CYTHON_BUILD/"
+            python3 "$CYTHON_BUILD/cython_extensions/setup.py" build_ext --inplace
         fi
 
         # Auto-discover common framework paths
@@ -76,7 +77,7 @@ case "$BOT_TYPE" in
             EXTRA_PATHS="$BOT_DIR/ares-sc2/src/ares:$BOT_DIR/ares-sc2/src:$BOT_DIR/ares-sc2"
         fi
 
-        export PYTHONPATH="${BOT_DIR}${EXTRA_PATHS:+:$EXTRA_PATHS}:/root/runner${PYTHONPATH:+:$PYTHONPATH}"
+        export PYTHONPATH="${CYTHON_BUILD:+$CYTHON_BUILD:}${BOT_DIR}${EXTRA_PATHS:+:$EXTRA_PATHS}:/root/runner${PYTHONPATH:+:$PYTHONPATH}"
         echo "PYTHONPATH=$PYTHONPATH"
 
         # If BOT_MODULE and BOT_CLASS are set, use the dynamic-import runner

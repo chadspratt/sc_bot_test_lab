@@ -557,18 +557,14 @@ def _bot_volume_args(
 
     # When source_path points inside the aiarena overlay tree it holds
     # only config files (ladderbots.json, etc.), not full bot source.
-    # Fall through to other_bots/ discovery, same as _opponent_volume_mounts.
+    # Clear it so the fallback path resolves from aiarena/bots/.
     if source and not source_override:
         norm_source = os.path.normcase(os.path.normpath(source))
         norm_overlay = os.path.normcase(os.path.normpath(
             aiarena_runner.AIARENA_BOTS_DIR
         ))
         if norm_source.startswith(norm_overlay):
-            other_bots = os.path.join(
-                aiarena_runner.REPO_ROOT, 'other_bots', bot_dir,
-            )
-            if os.path.isdir(other_bots):
-                source = os.path.normpath(other_bots)
+            source = ''
 
     args: list[str] = []
     if source:
@@ -591,7 +587,7 @@ def _bot_volume_args(
                 f = overlay_file.replace('\\', '/')
                 args += ['-v', f'{f}:/root/bot_dir/{filename}']
     else:
-        # No live source — try aiarena/bots/<dir>/ then other_bots/<dir>/
+        # No live source — try aiarena/bots/<dir>/
         bot_path = aiarena_runner._resolve_bot_host_path(bot_dir)
         if bot_path:
             bp = bot_path.replace('\\', '/')

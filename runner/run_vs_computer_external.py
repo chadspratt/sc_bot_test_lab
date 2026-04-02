@@ -49,7 +49,7 @@ except ImportError:
 import s2clientprotocol.sc2api_pb2 as sc_pb
 
 # Max seconds to wait for the bot process after game is expected to end.
-_BOT_PROCESS_TIMEOUT = 600
+_BOT_PROCESS_TIMEOUT = 1800
 
 # SC2 proto race values
 _RACE_NAME_TO_PROTO = {

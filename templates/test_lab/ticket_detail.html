@@ -1,6 +1,10 @@
 {% extends "test_lab/base.html" %}
 {% block title %}Ticket #{{ ticket.id }} — Test Lab{% endblock %}
 
+{% block extra_head %}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/diff2html/bundles/css/diff2html.min.css" />
+{% endblock %}
+
 {% block extra_css %}
 .status-badge {
     display: inline-block; padding: 2px 8px; border-radius: 10px;
@@ -18,14 +22,7 @@
 .ticket-meta dd { display: inline; margin: 0 20px 0 5px; }
 .action-bar { display: flex; gap: 8px; flex-wrap: wrap; margin: 15px 0; }
 .action-bar form { margin: 0; }
-.diff-block {
-    background: #1e1e1e; color: #d4d4d4; padding: 15px;
-    border-radius: 5px; overflow-x: auto; font-family: monospace;
-    font-size: 13px; white-space: pre; max-height: 500px; overflow-y: auto;
-}
-.diff-block .diff-add { color: #4ec9b0; }
-.diff-block .diff-del { color: #f44747; }
-.diff-block .diff-hunk { color: #569cd6; }
+#diff-output { max-height: 1500px; overflow-y: auto; }
 .prompt-cmd {
     background: #f0f0f0; padding: 8px 12px; border-radius: 4px;
     font-family: monospace; font-size: 14px; display: inline-block; margin: 5px 0;
@@ -44,6 +41,8 @@
 .merge-status { margin-top: 10px; padding: 8px; border-radius: 4px; display: none; }
 .merge-status.error { display: block; background: #fce4ec; color: #c62828; }
 .merge-status.success { display: block; background: #e8f5e9; color: #2e7d32; }
+table.d2h-diff-table th, table.d2h-diff-table td { border: 1px solid #ddd; padding: 8px; text-align: left; display: revert; }
+table td.d2h-code-side-linenumber { position: relative; }
 {% endblock %}
 
 {% block content %}
@@ -208,7 +207,7 @@
 {% if diff_text %}
 <div class="utility-section">
     <h3>Branch Diff ({{ ticket.branch }} vs main)</h3>
-    <div class="diff-block" id="diff-output"></div>
+    <div id="diff-output"></div>
 </div>
 {% endif %}
 
@@ -267,27 +266,24 @@
     }
 })();
 </script>
+<script src="https://cdn.jsdelivr.net/npm/diff2html/bundles/js/diff2html-ui.min.js"></script>
 {% if diff_text %}
 <script>
 (function() {
-    var raw = {{ diff_text|escapejs|safe }};
-    var container = document.getElementById('diff-output');
-    if (!raw) return;
-    var lines = raw.split('\n');
-    var html = '';
-    for (var i = 0; i < lines.length; i++) {
-        var line = lines[i].replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-        if (line.startsWith('@@')) {
-            html += '<span class="diff-hunk">' + line + '</span>\n';
-        } else if (line.startsWith('+')) {
-            html += '<span class="diff-add">' + line + '</span>\n';
-        } else if (line.startsWith('-')) {
-            html += '<span class="diff-del">' + line + '</span>\n';
-        } else {
-            html += line + '\n';
-        }
-    }
-    container.innerHTML = html;
+    var diffString = `{{ diff_text|escapejs|safe }}`;
+    if (!diffString) return;
+    var targetElement = document.getElementById('diff-output');
+    var configuration = {
+        drawFileList: true,
+        matching: 'lines',
+        outputFormat: 'side-by-side',
+        highlight: true,
+        fileListToggle: true,
+        fileContentToggle: true
+    };
+    var diff2htmlUi = new Diff2HtmlUI(targetElement, diffString, configuration);
+    diff2htmlUi.draw();
+    diff2htmlUi.highlightCode();
 })();
 </script>
 {% endif %}
@@ -322,11 +318,13 @@
                 if (data.error) {
                     status.textContent = data.error;
                     status.className = 'merge-status error';
+                    status.style.display = '';
                     return;
                 }
                 if (data.branches.length === 0) {
                     status.textContent = 'No other branches found.';
                     status.className = 'merge-status error';
+                    status.style.display = '';
                     return;
                 }
                 list.style.display = 'block';
@@ -347,6 +345,7 @@
                 loading.style.display = 'none';
                 status.textContent = 'Failed to fetch branches.';
                 status.className = 'merge-status error';
+                status.style.display = '';
             });
     };
 
@@ -381,6 +380,7 @@
                 } else {
                     status.textContent = resp.data.error + (resp.data.detail ? '\n' + resp.data.detail : '');
                     status.className = 'merge-status error';
+                    status.style.display = '';
                     status.style.whiteSpace = 'pre-wrap';
                     btn.disabled = false;
                 }
@@ -390,6 +390,7 @@
                 btn.disabled = false;
                 status.textContent = 'Network error.';
                 status.className = 'merge-status error';
+                status.style.display = '';
             });
     };
 })();

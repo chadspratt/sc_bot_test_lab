@@ -49,10 +49,7 @@ class CustomBot(models.Model):
         max_length=500,
         blank=True,
         default='',
-        help_text=(
-            "Directory name under other_bots/ (external_python) "
-            "or under aiarena/bots/ (aiarena type)"
-        ),
+        help_text="Directory name under aiarena/bots/",
     )
     aiarena_bot_type = models.CharField(
         max_length=20,
@@ -463,7 +460,7 @@ class Ticket(models.Model):
         """Return the branch name, auto-generating if empty."""
         if self.branch:
             return self.branch
-        return f'ticket/{self.id}-{self.slug}'
+        return f'ticket-{self.id}-{self.slug}'
 
     def __str__(self):
         return f"#{self.id}: {self.title} [{self.status}]"
