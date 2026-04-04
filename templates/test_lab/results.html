@@ -119,6 +119,23 @@ thead tr:nth-child(2) th { top: 41px; }
             {% endfor %}
         </select>
 
+        <span id="results_race_wrapper" style="display: none;">
+            <label for="results_friendly_race">Race:</label>
+            <select name="friendly_race" id="results_friendly_race">
+                <option value="">Random</option>
+                <option value="Protoss">Protoss</option>
+                <option value="Terran">Terran</option>
+                <option value="Zerg">Zerg</option>
+            </select>
+        </span>
+
+        <span id="results_build_wrapper" style="display: none;">
+            <label for="results_friendly_build">Build:</label>
+            <select name="friendly_build" id="results_friendly_build">
+                <option value="">None</option>
+            </select>
+        </span>
+
         <label for="run_test_suite">Suite:</label>
         <select name="test_suite" id="run_test_suite">
             {% for suite in test_suites %}
@@ -174,7 +191,7 @@ thead tr:nth-child(2) th { top: 41px; }
                             {% if match_data.opponent_bot or match_data.opponent_commit_hash %}<a href="{% url 'serve_aiarena_bot_log' match_id=match_data.id bot_name=match_data.test_bot_directory %}" target="_blank" class="checkmark-link">{{ match_data.duration_in_game_time|format_duration }}</a>{% else %}<a href="{% url 'serve_log' match_id=match_data.id %}" target="_blank" class="checkmark-link">{{ match_data.duration_in_game_time|format_duration }}</a>{% endif %}{% if match_data.is_best_time %} <span title="Fastest win or slowest loss on map">⭐</span>{% endif %}
                         {% endif %}<br>
                         <small>{{ match_data.map_name }}</small>
-                        {% if match_data.bot_actual_race %}<br><small title="Resolved race (bot was Random)">🎲{{ match_data.bot_actual_race }}</small>{% endif %}
+                        {% if match_data.friendly_race %}<br><small title="Resolved race (bot was Random)">🎲{{ match_data.friendly_race }}</small>{% endif %}
                     </td>
                     {% else %}
                     <td>-</td>
@@ -371,6 +388,75 @@ thead tr:nth-child(2) th { top: 41px; }
 {% endblock %}
 
 {% block extra_js %}
+{{ builds_by_bot_json|json_script:"results-builds-by-bot" }}
+{{ bot_id_to_dir_json|json_script:"results-bot-id-to-dir" }}
+{{ builds_by_race_by_bot_json|json_script:"results-builds-by-race-by-bot" }}
+{{ bot_race_map_json|json_script:"results-bot-race-map" }}
+<script>
+(function() {
+    var buildsByBot = JSON.parse(document.getElementById('results-builds-by-bot').textContent);
+    var botIdToDir = JSON.parse(document.getElementById('results-bot-id-to-dir').textContent);
+    var buildsByRaceByBot = JSON.parse(document.getElementById('results-builds-by-race-by-bot').textContent);
+    var botRaceMap = JSON.parse(document.getElementById('results-bot-race-map').textContent);
+    var botSel = document.getElementById('run_test_bot');
+    var buildSel = document.getElementById('results_friendly_build');
+    var buildWrapper = document.getElementById('results_build_wrapper');
+    var raceSel = document.getElementById('results_friendly_race');
+    var raceWrapper = document.getElementById('results_race_wrapper');
+    if (!botSel || !buildSel) return;
+
+    function sync() {
+        var botId = botSel.value;
+        var dir = botIdToDir[botId] || '';
+        var botRace = botRaceMap[String(botId)] || '';
+        var isRandom = (botRace === 'Random');
+        var allBuilds = buildsByBot[dir] || [];
+        var raceBuilds = buildsByRaceByBot[dir] || {};
+        var hasAnyBuilds = allBuilds.length > 0;
+        var hasRaceMapping = Object.keys(raceBuilds).length > 0;
+        var selectedRace = raceSel ? raceSel.value : '';
+
+        // Race dropdown: show for Random bots only
+        if (raceWrapper) {
+            raceWrapper.style.display = isRandom ? '' : 'none';
+            if (!isRandom && raceSel) raceSel.value = '';
+        }
+
+        // Determine builds
+        var builds;
+        if (isRandom) {
+            builds = (selectedRace && raceBuilds[selectedRace]) ? raceBuilds[selectedRace] : [];
+        } else if (hasRaceMapping && raceBuilds[botRace]) {
+            builds = raceBuilds[botRace];
+        } else {
+            builds = allBuilds;
+        }
+
+        buildSel.innerHTML = '<option value="">None</option>';
+        builds.forEach(function(b) {
+            var opt = document.createElement('option');
+            opt.value = b;
+            opt.textContent = b;
+            buildSel.appendChild(opt);
+        });
+
+        if (!hasAnyBuilds) {
+            buildWrapper.style.display = 'none';
+            buildSel.disabled = false;
+        } else if (isRandom && builds.length === 0) {
+            buildWrapper.style.display = '';
+            buildSel.disabled = true;
+        } else {
+            buildWrapper.style.display = '';
+            buildSel.disabled = false;
+        }
+    }
+
+    botSel.addEventListener('change', sync);
+    if (raceSel) raceSel.addEventListener('change', sync);
+    sync();
+})();
+</script>
 {% if active_tab == 'test-groups' %}
 <script>
     // Auto-submit filter form on any change

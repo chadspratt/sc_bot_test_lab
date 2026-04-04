@@ -161,6 +161,15 @@ class TestSuite(models.Model):
         related_name='test_suites',
         help_text="Replay tests to include in this test suite",
     )
+    custom_bot_builds = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text=(
+            'Per-bot build config overrides: {"<bot_id>": ["build1", ...]}. '
+            'When a bot ID is present, one match per listed build is launched '
+            'during test suite runs.'
+        ),
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     @property
@@ -224,7 +233,7 @@ class Match(models.Model):
     map_name = models.CharField(max_length=100)
     opponent_race = models.CharField(max_length=7, choices=Race)
     opponent_difficulty = models.CharField(max_length=11, choices=Difficulty, blank=True, default='')
-    opponent_build = models.CharField(max_length=15, choices=Build, blank=True, default='')
+    opponent_build = models.CharField(max_length=100, blank=True, default='')
     opponent_bot = models.ForeignKey(
         CustomBot, on_delete=models.SET_NULL, null=True, blank=True,
         related_name='opponent_matches',
@@ -237,9 +246,9 @@ class Match(models.Model):
     )
     result = models.CharField(max_length=50, choices=Result)
     duration_in_game_time = models.IntegerField(null=True, blank=True)
-    bot_actual_race = models.CharField(
+    friendly_race = models.CharField(
         max_length=7, blank=True, default='',
-        help_text="Resolved race when bot was set to Random (Protoss/Terran/Zerg)",
+        help_text="Race selected for this match. Set pre-match for Random-race bots, or resolved post-match from log.",
     )
     replay_file = models.CharField(
         max_length=500, blank=True, default='',
@@ -258,6 +267,11 @@ class Match(models.Model):
         related_name='matches',
         help_text="The replay test that generated this match (auto-set by test suite runner)",
     )
+    friendly_build = models.CharField(
+        max_length=100, blank=True, default='',
+        help_text="Build config name used by the test bot (from aiarena/configs/). Empty = default config.",
+    )
+
 
     # Non-database attributes (computed dynamically in views)
     is_best_time: bool = False

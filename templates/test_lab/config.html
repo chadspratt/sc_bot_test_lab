@@ -53,6 +53,12 @@ td { text-align: left; }
                 <a href="https://aiarena.net/bots" target="_blank">aiarena.net</a> (toggle "Only downloadable").
             </p>
             <p>
+                <strong>Build configs:</strong> To configure named builds for a bot, create subdirectories under
+                <code>test_lab/aiarena/configs/&lt;bot_directory&gt;/&lt;build_name&gt;/</code>.
+                Files in a build directory are overlaid onto the bot's root at runtime via Docker volume mounts.
+                See <code>test_lab/aiarena/configs/README.md</code> for details.
+            </p>
+            <p>
                 Known working bots: <a href="#" onclick="toggleKnownBots(); return false;">toggle list</a>
                 <div id="known-bots-list" style="display: none;">
                     <ul>
@@ -302,7 +308,7 @@ td { text-align: left; }
                     <tr>
                         <td style="border: 1px solid #ddd; padding: 6px 10px;">{{ suite.name }}</td>
                         <td style="border: 1px solid #ddd; padding: 6px 10px; text-align: center;">{% if suite.include_blizzard_ai %}&#10003;{% else %}&#10007;{% endif %}</td>
-                        <td style="border: 1px solid #ddd; padding: 6px 10px;">
+                        <td style="border: 1px solid #ddd; padding: 6px 10px;" class="suite-bots-cell" data-suite-id="{{ suite.id }}">
                             {% if suite.include_all_custom_bots %}
                                 <em>All active bots</em>
                             {% else %}
@@ -357,14 +363,18 @@ td { text-align: left; }
                         </label>
                         <div id="create-suite-bot-list">
                         {% for bot in custom_bots %}
-                        <label style="display: block; margin-left: 10px;">
-                            <input type="checkbox" name="custom_bot_ids" value="{{ bot.id }}">
-                            {{ bot.name }} ({{ bot.race }}){% if not bot.is_active %} <small style="color: #999;">(inactive)</small>{% endif %}
-                        </label>
+                        <div style="margin-left: 10px; margin-bottom: 2px;">
+                            <label style="display: block;">
+                                <input type="checkbox" name="custom_bot_ids" value="{{ bot.id }}" class="create-suite-bot-cb" data-bot-id="{{ bot.id }}">
+                                {{ bot.name }} ({{ bot.race }}){% if not bot.is_active %} <small style="color: #999;">(inactive)</small>{% endif %}
+                            </label>
+                            <div class="create-suite-builds-list" data-bot-id="{{ bot.id }}" style="margin-left: 24px; display: none;"></div>
+                        </div>
                         {% empty %}
                         <em>No custom bots registered.</em>
                         {% endfor %}
                         </div>
+                        <input type="hidden" name="custom_bot_builds" id="create-suite-bot-builds" value="">
                     </div>
                     <div style="margin-bottom: 10px;">
                         <label style="font-weight: bold;">Replay Tests:</label><br>
@@ -723,12 +733,16 @@ td { text-align: left; }
                 </label>
                 <div id="edit-suite-bot-list">
                 {% for bot in custom_bots %}
-                <label style="display: block; margin-left: 10px;">
-                    <input type="checkbox" name="custom_bot_ids" value="{{ bot.id }}" class="edit-suite-bot-cb">
-                    {{ bot.name }} ({{ bot.race }}){% if not bot.is_active %} <small style="color: #999;">(inactive)</small>{% endif %}
-                </label>
+                <div style="margin-left: 10px; margin-bottom: 2px;">
+                    <label style="display: block;">
+                        <input type="checkbox" name="custom_bot_ids" value="{{ bot.id }}" class="edit-suite-bot-cb" data-bot-id="{{ bot.id }}">
+                        {{ bot.name }} ({{ bot.race }}){% if not bot.is_active %} <small style="color: #999;">(inactive)</small>{% endif %}
+                    </label>
+                    <div class="edit-suite-builds-list" data-bot-id="{{ bot.id }}" style="margin-left: 24px; display: none;"></div>
+                </div>
                 {% endfor %}
                 </div>
+                <input type="hidden" name="custom_bot_builds" id="edit-suite-bot-builds" value="">
             </div>
             <div class="form-group">
                 <label style="font-weight: bold;">Replay Tests:</label>
@@ -849,8 +863,106 @@ td { text-align: left; }
 {% endblock %}
 
 {% block extra_js %}
+{{ builds_by_bot_json|json_script:"config-builds-by-bot" }}
+{{ bot_id_to_dir_json|json_script:"config-bot-id-to-dir" }}
 <script>
     initTabs('config-tabs');
+
+    // --- Build config data ---
+    var _buildsByBot = JSON.parse(document.getElementById('config-builds-by-bot').textContent);
+    var _botIdToDir = JSON.parse(document.getElementById('config-bot-id-to-dir').textContent);
+
+    function populateBuildCheckboxes(containerClass, savedBuilds) {
+        // Populate build checkboxes under each bot and show/hide based on available builds.
+        // savedBuilds: {"botId": ["build1", ...], ...}
+        document.querySelectorAll('.' + containerClass).forEach(function(div) {
+            var botId = div.getAttribute('data-bot-id');
+            var botDir = _botIdToDir[botId] || '';
+            var builds = _buildsByBot[botDir] || [];
+            div.innerHTML = '';
+            if (!builds.length) { div.style.display = 'none'; return; }
+            div.style.display = 'block';
+            var saved = (savedBuilds && savedBuilds[botId]) || [];
+            builds.forEach(function(b) {
+                var label = document.createElement('label');
+                label.style.display = 'block';
+                label.style.fontSize = '12px';
+                var cb = document.createElement('input');
+                cb.type = 'checkbox';
+                cb.className = containerClass + '-cb';
+                cb.setAttribute('data-bot-id', botId);
+                cb.value = b;
+                if (saved.indexOf(b) !== -1) cb.checked = true;
+                label.appendChild(cb);
+                label.appendChild(document.createTextNode(' ' + b));
+                div.appendChild(label);
+            });
+        });
+    }
+
+    function collectSuiteFormData(botCbClass, buildCbClass) {
+        // Collect the combined bot + build selections.
+        // Returns {botIds: [...], builds: {botId: [build1, ...]}}
+        // A checked bot checkbox → "" (default/no-build match) is included.
+        // A checked build checkbox → that build name is included.
+        // Both checked → both default AND build match run.
+        // Build checkbox without bot checkbox → bot auto-included, only builds run.
+        var botIds = [];
+        var builds = {};
+        // Gather checked build checkboxes first
+        document.querySelectorAll('.' + buildCbClass).forEach(function(cb) {
+            if (cb.checked) {
+                var botId = cb.getAttribute('data-bot-id');
+                if (!builds[botId]) builds[botId] = [];
+                builds[botId].push(cb.value);
+            }
+        });
+        // Gather checked bot checkboxes — adds "" (default match) to builds
+        document.querySelectorAll('.' + botCbClass).forEach(function(cb) {
+            if (cb.checked) {
+                botIds.push(cb.value);
+                if (!builds[cb.value]) builds[cb.value] = [];
+                builds[cb.value].unshift('');  // default match first
+            }
+        });
+        // Auto-include bots that have build selections even if bot checkbox unchecked
+        Object.keys(builds).forEach(function(botId) {
+            if (botIds.indexOf(botId) === -1) botIds.push(botId);
+        });
+        return {botIds: botIds, builds: builds};
+    }
+
+    // Populate create form build checkboxes on page load
+    populateBuildCheckboxes('create-suite-builds-list', {});
+
+    // Serialize custom_bot_builds on create form submit
+    (function() {
+        var form = document.querySelector('form[action*="test-suites/create"]');
+        if (form) {
+            form.addEventListener('submit', function() {
+                var data = collectSuiteFormData('create-suite-bot-cb', 'create-suite-builds-list-cb');
+                document.getElementById('create-suite-bot-builds').value = JSON.stringify(data.builds);
+                // Sync bot checkboxes so M2M includes bots with build selections
+                document.querySelectorAll('.create-suite-bot-cb').forEach(function(cb) {
+                    if (data.botIds.indexOf(cb.value) !== -1) cb.checked = true;
+                });
+            });
+        }
+    })();
+
+    // Serialize custom_bot_builds on edit form submit
+    (function() {
+        var form = document.getElementById('edit-suite-form');
+        if (form) {
+            form.addEventListener('submit', function() {
+                var data = collectSuiteFormData('edit-suite-bot-cb', 'edit-suite-builds-list-cb');
+                document.getElementById('edit-suite-bot-builds').value = JSON.stringify(data.builds);
+                document.querySelectorAll('.edit-suite-bot-cb').forEach(function(cb) {
+                    if (data.botIds.indexOf(cb.value) !== -1) cb.checked = true;
+                });
+            });
+        }
+    })();
 
     // --- Test Suite edit modal data ---
     var _suiteData = {{ test_suites_json|safe }};
@@ -868,14 +980,29 @@ td { text-align: left; }
         // Set the form action
         document.getElementById('edit-suite-form').action =
             '{% url "update_test_suite" 0 %}'.replace('/0/', '/' + suiteId + '/');
-        // Check the right custom bot checkboxes
+        // Check the right custom bot checkboxes.
+        // In new format, custom_bot_builds may contain "" entries meaning
+        // "run with default build" (i.e. the bot checkbox was checked).
+        var builds = suite.custom_bot_builds || {};
         document.querySelectorAll('.edit-suite-bot-cb').forEach(function(cb) {
-            cb.checked = suite.custom_bot_ids.indexOf(parseInt(cb.value)) !== -1;
+            var botId = cb.value;
+            var inM2M = suite.custom_bot_ids.indexOf(parseInt(botId)) !== -1;
+            var botBuilds = builds[botId] || [];
+            // Bot checkbox is checked if it was in the M2M AND had "" in builds
+            // (or had no build entries at all, meaning default-only)
+            cb.checked = inM2M && (botBuilds.indexOf('') !== -1 || botBuilds.length === 0);
         });
         // Check the right replay test checkboxes
         document.querySelectorAll('.edit-suite-rt-cb').forEach(function(cb) {
             cb.checked = suite.replay_test_ids.indexOf(parseInt(cb.value)) !== -1;
         });
+        // Populate and restore build selections (filter out "" entries)
+        var buildsSansDefault = {};
+        Object.keys(builds).forEach(function(k) {
+            var filtered = builds[k].filter(function(b) { return b !== ''; });
+            if (filtered.length) buildsSansDefault[k] = filtered;
+        });
+        populateBuildCheckboxes('edit-suite-builds-list', buildsSansDefault);
         toggleEditBotCheckboxes(suite.include_all_custom_bots);
         document.getElementById('edit-suite-modal').classList.add('active');
     }
@@ -1133,5 +1260,40 @@ td { text-align: left; }
                 if (data.path) document.getElementById(inputId).value = data.path;
             });
     }
+
+    // --- Enhance suite table cells with build info ---
+    (function() {
+        // Build a botId→name map from the checkboxes in the create form
+        var botNames = {};
+        document.querySelectorAll('.create-suite-bot-cb').forEach(function(cb) {
+            var label = cb.parentElement;
+            if (label) {
+                var text = label.textContent.trim();
+                botNames[cb.value] = text;
+            }
+        });
+        document.querySelectorAll('.suite-bots-cell').forEach(function(cell) {
+            var suiteId = cell.getAttribute('data-suite-id');
+            var suite = _suiteById[parseInt(suiteId)];
+            if (!suite || suite.include_all_custom_bots) return;
+            var builds = suite.custom_bot_builds || {};
+            var parts = [];
+            suite.custom_bot_ids.forEach(function(botId) {
+                var name = botNames[String(botId)] || ('Bot #' + botId);
+                var botBuilds = (builds[String(botId)] || []).filter(function(b) { return b !== ''; });
+                var hasDefault = (builds[String(botId)] || []).indexOf('') !== -1 || !builds[String(botId)];
+                if (hasDefault && botBuilds.length) {
+                    parts.push(name + ', ' + botBuilds.join(', '));
+                } else if (botBuilds.length) {
+                    parts.push(botBuilds.join(', '));
+                } else {
+                    parts.push(name);
+                }
+            });
+            if (parts.length) {
+                cell.textContent = parts.join('; ');
+            }
+        });
+    })();
 </script>
 {% endblock %}

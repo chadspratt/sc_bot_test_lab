@@ -116,7 +116,7 @@ def _get_match_list_context(request):
     # ------------------------------------------------------------------
     grouped_matches: dict[int, dict[str, Match]] = defaultdict(dict)
     race_groups: dict[str, list[str]] = defaultdict(list)  # race -> builds
-    custom_bot_opponents: dict[int, CustomBot] = {}  # bot_id -> CustomBot
+    custom_bot_opponents: dict[str, tuple[CustomBot, str]] = {}  # "bot_id_build" -> (CustomBot, build)
     version_opponents: dict[str, str] = {}  # short_hash -> opponent_key
     version_ordering: dict[str, tuple[int, int]] = {}  # short_hash -> (max_test_group_id, match_id)
     replay_test_opponents: dict[int, str] = {}  # replay_test_id -> name
@@ -146,9 +146,9 @@ def _get_match_list_context(request):
             if prev is None or group_id > prev[0] or (group_id == prev[0] and match.id < prev[1]):
                 version_ordering[short_hash] = (group_id, match.id)
         elif opp_bot is not None:
-            # Custom bot opponent — key by bot id
-            opponent_key = f"bot_{opp_bot.id}"
-            custom_bot_opponents[opp_bot.id] = opp_bot
+            # Custom bot opponent — key by bot id + build
+            opponent_key = f"bot_{opp_bot.id}_{match.opponent_build}"
+            custom_bot_opponents[opponent_key] = (opp_bot, match.opponent_build)
         else:
             # Computer opponent — key by race-build
             opponent_key = f"{match.opponent_race}-{match.opponent_build}"
@@ -197,12 +197,12 @@ def _get_match_list_context(request):
     # 2) Custom bot opponents (appended after computer columns)
     custom_bot_keys: list[str] = []
     custom_bot_names: list[str] = []
-    for bot_id in sorted(custom_bot_opponents.keys()):
-        bot = custom_bot_opponents[bot_id]
-        key = f"bot_{bot_id}"
-        custom_bot_keys.append(key)
-        custom_bot_names.append(bot.name)
-        sorted_opponents.append(key)
+    for opp_key in sorted(custom_bot_opponents.keys()):
+        bot, build = custom_bot_opponents[opp_key]
+        custom_bot_keys.append(opp_key)
+        label = f"{bot.name} ({build})" if build else bot.name
+        custom_bot_names.append(label)
+        sorted_opponents.append(opp_key)
 
     if custom_bot_keys:
         header_structure.append({
@@ -451,6 +451,7 @@ def create_pending_match(
     test_group_id: int, race: str, build: str, difficulty: str,
     test_bot: CustomBot,
     map_name: str = '',
+    friendly_build: str = '',
 ) -> int:
     """Create a pending match entry and return the match ID.
 
@@ -471,7 +472,8 @@ def create_pending_match(
         opponent_difficulty=difficulty or "CheatInsane",
         opponent_build=build.capitalize(),
         test_bot=test_bot,
-        result="Pending"
+        result="Pending",
+        friendly_build=friendly_build,
     )
     match.save()
     assert isinstance(match.id, int)
@@ -517,11 +519,16 @@ def _env_file_args(test_bot: CustomBot | None) -> list[str]:
     return args
 
 
-def _bot_identity_args(test_bot: CustomBot | None) -> list[str]:
+def _bot_identity_args(
+    test_bot: CustomBot | None, race_override: str = '',
+) -> list[str]:
     """Return ``['-e', 'K=V', ...]`` flags identifying the bot to the runner.
 
     Passes bot type, entry point, module/class, race, and name from the
     database so the Docker runner doesn't need to read ladderbots.json.
+
+    *race_override* — when non-empty, used instead of ``test_bot.race`` for
+    the ``BOT_RACE`` env-var (e.g. the user picked "Protoss" for a Random bot).
     """
     if test_bot is None:
         return []
@@ -534,8 +541,9 @@ def _bot_identity_args(test_bot: CustomBot | None) -> list[str]:
         args += ['-e', f'BOT_MODULE={test_bot.bot_module}']
     if test_bot.bot_class:
         args += ['-e', f'BOT_CLASS={test_bot.bot_class}']
-    if test_bot.race:
-        args += ['-e', f'BOT_RACE={test_bot.race}']
+    race = race_override or test_bot.race
+    if race:
+        args += ['-e', f'BOT_RACE={race}']
     if test_bot.name:
         args += ['-e', f'BOT_NAME={test_bot.name}']
     return args
@@ -683,7 +691,7 @@ def _recover_stale_sc_docker_matches() -> dict[int, str]:
                     match_obj.duration_in_game_time = duration
                 bot_race = _parse_sc_docker_bot_race(log_files[0])
                 if bot_race:
-                    match_obj.bot_actual_race = bot_race
+                    match_obj.friendly_race = bot_race
                 match_obj.save()
                 recovered[match_obj.id] = result
         except Exception:
@@ -717,7 +725,7 @@ def _launch_sc_docker_match(match_id: int, command: list[str], cwd: str, log_fil
                         match.duration_in_game_time = duration
                     bot_race = _parse_sc_docker_bot_race(log_file_path)
                     if bot_race:
-                        match.bot_actual_race = bot_race
+                        match.friendly_race = bot_race
                     match.save()
                 except Match.DoesNotExist:
                     logger.error('Single-container match %d: Match record not found', match_id)
@@ -737,6 +745,10 @@ def start_custom_bot_match(
     test_bot: CustomBot,
     test_group_id: int = -1,
     source_override: str | None = None,
+    friendly_build: str = '',
+    opponent_build: str = '',
+    friendly_race: str = '',
+    opponent_race_override: str = '',
 ) -> int:
     """Launch a single Docker match against a custom bot.
     Returns the match ID.
@@ -749,19 +761,35 @@ def start_custom_bot_match(
     ``source_override`` overrides the test bot's source directory (e.g.
     a git worktree path for branch-based testing).
 
+    ``friendly_build`` specifies a build config for the test bot.
+    ``opponent_build`` specifies a build config for the opponent.
+
+    ``friendly_race`` overrides the test bot's race (Random → specific).
+    ``opponent_race_override`` overrides the opponent's race similarly.
+
     For aiarena-type bots, uses the aiarena local-play-bootstrap infrastructure.
     For python_sc2 / external_python bots, uses the existing single-container approach.
     """
+    # Auto-resolve opponent race from builds.yml when a build is set
+    if opponent_build and not opponent_race_override and custom_bot.bot_directory:
+        builds_by_race = aiarena_runner.get_builds_by_race(custom_bot.bot_directory)
+        for race, builds in builds_by_race.items():
+            if opponent_build in builds:
+                opponent_race_override = race
+                break
+
     match = Match(
         test_group_id=test_group_id,
         start_timestamp=datetime.now(),
         map_name=random.choice(MAP_LIST),
-        opponent_race=custom_bot.race,
+        opponent_race=opponent_race_override or custom_bot.race,
         opponent_difficulty='',
-        opponent_build='',
+        opponent_build=opponent_build,
         opponent_bot=custom_bot,
         test_bot=test_bot,
         result="Pending",
+        friendly_build=friendly_build,
+        friendly_race=friendly_race,
     )
     match.save()
     match_id = match.id
@@ -776,6 +804,10 @@ def start_custom_bot_match(
     aiarena_runner.start_aiarena_match(
         match, custom_bot, test_bot=test_bot,
         source_override=source_override,
+        friendly_build=friendly_build,
+        opponent_build=opponent_build,
+        friendly_race=friendly_race,
+        opponent_race_override=opponent_race_override,
     )
     return match_id
 
@@ -787,6 +819,8 @@ def start_blizzard_ai_match(
     test_bot: CustomBot,
     test_group_id: int = -1,
     source_override: str | None = None,
+    friendly_build: str = '',
+    friendly_race: str = '',
 ) -> int:
     """Launch a single Docker match against the built-in Blizzard AI.
 
@@ -800,6 +834,12 @@ def start_blizzard_ai_match(
 
     *source_override* overrides the test bot's source directory (e.g.
     a git worktree path for branch-based testing).
+
+    *friendly_build* specifies a build config from ``aiarena/configs/``
+    to overlay on the test bot.
+
+    *friendly_race* overrides the bot's race for the match (e.g. lock
+    a Random-race bot to Protoss).
     """
     _write_sc_docker_env()
     logs_dir = _get_logs_dir()
@@ -807,8 +847,12 @@ def start_blizzard_ai_match(
 
     match_id = create_pending_match(
         test_group_id, race, build, difficulty, test_bot=test_bot,
+        friendly_build=friendly_build,
     )
     match_obj = Match.objects.get(id=match_id)
+    if friendly_race:
+        match_obj.friendly_race = friendly_race
+        match_obj.save(update_fields=['friendly_race'])
     log_file = os.path.join(logs_dir, f'{match_id}_{race}_{build}.log')
 
     command = [
@@ -823,7 +867,10 @@ def start_blizzard_ai_match(
         '-e', f'MAP_NAME={match_obj.map_name}',
     ]
     command += _bot_volume_args(test_bot, source_override)
-    command += _bot_identity_args(test_bot)
+    if friendly_build:
+        bot_dir = test_bot.bot_directory or test_bot.name
+        command += aiarena_runner.get_build_config_docker_args(bot_dir, friendly_build)
+    command += _bot_identity_args(test_bot, race_override=friendly_race)
     command += _env_file_args(test_bot)
     command.append('bot')
 
@@ -837,6 +884,8 @@ def start_test_suite(
     difficulty: str = 'CheatInsane',
     test_suite: TestSuite | None = None,
     branch: str = '',
+    friendly_build: str = '',
+    friendly_race: str = '',
 ) -> tuple[int, int]:
     """
     Create a TestGroup and launch Docker match containers based on the
@@ -897,10 +946,17 @@ def start_test_suite(
                     race, build, difficulty, test_bot,
                     test_group_id=test_group_id,
                     source_override=source_override,
+                    friendly_build=friendly_build,
+                    friendly_race=friendly_race,
                 )
                 count += 1
 
     # --- Custom bot matches ---
+    # Resolve per-bot build overrides from the test suite
+    custom_bot_builds: dict[str, str] = {}
+    if test_suite:
+        custom_bot_builds = test_suite.custom_bot_builds or {}
+
     if suite_custom_bots is not None:
         # Use bots selected in the test suite; if the test bot is included,
         # run it as a mirror match instead of skipping.
@@ -912,15 +968,29 @@ def start_test_suite(
         )
 
     for bot in bots_to_test:
-        try:
-            start_custom_bot_match(
-                bot, test_bot=test_bot, test_group_id=test_group_id,
-                source_override=source_override,
-            )
-            count += 1
-        except Exception:
-            # Don't let a single custom-bot failure abort the whole suite
-            pass
+        bot_id_str = str(bot.id)
+        opp_builds_raw = custom_bot_builds.get(bot_id_str, '')
+        # Normalise: new format is a list (may contain "" for default match),
+        # old format was a single string.
+        if isinstance(opp_builds_raw, list):
+            opp_builds = opp_builds_raw
+        elif opp_builds_raw:
+            opp_builds = [opp_builds_raw]
+        else:
+            opp_builds = ['']  # single match with no build override
+        for opp_build in opp_builds:
+            try:
+                start_custom_bot_match(
+                    bot, test_bot=test_bot, test_group_id=test_group_id,
+                    source_override=source_override,
+                    friendly_build=friendly_build,
+                    opponent_build=opp_build,
+                    friendly_race=friendly_race,
+                )
+                count += 1
+            except Exception:
+                # Don't let a single custom-bot failure abort the whole suite
+                pass
 
     # --- Past-version matches ---
     version_offsets = test_suite.previous_version_offsets if test_suite else []
@@ -947,11 +1017,15 @@ def start_test_suite(
                         result='Pending',
                         opponent_commit_hash=commit.hash,
                         test_bot=test_bot,
+                        friendly_build=friendly_build,
+                        friendly_race=friendly_race,
                     )
                     match.save()
                     aiarena_runner.start_past_version_match(
                         match, commit.hash, commit.short_hash, test_bot=test_bot,
                         source_override=source_override,
+                        friendly_build=friendly_build,
+                        friendly_race=friendly_race,
                     )
                     count += 1
                 except Exception as e:
@@ -967,6 +1041,8 @@ def start_test_suite(
             _launch_replay_test_match(
                 replay_test, test_group_id=test_group_id, test_bot=test_bot,
                 source_override=source_override,
+                friendly_build=friendly_build,
+                friendly_race=friendly_race,
             )
             count += 1
         except Exception as e:
@@ -988,6 +1064,8 @@ def trigger_tests(request):
     if request.method == 'POST':
         difficulty = request.POST.get('difficulty', '') or 'CheatInsane'
         description = request.POST.get('description', '').strip()
+        friendly_build = request.POST.get('friendly_build', '').strip()
+        friendly_race = request.POST.get('friendly_race', '').strip()
 
         # Resolve test subject bot from the filter value
         test_bot = None
@@ -1011,6 +1089,8 @@ def trigger_tests(request):
             _, count = start_test_suite(
                 description=description, difficulty=difficulty, test_bot=test_bot,
                 test_suite=test_suite,
+                friendly_build=friendly_build,
+                friendly_race=friendly_race,
             )
             suite_name = test_suite.name if test_suite else 'default'
             messages.success(request, f'Test suite "{suite_name}" started with difficulty {difficulty}! {count} tests running.')
@@ -1048,6 +1128,8 @@ def api_trigger_tests(request):
     test_bot_id = body.get('test_bot_id')
     description = body.get('description', '')
     branch = body.get('branch', '')
+    friendly_build = body.get('friendly_build', '')
+    friendly_race = body.get('friendly_race', '')
 
     # Resolve test subject bot
     test_bot = None
@@ -1090,6 +1172,7 @@ def api_trigger_tests(request):
             match_id = start_custom_bot_match(
                 custom_bot, test_bot=test_bot,
                 source_override=source_override,
+                friendly_build=friendly_build,
             )
             return JsonResponse({
                 'status': 'ok',
@@ -1129,6 +1212,8 @@ def api_trigger_tests(request):
         test_group_id, count = start_test_suite(
             description=description, difficulty=difficulty, test_bot=test_bot,
             test_suite=test_suite, branch=branch,
+            friendly_build=friendly_build,
+            friendly_race=friendly_race,
         )
         return JsonResponse({
             'status': 'ok',
@@ -1449,6 +1534,32 @@ def results_page(request):
             filter_params.append(f'{key}={val}')
     context['filter_qs'] = '&' + '&'.join(filter_params) if filter_params else ''
 
+    # Collect available build configs for the trigger form
+    test_subject_bots = context.get('test_subject_bots', CustomBot.objects.filter(is_test_subject=True).order_by('name'))
+    builds_by_bot: dict[str, list[str]] = {}
+    bot_id_to_dir: dict[str, str] = {}
+    for bot in test_subject_bots:
+        bot_dir = bot.bot_directory or bot.name
+        bot_id_to_dir[str(bot.id)] = bot_dir
+        if bot_dir not in builds_by_bot:
+            builds = aiarena_runner.get_available_builds(bot_dir)
+            if builds:
+                builds_by_bot[bot_dir] = builds
+    context['builds_by_bot_json'] = builds_by_bot
+    context['bot_id_to_dir_json'] = bot_id_to_dir
+
+    # Race-aware build data
+    builds_by_race_by_bot: dict[str, dict[str, list[str]]] = {}
+    bot_race_map: dict[str, str] = {}
+    for bot in test_subject_bots:
+        bot_dir = bot.bot_directory or bot.name
+        bot_race_map[str(bot.id)] = bot.race
+        race_builds = aiarena_runner.get_builds_by_race(bot_dir)
+        if race_builds:
+            builds_by_race_by_bot[bot_dir] = race_builds
+    context['builds_by_race_by_bot_json'] = builds_by_race_by_bot
+    context['bot_race_map_json'] = bot_race_map
+
     return render(request, 'test_lab/results.html', context)
 
 
@@ -1501,6 +1612,35 @@ def run_match_page(request):
 
     matches = matches[:50]
 
+    # Collect available build configs for all bots that have them
+    builds_by_bot: dict[str, list[str]] = {}
+    all_bots = list(test_subject_bots) + list(custom_bots_list)
+    seen_dirs: set[str] = set()
+    for bot in all_bots:
+        bot_dir = bot.bot_directory or bot.name
+        if bot_dir in seen_dirs:
+            continue
+        seen_dirs.add(bot_dir)
+        builds = aiarena_runner.get_available_builds(bot_dir)
+        if builds:
+            builds_by_bot[bot_dir] = builds
+
+    # Map bot_id -> bot_directory for JS to look up builds
+    bot_id_to_dir: dict[str, str] = {}
+    for bot in all_bots:
+        bot_id_to_dir[str(bot.id)] = bot.bot_directory or bot.name
+
+    # Race-aware build data
+    builds_by_race_by_bot: dict[str, dict[str, list[str]]] = {}
+    bot_race_map: dict[str, str] = {}
+    for bot in all_bots:
+        bot_dir = bot.bot_directory or bot.name
+        bot_race_map[str(bot.id)] = bot.race
+        if bot_dir not in builds_by_race_by_bot:
+            race_builds = aiarena_runner.get_builds_by_race(bot_dir)
+            if race_builds:
+                builds_by_race_by_bot[bot_dir] = race_builds
+
     return render(request, 'test_lab/run_match.html', {
         'active_page': 'run_match',
         'custom_bots': custom_bots_list,
@@ -1512,6 +1652,10 @@ def run_match_page(request):
         'matches': matches,
         'selected_test_bot': selected_test_bot,
         'replay_tests': ReplayTest.objects.order_by('name'),
+        'builds_by_bot_json': builds_by_bot,
+        'bot_id_to_dir_json': bot_id_to_dir,
+        'builds_by_race_by_bot_json': builds_by_race_by_bot,
+        'bot_race_map_json': bot_race_map,
     })
 
 
@@ -1546,6 +1690,7 @@ def config_page(request):
             'custom_bot_ids': list(s.custom_bots.values_list('id', flat=True)),
             'replay_test_ids': list(s.replay_tests.values_list('id', flat=True)),
             'previous_versions': s.previous_versions,
+            'custom_bot_builds': s.custom_bot_builds or {},
         }
         for s in test_suites
     ])
@@ -1564,6 +1709,27 @@ def config_page(request):
         for t in prompt_templates
     ])
 
+    # Collect available build configs for the config page
+    config_builds_by_bot: dict[str, list[str]] = {}
+    for bot in custom_bots_list:
+        bot_dir = bot.bot_directory or bot.name
+        builds = aiarena_runner.get_available_builds(bot_dir)
+        if builds:
+            config_builds_by_bot[bot_dir] = builds
+
+    # Map bot_id -> bot_directory for JS to look up builds
+    bot_id_to_dir = {str(bot.id): bot.bot_directory or bot.name for bot in custom_bots_list}
+
+    # Race-aware build data
+    builds_by_race_by_bot: dict[str, dict[str, list[str]]] = {}
+    bot_race_map: dict[str, str] = {}
+    for bot in custom_bots_list:
+        bot_dir = bot.bot_directory or bot.name
+        bot_race_map[str(bot.id)] = bot.race
+        race_builds = aiarena_runner.get_builds_by_race(bot_dir)
+        if race_builds:
+            builds_by_race_by_bot[bot_dir] = race_builds
+
     return render(request, 'test_lab/config.html', {
         'active_page': 'config',
         'bots': bots,
@@ -1580,6 +1746,11 @@ def config_page(request):
         'prompt_templates': prompt_templates,
         'prompt_templates_json': prompt_templates_json,
         'test_subject_bots': test_subject_bots,
+        'builds_by_bot_json': config_builds_by_bot,
+        'bot_id_to_dir_json': bot_id_to_dir,
+        'builds_by_race_by_bot_json': builds_by_race_by_bot,
+        'bot_race_map_json': bot_race_map,
+        'aiarena_configs_dir': aiarena_runner.AIARENA_CONFIGS_DIR.replace('\\', '/'),
     })
 
 
@@ -1729,11 +1900,22 @@ def create_test_suite(request):
     selected_replay_test_ids = request.POST.getlist('replay_test_ids')
     previous_versions = request.POST.get('previous_versions', '').strip()
 
+    # Parse per-bot build overrides from hidden JSON field
+    import json as _json
+    custom_bot_builds_raw = request.POST.get('custom_bot_builds', '').strip()
+    custom_bot_builds = {}
+    if custom_bot_builds_raw:
+        try:
+            custom_bot_builds = _json.loads(custom_bot_builds_raw)
+        except _json.JSONDecodeError:
+            pass
+
     suite = TestSuite.objects.create(
         name=name,
         include_blizzard_ai=include_blizzard_ai,
         include_all_custom_bots=include_all_custom_bots,
         previous_versions=previous_versions,
+        custom_bot_builds=custom_bot_builds,
     )
     if selected_bot_ids:
         suite.custom_bots.set(selected_bot_ids)
@@ -1785,10 +1967,21 @@ def update_test_suite(request, suite_id):
         messages.error(request, f'A test suite named "{name}" already exists.')
         return redirect(config_url)
 
+    # Parse per-bot build overrides from hidden JSON field
+    import json as _json
+    custom_bot_builds_raw = request.POST.get('custom_bot_builds', '').strip()
+    custom_bot_builds = {}
+    if custom_bot_builds_raw:
+        try:
+            custom_bot_builds = _json.loads(custom_bot_builds_raw)
+        except _json.JSONDecodeError:
+            pass
+
     suite.name = name
     suite.include_blizzard_ai = request.POST.get('include_blizzard_ai') == 'on'
     suite.include_all_custom_bots = request.POST.get('include_all_custom_bots') == 'on'
     suite.previous_versions = request.POST.get('previous_versions', '').strip()
+    suite.custom_bot_builds = custom_bot_builds
     suite.save()
 
     selected_bot_ids = request.POST.getlist('custom_bot_ids')
@@ -1839,6 +2032,8 @@ def run_single_match(request):
         race = request.POST.get('race', 'random')
         build = request.POST.get('build', 'randombuild')
         difficulty = request.POST.get('difficulty', 'CheatInsane')
+        friendly_build = request.POST.get('friendly_build', '').strip()
+        friendly_race = request.POST.get('friendly_race', '').strip()
 
         # Resolve test subject bot
         test_bot_id = request.POST.get('test_bot_id')
@@ -1850,10 +2045,15 @@ def run_single_match(request):
             return redirect('run_match')
 
         try:
-            match_id = start_blizzard_ai_match(race, build, difficulty, test_bot)
+            match_id = start_blizzard_ai_match(
+                race, build, difficulty, test_bot,
+                friendly_build=friendly_build,
+                friendly_race=friendly_race,
+            )
+            build_label = f' [build: {friendly_build}]' if friendly_build else ''
             messages.success(
                 request,
-                f'Single match started: {race} {build} @ {difficulty} (match #{match_id})'
+                f'Single match started: {race} {build} @ {difficulty}{build_label} (match #{match_id})'
             )
         except Exception as e:
             messages.error(request, f'Failed to start match: {str(e)}')
@@ -2079,11 +2279,24 @@ def run_custom_match(request):
         messages.error(request, 'Please select a test bot.')
         return redirect('run_match')
 
+    friendly_build = request.POST.get('friendly_build', '').strip()
+    friendly_race = request.POST.get('friendly_race', '').strip()
+    opponent_build = request.POST.get('opponent_build', '').strip()
+    opponent_race_override = request.POST.get('opponent_race', '').strip()
+
     try:
-        match_id = start_custom_bot_match(custom_bot, test_bot=test_bot)
+        match_id = start_custom_bot_match(
+            custom_bot, test_bot=test_bot,
+            friendly_build=friendly_build,
+            opponent_build=opponent_build,
+            friendly_race=friendly_race,
+            opponent_race_override=opponent_race_override,
+        )
+        build_label = f' [build: {friendly_build}]' if friendly_build else ''
+        opp_build_label = f' [opp build: {opponent_build}]' if opponent_build else ''
         messages.success(
             request,
-            f'Custom match started: {test_bot.name} vs {custom_bot.name} (match #{match_id})'
+            f'Custom match started: {test_bot.name} vs {custom_bot.name}{build_label}{opp_build_label} (match #{match_id})'
         )
     except Exception as e:
         messages.error(request, f'Failed to start custom match: {e}')
@@ -2117,6 +2330,8 @@ def run_past_version_match(request):
 
     test_name = test_bot.name
     test_race = test_bot.race
+    friendly_build = request.POST.get('friendly_build', '').strip()
+    friendly_race = request.POST.get('friendly_race', '').strip()
 
     try:
         # Create the match record
@@ -2130,11 +2345,15 @@ def run_past_version_match(request):
             result="Pending",
             opponent_commit_hash=commit_hash,
             test_bot=test_bot,
+            friendly_build=friendly_build,
+            friendly_race=friendly_race,
         )
         match.save()
 
         aiarena_runner.start_past_version_match(
             match, commit_hash, short_hash, test_bot=test_bot,
+            friendly_build=friendly_build,
+            friendly_race=friendly_race,
         )
         messages.success(
             request,
@@ -2194,6 +2413,8 @@ def run_replay_match(request):
     build = request.POST.get('build', 'Macro')
     race = request.POST.get('race', 'Random')
     bot_player_id = request.POST.get('bot_player_id', '1')
+    friendly_build = request.POST.get('friendly_build', '').strip()
+    friendly_race = request.POST.get('friendly_race', '').strip()
 
     # Resolve test subject bot
     test_bot = None
@@ -2242,6 +2463,8 @@ def run_replay_match(request):
             test_bot=test_bot,
             result="Pending",
             replay_takeover_game_loop=game_loop,
+            friendly_build=friendly_build,
+            friendly_race=friendly_race,
         )
         match.save()
         match_id = match.id
@@ -2282,7 +2505,10 @@ def run_replay_match(request):
                 command += ['-e', f'REPLAY_DURATION={duration_seconds / 22.4:.1f}']
 
         command += _bot_volume_args(test_bot) if test_bot else []
-        command += _bot_identity_args(test_bot)
+        if friendly_build and test_bot:
+            bot_dir = test_bot.bot_directory or test_bot.name
+            command += aiarena_runner.get_build_config_docker_args(bot_dir, friendly_build)
+        command += _bot_identity_args(test_bot, race_override=friendly_race)
         command += _env_file_args(test_bot)
         command += [
             'bot',
@@ -2305,7 +2531,8 @@ def run_replay_match(request):
 
 def _launch_replay_test_match(
     replay_test: ReplayTest, test_group_id: int = -1, test_bot=None,
-    source_override: str | None = None,
+    source_override: str | None = None, friendly_build: str = '',
+    friendly_race: str = '',
 ) -> int:
     """Launch a single replay test match in Docker. Returns the match ID."""
     import shutil as _shutil
@@ -2330,6 +2557,8 @@ def _launch_replay_test_match(
         replay_takeover_game_loop=game_loop,
         test_bot=test_bot,
         replay_test=replay_test,
+        friendly_build=friendly_build,
+        friendly_race=friendly_race,
     )
     match.save()
     match_id = match.id
@@ -2369,8 +2598,11 @@ def _launch_replay_test_match(
         command += ['-e', f'REPLAY_DURATION={duration_seconds:.1f}']
 
     command += _bot_volume_args(test_bot, source_override) if test_bot else []
-    command += _bot_identity_args(test_bot)
+    command += _bot_identity_args(test_bot, race_override=friendly_race)
     command += _env_file_args(test_bot)
+    if friendly_build and test_bot:
+        bot_dir = test_bot.bot_directory or test_bot.name
+        command += aiarena_runner.get_build_config_docker_args(bot_dir, friendly_build)
     command += [
         'bot',
         'bash', '/root/runner/run_docker_continue_replay.sh',
@@ -2386,6 +2618,8 @@ def run_saved_replay_test(request):
     """Launch a single saved replay test from the Run Match page."""
     replay_test_id = request.POST.get('replay_test_id', '')
     test_bot_id = request.POST.get('test_bot_id', '')
+    friendly_build = request.POST.get('friendly_build', '')
+    friendly_race = request.POST.get('friendly_race', '').strip()
 
     if not replay_test_id or not replay_test_id.isdigit():
         messages.error(request, 'Please select a replay test.')
@@ -2402,7 +2636,7 @@ def run_saved_replay_test(request):
         test_bot = CustomBot.objects.filter(id=int(test_bot_id)).first()
 
     try:
-        match_id = _launch_replay_test_match(replay_test, test_bot=test_bot)
+        match_id = _launch_replay_test_match(replay_test, test_bot=test_bot, friendly_build=friendly_build, friendly_race=friendly_race)
         messages.success(
             request,
             f'Replay test "{replay_test.name}" started (match #{match_id})'

@@ -40,6 +40,7 @@ AIARENA_DIR = os.path.normpath(os.path.join(os.path.dirname(__file__), 'aiarena'
 AIARENA_BOTS_DIR = os.path.join(AIARENA_DIR, 'bots')
 AIARENA_RUNS_DIR = os.path.join(AIARENA_DIR, 'runs')
 AIARENA_PATCHES_DIR = os.path.join(AIARENA_DIR, 'patches')
+AIARENA_CONFIGS_DIR = os.path.join(AIARENA_DIR, 'configs')
 
 # Repo root (for finding live source mounts)
 REPO_ROOT = os.path.normpath(os.path.join(AIARENA_DIR, '..', '..', '..', '..'))
@@ -370,6 +371,8 @@ def _write_compose_override(
     is_past_version: bool = False,
     past_version_cache_path: str | None = None,
     source_override: str | None = None,
+    friendly_build: str = '',
+    opponent_build: str = '',
 ) -> None:
     """Generate docker-compose.override.yml with per-bot volume mounts.
 
@@ -385,6 +388,10 @@ def _write_compose_override(
 
     *source_override* is passed through to ``_test_bot_volume_mounts``
     for branch-based testing.
+
+    *friendly_build* and *opponent_build* specify build config names
+    from ``aiarena/configs/``. Config files are overlaid on top of the
+    bot directory via additional volume mounts.
     """
     lines = [
         'services:',
@@ -398,6 +405,12 @@ def _write_compose_override(
         ]
     lines.append('    volumes:')
     lines += _test_bot_volume_mounts(test_bot, test_bot_aiarena_name, source_override=source_override)
+    if friendly_build:
+        lines += get_build_config_volume_mounts(
+            test_bot.bot_directory or test_bot.name,
+            friendly_build,
+            f'/bots/{test_bot_aiarena_name}',
+        )
 
     lines.append('  bot_controller2:')
     dockerfile = test_bot.dockerfile
@@ -440,6 +453,13 @@ def _write_compose_override(
             assert bot2_host_path is not None
             b2 = bot2_host_path.replace('\\', '/')
             lines.append(f'      - "{b2}:/bots/{bot2_name}"')
+    # Apply opponent build config overlay (for non-mirror, non-past-version)
+    if opponent_build and opponent_bot and not is_mirror and not is_past_version:
+        lines += get_build_config_volume_mounts(
+            opponent_bot.bot_directory or opponent_bot.name,
+            opponent_build,
+            f'/bots/{bot2_name}',
+        )
     lines.append('')  # trailing newline
 
     override_path = os.path.join(run_dir, 'docker-compose.override.yml')
@@ -597,6 +617,128 @@ def apply_bot_patches(bot_dir_name: str) -> list[str]:
     if copied:
         logger.info('Applied %d patch file(s) to %s: %s', len(copied), bot_dir_name, copied)
     return copied
+
+
+def get_available_builds(bot_dir_name: str) -> list[str]:
+    """Return available build config names for a bot.
+
+    Scans ``aiarena/configs/<bot_dir_name>/`` for subdirectories,
+    each representing a named build configuration.
+
+    Returns a sorted list of build names. Returns empty list if no
+    configs directory exists for this bot.
+    """
+    config_dir = os.path.join(AIARENA_CONFIGS_DIR, bot_dir_name)
+    if not os.path.isdir(config_dir):
+        return []
+    return sorted(
+        d for d in os.listdir(config_dir)
+        if os.path.isdir(os.path.join(config_dir, d))
+    )
+
+
+def get_builds_by_race(bot_dir_name: str) -> dict[str, list[str]]:
+    """Return a mapping of race → build names from ``builds.yml``.
+
+    Reads ``aiarena/configs/<bot_dir_name>/builds.yml`` which maps race names
+    (Protoss, Terran, Zerg) to build config names (subdirectories).
+
+    Values can be a single string or a YAML list.  Returns
+    ``{'Protoss': ['ProbeRush'], 'Terran': ['WorkerRush'], ...}`` or
+    an empty dict if no ``builds.yml`` exists.
+    """
+    import yaml
+
+    builds_path = os.path.join(AIARENA_CONFIGS_DIR, bot_dir_name, 'builds.yml')
+    if not os.path.isfile(builds_path):
+        return {}
+    try:
+        with open(builds_path) as f:
+            data = yaml.safe_load(f)
+    except Exception:
+        logger.warning('Failed to parse builds.yml for %s', bot_dir_name)
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    result: dict[str, list[str]] = {}
+    for race, builds in data.items():
+        race_str = str(race)
+        if isinstance(builds, list):
+            result[race_str] = [str(b) for b in builds]
+        elif builds:
+            result[race_str] = [str(builds)]
+    return result
+
+
+def get_build_config_volume_mounts(
+    bot_dir_name: str,
+    build_name: str,
+    container_bot_path: str,
+) -> list[str]:
+    """Return Docker Compose volume mount lines for a build config overlay.
+
+    Files in ``aiarena/configs/<bot_dir_name>/<build_name>/`` are mounted
+    individually on top of the bot directory inside the container.
+
+    *container_bot_path* is the container-side path where the bot is mounted
+    (e.g. ``/bots/who`` for aiarena matches or ``/root/bot_dir`` for
+    vs-computer matches).
+
+    Returns a list of volume mount strings in docker-compose format.
+    """
+    if not build_name:
+        return []
+    config_dir = os.path.join(AIARENA_CONFIGS_DIR, bot_dir_name, build_name)
+    if not os.path.isdir(config_dir):
+        logger.warning(
+            'Build config directory not found: %s/%s', bot_dir_name, build_name,
+        )
+        return []
+
+    mounts: list[str] = []
+    for root, _dirs, files in os.walk(config_dir):
+        for filename in files:
+            src = os.path.join(root, filename)
+            rel = os.path.relpath(src, config_dir)
+            host_path = src.replace('\\', '/')
+            container_path = f'{container_bot_path}/{rel}'.replace('\\', '/')
+            mounts.append(f'      - "{host_path}:{container_path}"')
+    if mounts:
+        logger.info(
+            'Build config %s/%s: %d file(s) will be overlaid',
+            bot_dir_name, build_name, len(mounts),
+        )
+    return mounts
+
+
+def get_build_config_docker_args(
+    bot_dir_name: str,
+    build_name: str,
+    container_bot_path: str = '/root/bot_dir',
+) -> list[str]:
+    """Return ``['-v', '<host>:<container>', ...]`` for build config overlays.
+
+    Similar to ``get_build_config_volume_mounts`` but returns flat
+    ``-v`` args for use with ``docker compose run``.
+    """
+    if not build_name:
+        return []
+    config_dir = os.path.join(AIARENA_CONFIGS_DIR, bot_dir_name, build_name)
+    if not os.path.isdir(config_dir):
+        logger.warning(
+            'Build config directory not found: %s/%s', bot_dir_name, build_name,
+        )
+        return []
+
+    args: list[str] = []
+    for root, _dirs, files in os.walk(config_dir):
+        for filename in files:
+            src = os.path.join(root, filename)
+            rel = os.path.relpath(src, config_dir)
+            host_path = src.replace('\\', '/')
+            container_path = f'{container_bot_path}/{rel}'.replace('\\', '/')
+            args += ['-v', f'{host_path}:{container_path}']
+    return args
 
 
 def read_ladderbots_json(bot_dir_name: str) -> dict | None:
@@ -791,6 +933,10 @@ def start_aiarena_match(
     test_bot: CustomBot,
     map_name: str | None = None,
     source_override: str | None = None,
+    friendly_build: str = '',
+    opponent_build: str = '',
+    friendly_race: str = '',
+    opponent_race_override: str = '',
 ) -> None:
     """Launch an aiarena match in a background thread.
 
@@ -800,6 +946,11 @@ def start_aiarena_match(
 
     *source_override* overrides the test bot's source directory (e.g.
     a git worktree path for branch-based testing).
+
+    *friendly_race* overrides the test bot's race in the matches file
+    (e.g. 'Protoss' to lock a Random-race bot to a specific race).
+
+    *opponent_race_override* overrides the opponent's race similarly.
 
     Each match gets its own run directory under ``aiarena/runs/<match_id>/``
     so multiple matches can run concurrently without conflicting.
@@ -812,12 +963,16 @@ def start_aiarena_match(
     match.map_name = map_name
     match.save()
 
-    opponent_race_code = RACE_TO_CODE.get(opponent_bot.race, 'R')
+    opponent_race_code = RACE_TO_CODE.get(
+        opponent_race_override or opponent_bot.race, 'R',
+    )
     opponent_type = opponent_bot.aiarena_bot_type or 'python'
     opponent_dir_name = opponent_bot.bot_directory
 
     test_bot_dir = test_bot.bot_directory or test_bot.name
-    test_bot_race = RACE_TO_CODE.get(test_bot.race, 'R')
+    test_bot_race = RACE_TO_CODE.get(
+        friendly_race or test_bot.race, 'R',
+    )
     test_bot_type = test_bot.aiarena_bot_type or 'python'
 
     # Detect mirror/self-play match
@@ -871,6 +1026,8 @@ def start_aiarena_match(
         is_mirror=is_mirror,
         mirror_aiarena_name=mirror_name,
         source_override=source_override,
+        friendly_build=friendly_build,
+        opponent_build=opponent_build,
     )
 
     log_file_path = os.path.join(run_dir, 'compose_output.log')
@@ -894,6 +1051,8 @@ def start_past_version_match(
     test_bot: CustomBot,
     map_name: str | None = None,
     source_override: str | None = None,
+    friendly_build: str = '',
+    friendly_race: str = '',
 ) -> None:
     """Launch a match of the current test bot vs a past version.
 
@@ -903,6 +1062,8 @@ def start_past_version_match(
 
     *source_override* overrides Player 1's source directory (e.g. a git
     worktree for branch-based testing).
+
+    *friendly_race* overrides the test bot's race in the matches file.
     """
     from . import bot_versions
 
@@ -913,7 +1074,7 @@ def start_past_version_match(
     match.save()
 
     test_bot_dir = test_bot.bot_directory or test_bot.name
-    test_bot_race = RACE_TO_CODE.get(test_bot.race, 'R')
+    test_bot_race = RACE_TO_CODE.get(friendly_race or test_bot.race, 'R')
     test_bot_type = test_bot.aiarena_bot_type or 'python'
 
     # Extract (or reuse) cached bot source for this commit
@@ -956,6 +1117,7 @@ def start_past_version_match(
         is_past_version=True,
         past_version_cache_path=cache_path,
         source_override=source_override,
+        friendly_build=friendly_build,
     )
 
     log_file_path = os.path.join(run_dir, 'compose_output.log')
@@ -1125,7 +1287,7 @@ def _collect_and_save_result(run_dir: str, match_id: int) -> None:
         if bot_log:
             bot_race = _parse_bot_race_from_log(bot_log)
             if bot_race:
-                match_obj.bot_actual_race = bot_race
+                match_obj.friendly_race = bot_race
 
     match_obj.save()
     logger.info(

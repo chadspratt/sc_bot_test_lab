@@ -41,6 +41,21 @@ tr:nth-child(even) { background-color: #f2f2f2; }
                         {% endfor %}
                     </select>
                 </div>
+                <div id="friendly_race_single_wrap" style="display:none;">
+                    <label for="friendly_race_single">Race:</label><br>
+                    <select name="friendly_race" id="friendly_race_single">
+                        <option value="">Random</option>
+                        <option value="Protoss">Protoss</option>
+                        <option value="Terran">Terran</option>
+                        <option value="Zerg">Zerg</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="friendly_build_single">Build:</label><br>
+                    <select name="friendly_build" id="friendly_build_single">
+                        <option value="">None</option>
+                    </select>
+                </div>
                 <div>
                     <label for="difficulty">Difficulty:</label><br>
                     <select name="difficulty" id="difficulty">
@@ -103,6 +118,21 @@ tr:nth-child(even) { background-color: #f2f2f2; }
                         {% endfor %}
                     </select>
                 </div>
+                <div id="friendly_race_custom_wrap" style="display:none;">
+                    <label for="friendly_race_custom">Race:</label><br>
+                    <select name="friendly_race" id="friendly_race_custom">
+                        <option value="">Random</option>
+                        <option value="Protoss">Protoss</option>
+                        <option value="Terran">Terran</option>
+                        <option value="Zerg">Zerg</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="friendly_build_custom">Build:</label><br>
+                    <select name="friendly_build" id="friendly_build_custom">
+                        <option value="">None</option>
+                    </select>
+                </div>
                 {% endif %}
                 <div>
                     <label for="custom_bot_id">Opponent Bot:</label><br>
@@ -110,6 +140,21 @@ tr:nth-child(even) { background-color: #f2f2f2; }
                         {% for bot in custom_bots %}
                         <option value="{{ bot.id }}">{{ bot.name }} ({{ bot.race }}{% if bot.is_aiarena %} - AI Arena{% endif %})</option>
                         {% endfor %}
+                    </select>
+                </div>
+                <div id="opponent_race_custom_wrap" style="display:none;">
+                    <label for="opponent_race_custom">Opponent Race:</label><br>
+                    <select name="opponent_race" id="opponent_race_custom">
+                        <option value="">Random</option>
+                        <option value="Protoss">Protoss</option>
+                        <option value="Terran">Terran</option>
+                        <option value="Zerg">Zerg</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="opponent_build_custom">Opponent Build:</label><br>
+                    <select name="opponent_build" id="opponent_build_custom">
+                        <option value="">None</option>
                     </select>
                 </div>
                 <div>
@@ -137,6 +182,21 @@ tr:nth-child(even) { background-color: #f2f2f2; }
                         {% for bot in version_test_bots %}
                         <option value="{{ bot.id }}">{{ bot.name }}</option>
                         {% endfor %}
+                    </select>
+                </div>
+                <div id="friendly_race_version_wrap" style="display:none;">
+                    <label for="friendly_race_version">Race:</label><br>
+                    <select name="friendly_race" id="friendly_race_version">
+                        <option value="">Random</option>
+                        <option value="Protoss">Protoss</option>
+                        <option value="Terran">Terran</option>
+                        <option value="Zerg">Zerg</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="friendly_build_version">Build:</label><br>
+                    <select name="friendly_build" id="friendly_build_version">
+                        <option value="">None</option>
                     </select>
                 </div>
                 <div>
@@ -191,6 +251,21 @@ tr:nth-child(even) { background-color: #f2f2f2; }
                         {% endfor %}
                     </select>
                 </div>
+                <div id="friendly_race_rt_wrap" style="display:none;">
+                    <label for="friendly_race_rt">Race:</label><br>
+                    <select name="friendly_race" id="friendly_race_rt">
+                        <option value="">Random</option>
+                        <option value="Protoss">Protoss</option>
+                        <option value="Terran">Terran</option>
+                        <option value="Zerg">Zerg</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="friendly_build_rt">Build:</label><br>
+                    <select name="friendly_build" id="friendly_build_rt">
+                        <option value="">None</option>
+                    </select>
+                </div>
                 <div>
                     <button type="submit" class="utility-btn">Run Replay Test</button>
                 </div>
@@ -209,6 +284,21 @@ tr:nth-child(even) { background-color: #f2f2f2; }
                         {% for bot in test_subject_bots %}
                         <option value="{{ bot.id }}">{{ bot.name }} ({{ bot.race }})</option>
                         {% endfor %}
+                    </select>
+                </div>
+                <div id="friendly_race_replay_wrap" style="display:none;">
+                    <label for="friendly_race_replay">Race:</label><br>
+                    <select name="friendly_race" id="friendly_race_replay">
+                        <option value="">Random</option>
+                        <option value="Protoss">Protoss</option>
+                        <option value="Terran">Terran</option>
+                        <option value="Zerg">Zerg</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="friendly_build_replay">Build:</label><br>
+                    <select name="friendly_build" id="friendly_build_replay">
+                        <option value="">None</option>
                     </select>
                 </div>
                 <div>
@@ -327,7 +417,7 @@ tr:nth-child(even) { background-color: #f2f2f2; }
                 {% endif %}
             </td>
             <td>{{ match.opponent_race }}</td>
-            <td>{{ match.bot_actual_race|default:"-" }}</td>
+            <td>{{ match.friendly_race|default:"-" }}</td>
             <td>{{ match.map_name }}</td>
             <td class="
                 {% if match.result == 'Victory' %}result-victory
@@ -370,8 +460,118 @@ tr:nth-child(even) { background-color: #f2f2f2; }
 
 {% block extra_js %}
 {{ commits_by_bot_json|json_script:"commits-by-bot" }}
+{{ builds_by_bot_json|json_script:"builds-by-bot" }}
+{{ bot_id_to_dir_json|json_script:"bot-id-to-dir" }}
+{{ builds_by_race_by_bot_json|json_script:"builds-by-race-by-bot" }}
+{{ bot_race_map_json|json_script:"bot-race-map" }}
 <script>
 initTabs('match-type-tabs');
+
+// --- Race + build dropdown logic ---
+(function() {
+    var buildsByBot = JSON.parse(document.getElementById('builds-by-bot').textContent);
+    var botIdToDir = JSON.parse(document.getElementById('bot-id-to-dir').textContent);
+    var buildsByRaceByBot = JSON.parse(document.getElementById('builds-by-race-by-bot').textContent);
+    var botRaceMap = JSON.parse(document.getElementById('bot-race-map').textContent);
+
+    /**
+     * Update a build <select> based on bot directory and selected race.
+     * For Random bots: disabled until a specific race with builds is chosen.
+     * For fixed-race bots: shows builds for the bot's race (or all if no race mapping).
+     * Hidden entirely when no builds exist at all for the bot.
+     */
+    function updateBuildSelect(buildSelect, botDir, botId, selectedRace) {
+        var allBuilds = buildsByBot[botDir] || [];
+        var raceBuilds = buildsByRaceByBot[botDir] || {};
+        var botRace = botRaceMap[String(botId)] || '';
+        var isRandom = (botRace === 'Random');
+        var hasAnyBuilds = allBuilds.length > 0;
+        var hasRaceMapping = Object.keys(raceBuilds).length > 0;
+
+        var builds;
+        if (isRandom) {
+            // Random bot: only show builds when a specific race with builds is selected
+            builds = (selectedRace && raceBuilds[selectedRace]) ? raceBuilds[selectedRace] : [];
+        } else if (hasRaceMapping && raceBuilds[botRace]) {
+            // Fixed-race bot with race mapping: filter by the bot's own race
+            builds = raceBuilds[botRace];
+        } else {
+            // No race mapping: show all builds
+            builds = allBuilds;
+        }
+
+        buildSelect.innerHTML = '<option value="">None</option>';
+        builds.forEach(function(b) {
+            var opt = document.createElement('option');
+            opt.value = b;
+            opt.textContent = b;
+            buildSelect.appendChild(opt);
+        });
+
+        if (!hasAnyBuilds) {
+            // No builds at all for this bot — hide entirely
+            buildSelect.parentElement.style.display = 'none';
+            buildSelect.disabled = false;
+        } else if (isRandom && builds.length === 0) {
+            // Random bot, no race selected or race has no builds — show but disable
+            buildSelect.parentElement.style.display = '';
+            buildSelect.disabled = true;
+        } else {
+            // Builds available — show and enable
+            buildSelect.parentElement.style.display = '';
+            buildSelect.disabled = false;
+        }
+    }
+
+    function updateRaceVisibility(botId, raceWrap, raceSel) {
+        var race = botRaceMap[String(botId)] || '';
+        var isRandom = (race === 'Random');
+        raceWrap.style.display = isRandom ? '' : 'none';
+        if (!isRandom && raceSel) raceSel.value = '';
+    }
+
+    // Wire up bot selector -> race + build for each form
+    var formConfigs = [
+        ['test_bot_id_single', 'friendly_build_single', 'friendly_race_single', 'friendly_race_single_wrap'],
+        ['test_bot_id_custom', 'friendly_build_custom', 'friendly_race_custom', 'friendly_race_custom_wrap'],
+        ['test_bot_id_version', 'friendly_build_version', 'friendly_race_version', 'friendly_race_version_wrap'],
+        ['test_bot_id_replay', 'friendly_build_replay', 'friendly_race_replay', 'friendly_race_replay_wrap'],
+        ['rt_test_bot', 'friendly_build_rt', 'friendly_race_rt', 'friendly_race_rt_wrap'],
+    ];
+    formConfigs.forEach(function(cfg) {
+        var botSel = document.getElementById(cfg[0]);
+        var buildSel = document.getElementById(cfg[1]);
+        var raceSel = document.getElementById(cfg[2]);
+        var raceWrap = document.getElementById(cfg[3]);
+        if (!botSel || !buildSel) return;
+        function sync() {
+            var selectedRace = raceSel ? raceSel.value : '';
+            if (raceWrap) updateRaceVisibility(botSel.value, raceWrap, raceSel);
+            updateBuildSelect(buildSel, botIdToDir[botSel.value] || '', botSel.value, selectedRace);
+        }
+        botSel.addEventListener('change', sync);
+        if (raceSel) raceSel.addEventListener('change', sync);
+        sync();
+    });
+
+    // Wire up opponent bot selector -> opponent race + opponent build (custom bot form)
+    var oppBotSel = document.getElementById('custom_bot_id');
+    var oppBuildSel = document.getElementById('opponent_build_custom');
+    var oppRaceSel = document.getElementById('opponent_race_custom');
+    var oppRaceWrap = document.getElementById('opponent_race_custom_wrap');
+    if (oppBotSel && oppBuildSel) {
+        function syncOpp() {
+            var selectedRace = oppRaceSel ? oppRaceSel.value : '';
+            if (oppRaceWrap) updateRaceVisibility(oppBotSel.value, oppRaceWrap, oppRaceSel);
+            updateBuildSelect(oppBuildSel, botIdToDir[oppBotSel.value] || '', oppBotSel.value, selectedRace);
+        }
+        oppBotSel.addEventListener('change', syncOpp);
+        if (oppRaceSel) oppRaceSel.addEventListener('change', syncOpp);
+        syncOpp();
+    }
+})();
+
+// --- Past version commit switcher ---
 (function() {
     var sel = document.getElementById('test_bot_id_version');
     var commitSel = document.getElementById('commit_hash');

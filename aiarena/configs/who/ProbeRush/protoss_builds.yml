@@ -1,0 +1,186 @@
+# This file is optional and here as an example of how to activate the build runner
+# FEEL FREE TO DELETE!!
+
+# If playing as a different race, make a file similar to this but change filename:
+# `zerg_builds.yml` or `terran_builds.yml`
+
+
+# Save the game opening and result to disk?
+# Setting to `True` allows Ares to select a new opening after defeat
+UseData: True
+# How should we choose a build?
+# Use `Cycle` for a simple build cycle on defeat
+# Use `WinrateBased` to use winrates to select a build
+BuildSelection: WinrateBased
+# For each Race / Opponent ID choose a build selection
+BuildChoices:
+    # test_123 is active if Debug: True (set via a `config.yml` file)
+    test_123:
+        BotName: Test
+        Cycle:
+            - ProbeRush
+
+    Protoss:
+        BotName: ProtossRace
+        Cycle:
+            # - ProxyNexus
+            # - MightBeAWorkerRush
+            # - ProxyZealot
+            # - ProxyZealotWithProbes
+            - ProbeRush
+            # - OneBaseTempest
+            # - ProxyVoids
+            # - Carriers
+            # - ProxyZealotInMain
+
+    Random:
+        BotName: RandomRace
+        Cycle:
+            # - ProxyNexus
+            # - MightBeAWorkerRush
+            # - ProxyZealot
+            # - ProxyZealotWithProbes
+            - ProbeRush
+            # - OneBaseTempest
+            # - ProxyVoids
+            # - Carriers
+            # - ProxyZealotInMain
+
+    Terran:
+        BotName: TerranRace
+        Cycle:
+            # - ProxyNexus
+            # - MightBeAWorkerRush
+            # - ProxyZealot
+            # - ProxyZealotWithProbes
+            - ProbeRush
+            # - OneBaseTempest
+            # - ProxyVoids
+            # - Carriers
+            # - ProxyZealotInMain
+
+    Zerg:
+        BotName: ZergRace
+        Cycle:
+            # - ProxyNexus
+            # - MightBeAWorkerRush
+            # - ProxyZealot
+            # - ProxyZealotWithProbes
+            - ProbeRush
+            # - OneBaseTempest
+            # - ProxyVoids
+            # - Carriers
+            # - ProxyZealotInMain
+
+Builds:
+    Carriers:
+        ConstantWorkerProductionTill: 44
+        AutoSupplyAtSupply: 44
+        OpeningBuildOrder:
+            - 14 pylon @ ramp
+            - 15 forge @ ramp
+            - 15 chrono @ nexus
+            - 17 gateway @ ramp
+            - 16 pylon @ ramp
+            - 16 photoncannon @ ramp
+            - 16 gas
+            - 16 core
+            - 16 gas
+            - 16 nexus
+            - 16 stargate
+            - 16 photoncannon @ ramp
+            - 16 pylon @ nat *2
+            - 16 photoncannon @ nat
+            - 16 fleetbeacon
+            - 16 photoncannon @ nat
+            - 16 pylon @ nat
+            - 16 carrier
+            - 16 chrono @ stargate
+            - 16 gas *2
+            - 16 shieldbattery
+            - 16 shieldbattery @ nat
+            - 16 stargate
+            - 16 photoncannon @ nat *2
+
+    MightBeAWorkerRush:
+        ConstantWorkerProductionTill: 36
+        AutoSupplyAtSupply: 22
+        OpeningBuildOrder:
+            - 12 chrono @ nexus
+            - 15 pylon @ ramp
+            - 15 chrono @ nexus
+            - 17 gate @ ramp
+            - 17 core @ ramp
+            - 17 gas
+            - 17 gateway
+            - 17 warpgateresearch
+            - 17 chrono @ core
+            - 17 gas
+
+    ProxyVoids:
+        ConstantWorkerProductionTill: 0
+        AutoSupplyAtSupply: 200
+        OpeningBuildOrder:
+            - 12 pylon @ ramp
+            - 12 probe
+            - 13 gate @ ramp
+            - 13 chrono @ nexus
+            - 13 probe
+            - 14 gas
+            - 14 probe *2
+            - 16 gas
+            - 16 core @ ramp
+
+    ProxyNexus:
+        ConstantWorkerProductionTill: 18
+        OpeningBuildOrder:
+            - 14 pylon @ ramp
+            - 15 gate @ ramp
+            - 16 gate @ ramp
+
+    ProxyZealot:
+        ConstantWorkerProductionTill: 0
+        OpeningBuildOrder:
+            - 12 probe *3
+
+    ProxyZealotInMain:
+      ConstantWorkerProductionTill: 0
+      OpeningBuildOrder:
+        - 12 probe *3
+
+    ProxyZealotWithProbes:
+        ConstantWorkerProductionTill: 0
+        OpeningBuildOrder:
+            - 12 probe *3
+
+    ProbeRush:
+        ConstantWorkerProductionTill: 22
+        OpeningBuildOrder:
+            - 12 worker
+            - 12 chrono @ nexus
+            - 12 worker *2
+
+    OneBaseTempest:
+        ConstantWorkerProductionTill: 0
+        AutoSupplyAtSupply: 22
+        OpeningBuildOrder:
+            - 12 pylon @ ramp
+            - 12 probe
+            - 13 gate @ ramp
+            - 13 probe
+            - 13 chrono @ nexus
+            - 13 probe
+            - 15 gas *2
+            - 15 probe
+            - 16 core @ ramp
+            - 16 stargate
+            - 16 shieldbattery @ ramp
+            - 16 fleetbeacon
+            - 16 pylon *2
+            - 16 tempest
+            - 16 chrono @ stargate
+            - 16 pylon
+            - 16 tempestgroundattackupgrade
+
+
+
