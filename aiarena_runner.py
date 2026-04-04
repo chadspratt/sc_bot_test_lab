@@ -598,9 +598,15 @@ def apply_bot_patches(bot_dir_name: str) -> list[str]:
 
     If a matching patch folder exists, all files within it are copied
     (recursively) into aiarena/bots/<bot_dir_name>/, overwriting existing
-    files.  Returns a list of relative paths that were copied.
+    files.  If no bot-specific patch folder exists, falls back to the
+    ``_default`` patch folder so that generic patches (e.g.
+    ``run_vs_blizzard.py``) are applied to newly registered bots.
+
+    Returns a list of relative paths that were copied.
     """
     patch_dir = os.path.join(AIARENA_PATCHES_DIR, bot_dir_name)
+    if not os.path.isdir(patch_dir):
+        patch_dir = os.path.join(AIARENA_PATCHES_DIR, '_default')
     if not os.path.isdir(patch_dir):
         return []
 
