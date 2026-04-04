@@ -1,0 +1,215 @@
+# Save the game opening and result to disk?
+# Setting to `True` allows Ares to select a new opening after defeat
+UseData: True
+# How should we choose a build?
+# Use `Cycle` for a simple build cycle on defeat
+# Use `WinrateBased` to use winrates to select a build
+BuildSelection: WinrateBased
+# For each Race / Opponent ID choose a build selection
+BuildChoices:
+    # test_123 is active if Debug: True (set via a `config.yml` file)
+    test_123:
+        BotName: Test
+        Cycle:
+#            - WorkerRush
+          #  - MightBeAWorkerRush
+           - ProxyMarine
+#            - ProxyReaperWithPf
+#            - Turtle
+#            - ProxyMarauder
+#            - MassMine
+#            - Reapers
+          #  - BattleCruiserRush
+            # - ThorDrop
+
+    Protoss:
+        BotName: ProtossRace
+        Cycle:
+            # - ProxyReaperWithPf
+            # - MassMine
+            # - ProxyMarauder
+            # - Reapers
+            - ProxyMarine
+            # - MightBeAWorkerRush
+            # - BattleCruiserRush
+            # - ThorDrop
+            # - WorkerRush
+
+    Random:
+        BotName: RandomRace
+        Cycle:
+            # - ProxyReaperWithPf
+            # - MassMine
+            # - ProxyMarauder
+            # - Reapers
+            - ProxyMarine
+            # - MightBeAWorkerRush
+            # - BattleCruiserRush
+            # - ThorDrop
+            # - WorkerRush
+
+    Terran:
+        BotName: TerranRace
+        Cycle:
+            # - ProxyReaperWithPf
+            # - MassMine
+            # - ProxyMarauder
+            # - Reapers
+            - ProxyMarine
+            # - MightBeAWorkerRush
+            # - BattleCruiserRush
+            # - ThorDrop
+            # - WorkerRush
+
+    Zerg:
+        BotName: ZergRace
+        Cycle:
+            # - ProxyReaperWithPf
+            # - MassMine
+            # - ProxyMarauder
+            # - Reapers
+            - ProxyMarine
+            # - MightBeAWorkerRush
+            # - BattleCruiserRush
+            # - ThorDrop
+            # - WorkerRush
+
+Builds:
+    Turtle:
+      ConstantWorkerProductionTill: 60
+      PersistentWorker: False
+      OpeningBuildOrder:
+        - 14 supplydepot
+        - 14 expand
+        - 16 barracks
+        - 16 gas *2
+        - 16 orbital
+        - 16 orbital
+        - 16 gas *2
+
+    BattleCruiserRush:
+      ConstantWorkerProductionTill: 0
+      PersistentWorker: False
+      OpeningBuildOrder:
+        - 12 supply
+        - 12 gas
+        - 12 barracks
+        - 12 scv *3
+        - 15 factory
+        - 15 marine
+        - 15 orbital
+        - 15 gas
+        - 15 marine
+        - 15 scv *2
+        - 17 starport
+        - 17 marine
+        - 17 scv *2
+        - 17 marine
+        - 19 supply
+        - 19 fusioncore
+        - 19 starporttechlab
+
+    MassMine:
+      ConstantWorkerProductionTill: 0
+      PersistentWorker: False
+      OpeningBuildOrder:
+        - 12 supply
+        - 12 scv *2
+        - 14 barracks
+        - 14 gas
+        - 14 scv
+        - 14 gas
+        - 14 scv
+        - 0 reaper
+        - 0 orbital
+        - 0 factory
+        - 0 scv
+        - 0 barracksreactor
+        - 0 supply
+        - 0 scv
+        - 0 armory
+        - 0 scv
+        - 0 factory
+        - 0 addonswap factory barracksreactor
+        - 0 scv
+        - 0 widowmine *2
+        - 0 starport
+
+    # pull scvs
+    ProxyMarauder:
+      ConstantWorkerProductionTill: 0
+      PersistentWorker: False
+      OpeningBuildOrder:
+        - 12 scv
+        - 13 supplydepot
+        - 13 scv
+    ProxyMarine:
+      ConstantWorkerProductionTill: 0
+      PersistentWorker: False
+      OpeningBuildOrder:
+        - 12 scv
+        - 13 supplydepot
+    ProxyReaperWithPf:
+      ConstantWorkerProductionTill: 0
+      PersistentWorker: False
+      OpeningBuildOrder:
+        - 12 scv *2
+        - 12 supplydepot
+    # add hellions when possible
+    Reapers:
+      ConstantWorkerProductionTill: 0
+      PersistentWorker: False
+      OpeningBuildOrder:
+        - 12 supply
+        - 12 scv *2
+        - 14 barracks
+        - 14 gas
+        - 14 scv
+        - 14 gas
+        - 14 scv
+        - 14 barracks
+        - 0 reaper
+        - 0 orbital
+        - 0 barracks
+        - 0 reaper *2
+        - 0 scv
+        - 0 supply
+        - 0 barracks
+        - 0 reaper *3
+        - 0 factory
+    # marine / scv allin
+    ThorDrop:
+      ConstantWorkerProductionTill: 0
+      PersistentWorker: False
+      OpeningBuildOrder:
+        - 12 supply
+        - 12 scv *2
+        - 14 barracks
+        - 14 gas
+        - 14 scv
+        - 14 gas
+        - 14 scv
+        - 0 reaper
+        - 0 orbital
+        - 0 factory
+        - 0 scv
+        - 0 marine
+        - 0 supply
+        - 0 scv *2
+        - 0 marine
+        - 0 armory
+        - 0 factorytechlab
+        - 0 starport
+        - 0 marine
+        - 0 supply
+    MightBeAWorkerRush:
+      ConstantWorkerProductionTill: 0
+      PersistentWorker: False
+      OpeningBuildOrder:
+        - 12 scv *2
+        - 12 supplydepot
+    WorkerRush:
+      ConstantWorkerProductionTill: 0
+      PersistentWorker: False
+      OpeningBuildOrder:
+        - 12 scv *3

@@ -1,2 +1,31 @@
 Protoss:
-    ProbeRush
+- Carriers
+- MightBeAWorkerRush
+- ProxyVoids
+- ProxyNexus
+- ProxyZealot
+- ProxyZealotInMain
+- ProxyZealotWithProbes
+- ProbeRush
+- OneBaseTempest
+Terran:
+- Turtle
+- BattleCruiserRush
+- MassMine
+- ProxyMarauder
+- ProxyMarine
+- ProxyReaperWithPf
+- Reapers
+- ThorDrop
+- MightBeAWorkerRush
+- WorkerRush
+Zerg:
+- BroRush
+- DroneRush
+- DroneRushVariation
+- LingDroneRush
+- OneBaseMuta
+- ProxyHatch
+- ProxyHatchVariation
+- RavagerRush
+- Ultras

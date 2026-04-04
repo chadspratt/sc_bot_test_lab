@@ -4,7 +4,7 @@
 
 # Set custom values here for your bot
 MyBotName: who
-MyBotRace: Terran
+MyBotRace: Protoss
 # setting true allows auto upload to aiareana (https://aiarena.net/) on push to `main` branch
 # see tutorial on readme before setting to True
 AutoUploadToAiarena: False
