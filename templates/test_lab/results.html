@@ -143,6 +143,14 @@ thead tr:nth-child(2) th { top: 41px; }
             {% endfor %}
         </select>
 
+        <label for="results_map_name">Map:</label>
+        <select name="map_name" id="results_map_name">
+            <option value="">Auto</option>
+            {% for map in map_list %}
+            <option value="{{ map }}">{{ map }}</option>
+            {% endfor %}
+        </select>
+
         <input type="hidden" name="difficulty" value="CheatInsane">
         <input type="text" name="description" placeholder="description" style="padding: 6px 10px; border: 1px solid #555; border-radius: 4px; background: #2a2a2a; color: #e0e0e0; width: 180px;">
         <button type="submit" class="trigger-btn">Start Test Suite</button>

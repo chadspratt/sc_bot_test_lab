@@ -124,6 +124,7 @@ def main() -> str:
         f"Result: {result_str}\n"
         f"================================"
     )
+    # These are used by test_lab to recover match results if the server restarted while match was running
     print(f"MATCH_RESULT:{result_str}", flush=True)
     if duration is not None:
         print(f"MATCH_DURATION:{duration}", flush=True)

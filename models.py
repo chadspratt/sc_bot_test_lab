@@ -170,6 +170,12 @@ class TestSuite(models.Model):
             'during test suite runs.'
         ),
     )
+    map_name = models.CharField(
+        max_length=100,
+        blank=True,
+        default='',
+        help_text='Force all matches in this suite to use a specific map. Empty = auto-select.',
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     @property

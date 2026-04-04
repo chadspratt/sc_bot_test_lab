@@ -749,6 +749,7 @@ def start_custom_bot_match(
     opponent_build: str = '',
     friendly_race: str = '',
     opponent_race_override: str = '',
+    map_name: str = '',
 ) -> int:
     """Launch a single Docker match against a custom bot.
     Returns the match ID.
@@ -778,10 +779,11 @@ def start_custom_bot_match(
                 opponent_race_override = race
                 break
 
+    selected_map = map_name or random.choice(MAP_LIST)
     match = Match(
         test_group_id=test_group_id,
         start_timestamp=datetime.now(),
-        map_name=random.choice(MAP_LIST),
+        map_name=selected_map,
         opponent_race=opponent_race_override or custom_bot.race,
         opponent_difficulty='',
         opponent_build=opponent_build,
@@ -803,6 +805,7 @@ def start_custom_bot_match(
 
     aiarena_runner.start_aiarena_match(
         match, custom_bot, test_bot=test_bot,
+        map_name=selected_map,
         source_override=source_override,
         friendly_build=friendly_build,
         opponent_build=opponent_build,
@@ -821,6 +824,7 @@ def start_blizzard_ai_match(
     source_override: str | None = None,
     friendly_build: str = '',
     friendly_race: str = '',
+    map_name: str = '',
 ) -> int:
     """Launch a single Docker match against the built-in Blizzard AI.
 
@@ -847,6 +851,7 @@ def start_blizzard_ai_match(
 
     match_id = create_pending_match(
         test_group_id, race, build, difficulty, test_bot=test_bot,
+        map_name=map_name,
         friendly_build=friendly_build,
     )
     match_obj = Match.objects.get(id=match_id)
@@ -886,6 +891,7 @@ def start_test_suite(
     branch: str = '',
     friendly_build: str = '',
     friendly_race: str = '',
+    map_name: str = '',
 ) -> tuple[int, int]:
     """
     Create a TestGroup and launch Docker match containers based on the
@@ -913,6 +919,9 @@ def start_test_suite(
         test_suite = TestSuite.objects.filter(name='Blizzard AI').first()
 
     include_blizzard = test_suite.include_blizzard_ai if test_suite else True
+
+    # Resolve map: explicit parameter > suite default > auto-select
+    effective_map = map_name or (test_suite.map_name if test_suite else '')
 
     # Resolve custom bots for this suite, always excluding inactive bots
     if test_suite and test_suite.include_all_custom_bots:
@@ -948,6 +957,7 @@ def start_test_suite(
                     source_override=source_override,
                     friendly_build=friendly_build,
                     friendly_race=friendly_race,
+                    map_name=effective_map,
                 )
                 count += 1
 
@@ -986,6 +996,7 @@ def start_test_suite(
                     friendly_build=friendly_build,
                     opponent_build=opp_build,
                     friendly_race=friendly_race,
+                    map_name=effective_map,
                 )
                 count += 1
             except Exception:
@@ -1023,6 +1034,7 @@ def start_test_suite(
                     match.save()
                     aiarena_runner.start_past_version_match(
                         match, commit.hash, commit.short_hash, test_bot=test_bot,
+                        map_name=effective_map or None,
                         source_override=source_override,
                         friendly_build=friendly_build,
                         friendly_race=friendly_race,
@@ -1066,6 +1078,7 @@ def trigger_tests(request):
         description = request.POST.get('description', '').strip()
         friendly_build = request.POST.get('friendly_build', '').strip()
         friendly_race = request.POST.get('friendly_race', '').strip()
+        map_name = request.POST.get('map_name', '').strip()
 
         # Resolve test subject bot from the filter value
         test_bot = None
@@ -1091,6 +1104,7 @@ def trigger_tests(request):
                 test_suite=test_suite,
                 friendly_build=friendly_build,
                 friendly_race=friendly_race,
+                map_name=map_name,
             )
             suite_name = test_suite.name if test_suite else 'default'
             messages.success(request, f'Test suite "{suite_name}" started with difficulty {difficulty}! {count} tests running.')
@@ -1130,6 +1144,7 @@ def api_trigger_tests(request):
     branch = body.get('branch', '')
     friendly_build = body.get('friendly_build', '')
     friendly_race = body.get('friendly_race', '')
+    map_name = body.get('map_name', '')
 
     # Resolve test subject bot
     test_bot = None
@@ -1173,6 +1188,7 @@ def api_trigger_tests(request):
                 custom_bot, test_bot=test_bot,
                 source_override=source_override,
                 friendly_build=friendly_build,
+                map_name=map_name,
             )
             return JsonResponse({
                 'status': 'ok',
@@ -1214,6 +1230,7 @@ def api_trigger_tests(request):
             test_suite=test_suite, branch=branch,
             friendly_build=friendly_build,
             friendly_race=friendly_race,
+            map_name=map_name,
         )
         return JsonResponse({
             'status': 'ok',
@@ -1559,6 +1576,7 @@ def results_page(request):
             builds_by_race_by_bot[bot_dir] = race_builds
     context['builds_by_race_by_bot_json'] = builds_by_race_by_bot
     context['bot_race_map_json'] = bot_race_map
+    context['map_list'] = MAP_LIST
 
     return render(request, 'test_lab/results.html', context)
 
@@ -1656,6 +1674,7 @@ def run_match_page(request):
         'bot_id_to_dir_json': bot_id_to_dir,
         'builds_by_race_by_bot_json': builds_by_race_by_bot,
         'bot_race_map_json': bot_race_map,
+        'map_list': MAP_LIST,
     })
 
 
@@ -1691,6 +1710,7 @@ def config_page(request):
             'replay_test_ids': list(s.replay_tests.values_list('id', flat=True)),
             'previous_versions': s.previous_versions,
             'custom_bot_builds': s.custom_bot_builds or {},
+            'map_name': s.map_name,
         }
         for s in test_suites
     ])
@@ -1751,6 +1771,7 @@ def config_page(request):
         'builds_by_race_by_bot_json': builds_by_race_by_bot,
         'bot_race_map_json': bot_race_map,
         'aiarena_configs_dir': aiarena_runner.AIARENA_CONFIGS_DIR.replace('\\', '/'),
+        'map_list': MAP_LIST,
     })
 
 
@@ -1899,6 +1920,7 @@ def create_test_suite(request):
     selected_bot_ids = request.POST.getlist('custom_bot_ids')
     selected_replay_test_ids = request.POST.getlist('replay_test_ids')
     previous_versions = request.POST.get('previous_versions', '').strip()
+    suite_map_name = request.POST.get('map_name', '').strip()
 
     # Parse per-bot build overrides from hidden JSON field
     import json as _json
@@ -1916,6 +1938,7 @@ def create_test_suite(request):
         include_all_custom_bots=include_all_custom_bots,
         previous_versions=previous_versions,
         custom_bot_builds=custom_bot_builds,
+        map_name=suite_map_name,
     )
     if selected_bot_ids:
         suite.custom_bots.set(selected_bot_ids)
@@ -1982,6 +2005,7 @@ def update_test_suite(request, suite_id):
     suite.include_all_custom_bots = request.POST.get('include_all_custom_bots') == 'on'
     suite.previous_versions = request.POST.get('previous_versions', '').strip()
     suite.custom_bot_builds = custom_bot_builds
+    suite.map_name = request.POST.get('map_name', '').strip()
     suite.save()
 
     selected_bot_ids = request.POST.getlist('custom_bot_ids')
@@ -2034,6 +2058,7 @@ def run_single_match(request):
         difficulty = request.POST.get('difficulty', 'CheatInsane')
         friendly_build = request.POST.get('friendly_build', '').strip()
         friendly_race = request.POST.get('friendly_race', '').strip()
+        map_name = request.POST.get('map_name', '').strip()
 
         # Resolve test subject bot
         test_bot_id = request.POST.get('test_bot_id')
@@ -2049,6 +2074,7 @@ def run_single_match(request):
                 race, build, difficulty, test_bot,
                 friendly_build=friendly_build,
                 friendly_race=friendly_race,
+                map_name=map_name,
             )
             build_label = f' [build: {friendly_build}]' if friendly_build else ''
             messages.success(
@@ -2283,6 +2309,7 @@ def run_custom_match(request):
     friendly_race = request.POST.get('friendly_race', '').strip()
     opponent_build = request.POST.get('opponent_build', '').strip()
     opponent_race_override = request.POST.get('opponent_race', '').strip()
+    map_name = request.POST.get('map_name', '').strip()
 
     try:
         match_id = start_custom_bot_match(
@@ -2291,6 +2318,7 @@ def run_custom_match(request):
             opponent_build=opponent_build,
             friendly_race=friendly_race,
             opponent_race_override=opponent_race_override,
+            map_name=map_name,
         )
         build_label = f' [build: {friendly_build}]' if friendly_build else ''
         opp_build_label = f' [opp build: {opponent_build}]' if opponent_build else ''
@@ -2332,6 +2360,7 @@ def run_past_version_match(request):
     test_race = test_bot.race
     friendly_build = request.POST.get('friendly_build', '').strip()
     friendly_race = request.POST.get('friendly_race', '').strip()
+    map_name = request.POST.get('map_name', '').strip()
 
     try:
         # Create the match record
@@ -2352,6 +2381,7 @@ def run_past_version_match(request):
 
         aiarena_runner.start_past_version_match(
             match, commit_hash, short_hash, test_bot=test_bot,
+            map_name=map_name or None,
             friendly_build=friendly_build,
             friendly_race=friendly_race,
         )

@@ -91,6 +91,15 @@ tr:nth-child(even) { background-color: #f2f2f2; }
                     </select>
                 </div>
                 <div>
+                    <label for="map_name_single">Map:</label><br>
+                    <select name="map_name" id="map_name_single">
+                        <option value="">Auto</option>
+                        {% for map in map_list %}
+                        <option value="{{ map }}">{{ map }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div>
                     <button type="submit" class="utility-btn">Run Match</button>
                 </div>
             </form>
@@ -158,6 +167,15 @@ tr:nth-child(even) { background-color: #f2f2f2; }
                     </select>
                 </div>
                 <div>
+                    <label for="map_name_custom">Map:</label><br>
+                    <select name="map_name" id="map_name_custom">
+                        <option value="">Auto</option>
+                        {% for map in map_list %}
+                        <option value="{{ map }}">{{ map }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div>
                     <button type="submit" class="utility-btn">Run Custom Match</button>
                 </div>
             </form>
@@ -207,6 +225,15 @@ tr:nth-child(even) { background-color: #f2f2f2; }
                             {{ commit.short_hash }} — {{ commit.subject|truncatechars:60 }}
                             ({{ commit.date|truncatechars:10 }}){% if commit.is_cached %} [cached]{% endif %}
                         </option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <label for="map_name_version">Map:</label><br>
+                    <select name="map_name" id="map_name_version">
+                        <option value="">Auto</option>
+                        {% for map in map_list %}
+                        <option value="{{ map }}">{{ map }}</option>
                         {% endfor %}
                     </select>
                 </div>
