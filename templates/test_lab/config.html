@@ -422,6 +422,11 @@ td { text-align: left; }
                         <label for="replay_file_config" style="font-weight: bold; font-size: 13px;">Replay File (.SC2Replay):</label><br>
                         <input type="file" name="replay_file" id="replay_file_config" accept=".SC2Replay" required>
                     </div>
+                    <div style="margin-bottom: 12px;">
+                        <label for="state_db_file_config" style="font-weight: bold; font-size: 13px;">State DB File (optional):</label><br>
+                        <input type="file" name="state_db_file" id="state_db_file_config" accept=".db">
+                        <small style="color: #666;">SQLite snapshot DB from a previous match. The bot uses it to restore internal state at takeover time.</small>
+                    </div>
                     <div style="display: flex; gap: 15px; flex-wrap: wrap; margin-bottom: 12px;">
                         <div>
                             <label for="rt_bot_player_id" style="font-weight: bold; font-size: 13px;">Test Bot plays as:</label><br>
@@ -520,6 +525,7 @@ td { text-align: left; }
                         <th>Duration</th>
                         <th>Player</th>
                         <th>Opponent</th>
+                        <th>State DB</th>
                         <th>Created</th>
                         <th>In Suites</th>
                         <th></th>
@@ -540,6 +546,13 @@ td { text-align: left; }
                                 {{ test.opponent_bot.name }}
                             {% else %}
                                 {{ test.opponent_race }} {{ test.opponent_difficulty }} {{ test.opponent_build }}
+                            {% endif %}
+                        </td>
+                        <td style="font-size: 12px;">
+                            {% if test.state_db_file %}
+                                <span title="{{ test.state_db_file }}">&#x2713;</span>
+                            {% else %}
+                                <em style="color: #999;">&mdash;</em>
                             {% endif %}
                         </td>
                         <td style="font-size: 12px;">{{ test.created_at|date:"M d, Y H:i" }}</td>

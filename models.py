@@ -365,6 +365,12 @@ class ReplayTest(models.Model):
         related_name='replay_tests',
         help_text="Custom bot to use as the opponent (when opponent_type is CustomBot)",
     )
+    state_db_file = models.CharField(
+        max_length=500,
+        blank=True,
+        default='',
+        help_text="Path to a state snapshot SQLite DB file on the host. Mounted into the container so the bot can restore mid-game state.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     @property

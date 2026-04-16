@@ -2438,6 +2438,7 @@ def _parse_game_time(time_str: str) -> int | None:
 def run_replay_match(request):
     """Launch a match that continues from an uploaded replay at a specified time."""
     replay_file = request.FILES.get('replay_file')
+    state_db_upload = request.FILES.get('state_db_file')
     takeover_time = request.POST.get('takeover_time', '').strip()
     difficulty = request.POST.get('difficulty', 'CheatInsane')
     build = request.POST.get('build', 'Macro')
@@ -2511,6 +2512,17 @@ def run_replay_match(request):
         match.replay_file = container_replay_path
         match.save()
 
+        # Save optional state DB file to the same directory
+        if state_db_upload:
+            state_db_filename = f"{match_id}_state.db"
+            state_db_dest = os.path.join(logs_dir, state_db_filename)
+            with open(state_db_dest, 'wb') as dest:
+                for chunk in state_db_upload.chunks():
+                    dest.write(chunk)
+            container_state_db_path = f"/root/replays/{state_db_filename}"
+        else:
+            container_state_db_path = ''
+
         log_file = os.path.join(logs_dir, f"{match_id}_continue_replay.log")
 
         command = [
@@ -2526,6 +2538,9 @@ def run_replay_match(request):
             '-e', f'RACE={race.lower()}',
             '-e', f'MATCH_ID={match_id}',
         ]
+
+        if container_state_db_path:
+            command += ['-e', f'STATE_DB_PATH={container_state_db_path}']
 
         # Pass duration limit if provided (seconds after takeover before forfeit)
         replay_duration = request.POST.get('replay_duration', '').strip()
@@ -2606,6 +2621,14 @@ def _launch_replay_test_match(
     match.replay_file = container_replay_path
     match.save()
 
+    # Copy state DB if the replay test has one attached
+    container_state_db_path = ''
+    if replay_test.state_db_file and os.path.isfile(replay_test.state_db_file):
+        state_db_filename = f'{match_id}_state.db'
+        state_db_dest = os.path.join(logs_dir, state_db_filename)
+        _shutil.copy2(replay_test.state_db_file, state_db_dest)
+        container_state_db_path = f'/root/replays/{state_db_filename}'
+
     log_file = os.path.join(logs_dir, f'{match_id}_replay_test.log')
 
     command = [
@@ -2621,6 +2644,9 @@ def _launch_replay_test_match(
         '-e', f'RACE={rt_race.lower()}',
         '-e', f'MATCH_ID={match_id}',
     ]
+
+    if container_state_db_path:
+        command += ['-e', f'STATE_DB_PATH={container_state_db_path}']
 
     duration_loops = _parse_game_time(replay_test.duration)
     if duration_loops and duration_loops > 0:
@@ -2700,6 +2726,7 @@ def create_replay_test(request):
     start_times = request.POST.getlist('start_time')
     durations = request.POST.getlist('duration')
     replay_file = request.FILES.get('replay_file')
+    state_db_upload = request.FILES.get('state_db_file')
 
     # Shared settings for all tests in this batch
     bot_player_id = request.POST.get('bot_player_id', '1')
@@ -2750,6 +2777,16 @@ def create_replay_test(request):
             for chunk in replay_file.chunks():
                 dest.write(chunk)
 
+    # Save optional state DB file
+    state_db_path = ''
+    if state_db_upload:
+        safe_db_name = state_db_upload.name.replace(' ', '_')
+        state_db_path = os.path.join(REPLAY_UPLOAD_DIR, safe_db_name)
+        if not os.path.exists(state_db_path):
+            with open(state_db_path, 'wb') as dest:
+                for chunk in state_db_upload.chunks():
+                    dest.write(chunk)
+
     created = 0
     for i, name in enumerate(names):
         name = name.strip()
@@ -2778,6 +2815,7 @@ def create_replay_test(request):
             opponent_difficulty=opponent_difficulty if opponent_type == 'BuiltInAI' else '',
             opponent_build=opponent_build if opponent_type == 'BuiltInAI' else '',
             opponent_bot=opponent_bot if opponent_type == 'CustomBot' else None,
+            state_db_file=state_db_path,
         )
         created += 1
 
