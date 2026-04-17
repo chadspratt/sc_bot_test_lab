@@ -232,7 +232,7 @@ td { text-align: left; }
                         </td>
                         <td>
                             {% if bot.is_test_subject %}
-                                <span class="ts-edit-btn" style="color: #28a745; font-weight: bold;" onclick="openTestSubjectModal({{ bot.id }}, '{{ bot.name|escapejs }}', {{ bot.is_test_subject|yesno:'true,false' }}, '{{ bot.source_path|escapejs }}', {{ bot.enable_version_history|yesno:'true,false' }}, '{{ bot.dockerfile|escapejs }}', '{{ bot.env_file|escapejs }}', '{{ bot.archive_paths|join:", "|escapejs }}')">Yes</span>
+                                <span style="color: #28a745; font-weight: bold;">Yes</span>
                                 {% if bot.source_path %}<br><small>src: <code>{{ bot.source_path }}</code></small>{% endif %}
                                 {% if bot.enable_version_history %}<br><small style="color: #17a2b8;">version history: enabled</small>{% endif %}
                                 {% if bot.archive_paths %}<br><small>archive paths: <code>{{ bot.archive_paths|join:", " }}</code></small>{% endif %}
@@ -240,7 +240,7 @@ td { text-align: left; }
                                 {% if bot.env_file %}<br><small>env: <code>{{ bot.env_file }}</code></small>{% endif %}
                                 {% if bot.symlink_mounts %}<br><small>symlinks: {{ bot.symlink_mounts|length }}</small>{% endif %}
                             {% else %}
-                                <span class="ts-edit-btn" style="color: #999;" onclick="openTestSubjectModal({{ bot.id }}, '{{ bot.name|escapejs }}', {{ bot.is_test_subject|yesno:'true,false' }}, '{{ bot.source_path|escapejs }}', false, '', '', '')">No</span>
+                                <span style="color: #999;">No</span>
                             {% endif %}
                         </td>
                         <td>
@@ -254,6 +254,7 @@ td { text-align: left; }
                         <td>{{ bot.description }}</td>
                         <td>{{ bot.created_at|date:"Y-m-d H:i" }}</td>
                         <td>
+                            <button type="button" onclick="openBotEditModal({{ bot.id }}, '{{ bot.name|escapejs }}', '{{ bot.race }}', {{ bot.is_test_subject|yesno:'true,false' }}, '{{ bot.source_path|escapejs }}', {{ bot.enable_version_history|yesno:'true,false' }}, '{{ bot.dockerfile|escapejs }}', '{{ bot.env_file|escapejs }}', '{{ bot.archive_paths|join:", "|escapejs }}')" style="background: #007bff; color: white; border: none; padding: 4px 8px; border-radius: 3px; cursor: pointer; font-size: 12px; margin-right: 4px;">Edit</button>
                             <form method="post" action="{% url 'delete_custom_bot' bot.id %}" style="display: inline;" onsubmit="return confirm('Delete {{ bot.name }}?');">
                                 {% csrf_token %}
                                 <button type="submit" class="btn-danger">Delete</button>
@@ -786,6 +787,15 @@ td { text-align: left; }
         <h3>Edit Bot — <span id="ts-modal-bot-name"></span></h3>
         <input type="hidden" id="ts-modal-bot-id">
         <div class="form-group">
+            <label for="ts-modal-race">Race:</label>
+            <select id="ts-modal-race">
+                <option value="Random">Random</option>
+                <option value="Protoss">Protoss</option>
+                <option value="Terran">Terran</option>
+                <option value="Zerg">Zerg</option>
+            </select>
+        </div>
+        <div class="form-group">
             <label>
                 <input type="checkbox" id="ts-modal-enabled" onchange="document.getElementById('ts-modal-fields').style.display = this.checked ? 'block' : 'none';">
                 This bot is a test subject
@@ -1149,9 +1159,10 @@ td { text-align: left; }
         document.getElementById('rt_custom_bot_field').style.display = type === 'CustomBot' ? '' : 'none';
     }
 
-    function openTestSubjectModal(botId, botName, isTestSubject, sourcePath, enableVersionHistory, dockerfile, envFile, archivePaths) {
+    function openBotEditModal(botId, botName, race, isTestSubject, sourcePath, enableVersionHistory, dockerfile, envFile, archivePaths) {
         document.getElementById('ts-modal-bot-id').value = botId;
         document.getElementById('ts-modal-bot-name').textContent = botName;
+        document.getElementById('ts-modal-race').value = race;
         document.getElementById('ts-modal-enabled').checked = isTestSubject;
         document.getElementById('ts-modal-source-path').value = sourcePath;
         document.getElementById('ts-modal-version-history').checked = enableVersionHistory;
@@ -1171,6 +1182,7 @@ td { text-align: left; }
         var botId = document.getElementById('ts-modal-bot-id').value;
         var enabled = document.getElementById('ts-modal-enabled').checked;
         var params = new URLSearchParams();
+        params.set('race', document.getElementById('ts-modal-race').value);
         params.set('source_path', document.getElementById('ts-modal-source-path').value);
         if (enabled) {
             params.set('is_test_subject', 'on');

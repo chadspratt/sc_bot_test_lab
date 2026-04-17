@@ -2203,8 +2203,13 @@ def update_custom_bot_test_subject(request, bot_id):
 
     is_test_subject = request.POST.get('is_test_subject') == 'on'
     source_path = request.POST.get('source_path', '').strip()
+    race = request.POST.get('race', '').strip()
 
     update_fields = ['is_test_subject', 'source_path']
+
+    if race and race in ('Random', 'Protoss', 'Terran', 'Zerg'):
+        bot.race = race
+        update_fields.append('race')
 
     if source_path:
         if not os.path.isdir(source_path):
