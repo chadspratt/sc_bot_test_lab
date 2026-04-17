@@ -73,15 +73,27 @@ def main() -> str:
     bot_race_name = os.environ.get("BOT_RACE") or lb_info.get("Race", "Random")
     bot_name = os.environ.get("BOT_NAME") or lb_info.get("_bot_name", bot_class_name)
 
-    if not bot_module_path or not bot_class_name:
-        raise RuntimeError(
-            "BOT_MODULE and BOT_CLASS environment variables are required for "
-            "Python bots. Set them on the CustomBot model in the admin panel."
-        )
+    # Prefer bot_loader.py (avoids module-name collisions), fall back to
+    # dynamic import via BOT_MODULE / BOT_CLASS.
+    from bot_import import try_load_bot_loader
 
-    # Dynamically import the bot class
-    bot_module = importlib.import_module(bot_module_path)
-    bot_cls = getattr(bot_module, bot_class_name)
+    loader = try_load_bot_loader(bot_dir)
+    if loader:
+        bot_instance = loader.create_bot()
+        bot_name = os.environ.get("BOT_NAME") or getattr(loader, "BOT_NAME", bot_name)
+        bot_race_name = os.environ.get("BOT_RACE") or getattr(loader, "BOT_DEFAULT_RACE", bot_race_name)
+    else:
+        if not bot_module_path or not bot_class_name:
+            raise RuntimeError(
+                "BOT_MODULE and BOT_CLASS environment variables are required for "
+                "Python bots (unless the bot ships a bot_loader.py). "
+                "Set them on the CustomBot model in the admin panel."
+            )
+        # Dynamically import the bot class
+        bot_module = importlib.import_module(bot_module_path)
+        bot_cls = getattr(bot_module, bot_class_name)
+        bot_instance = bot_cls()
+
     bot_race = RACE_DICT.get(bot_race_name.lower(), Race[bot_race_name])
 
     opponent_race = RACE_DICT.get(race, RACE_DICT[None])
@@ -95,7 +107,6 @@ def main() -> str:
 
     os.environ["TEST_MATCH_ID"] = match_id
 
-    bot_instance = bot_cls()
     duration: int | None = None
 
     try:

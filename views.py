@@ -537,10 +537,6 @@ def _bot_identity_args(
         args += ['-e', f'BOT_TYPE={test_bot.aiarena_bot_type}']
     if test_bot.bot_file:
         args += ['-e', f'BOT_ENTRY={test_bot.bot_file}']
-    if test_bot.bot_module:
-        args += ['-e', f'BOT_MODULE={test_bot.bot_module}']
-    if test_bot.bot_class:
-        args += ['-e', f'BOT_CLASS={test_bot.bot_class}']
     race = race_override or test_bot.race
     if race:
         args += ['-e', f'BOT_RACE={race}']
@@ -602,6 +598,9 @@ def _bot_volume_args(
             args += ['-v', f'{bp}:/root/bot_dir']
         else:
             logger.warning('No bot source found for %s', bot_dir)
+
+    # Overlay patch files (e.g. bot_loader.py) from aiarena/patches/<bot>/
+    args += aiarena_runner.get_patch_docker_args(bot_dir)
 
     return args
 
@@ -1682,13 +1681,6 @@ def config_page(request):
     """Config page with Custom Bots, Test Suites, and System tabs."""
     import json as _json
 
-    bot_config_path = os.path.join(os.path.dirname(__file__), 'bot_config.json')
-    try:
-        with open(bot_config_path) as f:
-            bot_config = _json.load(f)
-    except (FileNotFoundError, _json.JSONDecodeError):
-        bot_config = {}
-
     bots = CustomBot.objects.all().order_by('-created_at')
     all_bot_details = aiarena_runner.get_available_aiarena_bot_details()
     used_directories = set(
@@ -1756,7 +1748,6 @@ def config_page(request):
         'aiarena_bots': available_bots,
         'aiarena_bots_json': _json.dumps(available_bots),
         'aiarena_bots_dir': aiarena_runner.AIARENA_BOTS_DIR.replace('\\', '/'),
-        'bot_config_json': _json.dumps(bot_config),
         'custom_bots': custom_bots_list,
         'test_suites': test_suites,
         'test_suites_json': test_suites_json,
@@ -2122,8 +2113,6 @@ def create_custom_bot(request):
     archive_paths_raw = request.POST.get('archive_paths', '').strip()
     dockerfile = request.POST.get('dockerfile', '').strip()
     env_file = request.POST.get('env_file', '').strip()
-    bot_module = request.POST.get('bot_module', '').strip()
-    bot_class = request.POST.get('bot_class', '').strip()
     bot_file = request.POST.get('bot_file', '').strip()
 
     # Parse archive_paths: comma-separated list of paths
@@ -2166,15 +2155,10 @@ def create_custom_bot(request):
             symlink_mounts=symlink_mounts,
             dockerfile=dockerfile,
             env_file=env_file,
-            bot_module=bot_module,
-            bot_class=bot_class,
             bot_file=bot_file,
             description=description,
         )
         msg = f'Bot "{name}" registered successfully.'
-        patched_files = aiarena_runner.apply_bot_patches(bot_directory)
-        if patched_files:
-            msg += f' Applied patches: {", ".join(patched_files)}'
         if symlink_mounts:
             link_names = ', '.join(m['name'] for m in symlink_mounts)
             msg += f' Detected symlinks: {link_names}'
@@ -2234,8 +2218,6 @@ def update_custom_bot_test_subject(request, bot_id):
         enable_version_history = request.POST.get('enable_version_history') == 'on'
         dockerfile = request.POST.get('dockerfile', '').strip()
         env_file = request.POST.get('env_file', '').strip()
-        bot_module = request.POST.get('bot_module', '').strip()
-        bot_class = request.POST.get('bot_class', '').strip()
         bot_file = request.POST.get('bot_file', '').strip()
         archive_paths_raw = request.POST.get('archive_paths', '').strip()
         archive_paths = [p.strip() for p in archive_paths_raw.split(',') if p.strip()] if archive_paths_raw else []
@@ -2248,20 +2230,16 @@ def update_custom_bot_test_subject(request, bot_id):
         bot.archive_paths = archive_paths
         bot.dockerfile = dockerfile
         bot.env_file = env_file
-        bot.bot_module = bot_module
-        bot.bot_class = bot_class
         bot.bot_file = bot_file
-        update_fields += ['enable_version_history', 'archive_paths', 'dockerfile', 'env_file', 'bot_module', 'bot_class', 'bot_file']
+        update_fields += ['enable_version_history', 'archive_paths', 'dockerfile', 'env_file', 'bot_file']
     else:
         bot.is_test_subject = False
         bot.enable_version_history = False
         bot.archive_paths = []
         bot.dockerfile = ''
         bot.env_file = ''
-        bot.bot_module = ''
-        bot.bot_class = ''
         bot.bot_file = ''
-        update_fields += ['enable_version_history', 'archive_paths', 'dockerfile', 'env_file', 'bot_module', 'bot_class', 'bot_file']
+        update_fields += ['enable_version_history', 'archive_paths', 'dockerfile', 'env_file', 'bot_file']
 
     bot.save(update_fields=update_fields)
     return JsonResponse({'status': 'ok'})

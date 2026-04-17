@@ -80,16 +80,13 @@ case "$BOT_TYPE" in
         export PYTHONPATH="${CYTHON_BUILD:+$CYTHON_BUILD:}${BOT_DIR}${EXTRA_PATHS:+:$EXTRA_PATHS}:/root/runner${PYTHONPATH:+:$PYTHONPATH}"
         echo "PYTHONPATH=$PYTHONPATH"
 
-        # Prefer a bot-local run_vs_blizzard.py if present — it imports
-        # the bot directly, avoiding module-name collisions between the
-        # runner's config.py and the bot's own modules (e.g. sharpy bots).
-        if [ -f "$BOT_DIR/run_vs_blizzard.py" ]; then
-            exec python3 "$BOT_DIR/run_vs_blizzard.py" "$@"
-        # If BOT_MODULE and BOT_CLASS are set, use the dynamic-import runner
-        # (works for any Python bot). Otherwise fall back to the external
-        # runner which launches the bot's own run.py via --LadderServer args
-        # (requires the bot to handle StartPort=None for vs-computer mode).
-        elif [ -n "$BOT_MODULE" ] && [ -n "$BOT_CLASS" ]; then
+        # If the bot ships a bot_loader.py or has BOT_MODULE/BOT_CLASS set,
+        # use the standard runner (which handles both paths internally).
+        # bot_loader.py avoids module-name collisions between the runner's
+        # config.py and the bot's own modules (e.g. sharpy bots).
+        # Otherwise fall back to the external runner which launches the
+        # bot's own run.py via --LadderServer args.
+        if [ -f "$BOT_DIR/bot_loader.py" ] || ([ -n "$BOT_MODULE" ] && [ -n "$BOT_CLASS" ]); then
             exec python3 /root/runner/run_vs_computer.py "$@"
         else
             exec python3 /root/runner/run_vs_computer_external.py python

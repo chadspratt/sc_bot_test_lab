@@ -405,6 +405,10 @@ def _write_compose_override(
         ]
     lines.append('    volumes:')
     lines += _test_bot_volume_mounts(test_bot, test_bot_aiarena_name, source_override=source_override)
+    lines += get_patch_volume_mounts(
+        test_bot.bot_directory or test_bot.name,
+        f'/bots/{test_bot_aiarena_name}',
+    )
     if friendly_build:
         lines += get_build_config_volume_mounts(
             test_bot.bot_directory or test_bot.name,
@@ -424,6 +428,10 @@ def _write_compose_override(
             ]
         lines += ['    volumes:']
         lines += _past_version_volume_mounts(test_bot, bot2_name, past_version_cache_path)
+        lines += get_patch_volume_mounts(
+            test_bot.bot_directory or test_bot.name,
+            f'/bots/{bot2_name}',
+        )
     elif is_mirror:
         assert mirror_aiarena_name is not None
         if dockerfile:
@@ -434,6 +442,10 @@ def _write_compose_override(
             ]
         lines += ['    volumes:']
         lines += _test_bot_volume_mounts(test_bot, mirror_aiarena_name, source_override=source_override)
+        lines += get_patch_volume_mounts(
+            test_bot.bot_directory or test_bot.name,
+            f'/bots/{mirror_aiarena_name}',
+        )
     else:
         # Non-Python bots need the proxy_fwd image (installs libs
         # required for C++/Go bots to establish TCP connections).
@@ -449,6 +461,10 @@ def _write_compose_override(
         lines.append('    volumes:')
         if opponent_bot is not None:
             lines += _opponent_volume_mounts(opponent_bot, bot2_name)
+            lines += get_patch_volume_mounts(
+                opponent_bot.bot_directory or opponent_bot.name,
+                f'/bots/{bot2_name}',
+            )
         else:
             assert bot2_host_path is not None
             b2 = bot2_host_path.replace('\\', '/')
@@ -599,8 +615,8 @@ def apply_bot_patches(bot_dir_name: str) -> list[str]:
     If a matching patch folder exists, all files within it are copied
     (recursively) into aiarena/bots/<bot_dir_name>/, overwriting existing
     files.  If no bot-specific patch folder exists, falls back to the
-    ``_default`` patch folder so that generic patches (e.g.
-    ``run_vs_blizzard.py``) are applied to newly registered bots.
+    ``_default`` patch folder so that generic patches are applied to newly
+    registered bots.
 
     Returns a list of relative paths that were copied.
     """
@@ -741,6 +757,71 @@ def get_build_config_docker_args(
         for filename in files:
             src = os.path.join(root, filename)
             rel = os.path.relpath(src, config_dir)
+            host_path = src.replace('\\', '/')
+            container_path = f'{container_bot_path}/{rel}'.replace('\\', '/')
+            args += ['-v', f'{host_path}:{container_path}']
+    return args
+
+
+def _resolve_patch_dir(bot_dir_name: str) -> str | None:
+    """Return the patch directory for a bot, or *None* if none exists.
+
+    Only returns a bot-specific ``patches/<bot_dir_name>/`` directory.
+    The ``_default`` directory is intentionally *not* used as a fallback
+    here because its generic template would break bots that don't have a
+    custom patch.
+    """
+    patch_dir = os.path.join(AIARENA_PATCHES_DIR, bot_dir_name)
+    if os.path.isdir(patch_dir):
+        return patch_dir
+    return None
+
+
+def get_patch_volume_mounts(
+    bot_dir_name: str,
+    container_bot_path: str,
+) -> list[str]:
+    """Return Docker Compose volume mount lines for patch file overlays.
+
+    Files in ``aiarena/patches/<bot_dir_name>/`` are mounted individually
+    on top of the bot directory inside the container, similar to build
+    config overlays.
+
+    Returns a list of volume mount strings in docker-compose format.
+    """
+    patch_dir = _resolve_patch_dir(bot_dir_name)
+    if not patch_dir:
+        return []
+
+    mounts: list[str] = []
+    for root, _dirs, files in os.walk(patch_dir):
+        for filename in files:
+            src = os.path.join(root, filename)
+            rel = os.path.relpath(src, patch_dir)
+            host_path = src.replace('\\', '/')
+            container_path = f'{container_bot_path}/{rel}'.replace('\\', '/')
+            mounts.append(f'      - "{host_path}:{container_path}"')
+    return mounts
+
+
+def get_patch_docker_args(
+    bot_dir_name: str,
+    container_bot_path: str = '/root/bot_dir',
+) -> list[str]:
+    """Return ``['-v', '<host>:<container>', ...]`` for patch file overlays.
+
+    Similar to ``get_patch_volume_mounts`` but returns flat ``-v`` args
+    for use with ``docker compose run``.
+    """
+    patch_dir = _resolve_patch_dir(bot_dir_name)
+    if not patch_dir:
+        return []
+
+    args: list[str] = []
+    for root, _dirs, files in os.walk(patch_dir):
+        for filename in files:
+            src = os.path.join(root, filename)
+            rel = os.path.relpath(src, patch_dir)
             host_path = src.replace('\\', '/')
             container_path = f'{container_bot_path}/{rel}'.replace('\\', '/')
             args += ['-v', f'{host_path}:{container_path}']

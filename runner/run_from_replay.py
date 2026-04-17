@@ -51,8 +51,8 @@ def main() -> str:
     bot_dir = os.environ.get("BOT_DIR", "/root/bot_dir")
     os.chdir(bot_dir)
 
-    bot_module_path = os.environ["BOT_MODULE"]
-    bot_class_name = os.environ["BOT_CLASS"]
+    bot_module_path = os.environ.get("BOT_MODULE", "")
+    bot_class_name = os.environ.get("BOT_CLASS", "")
     bot_race_name = os.environ.get("BOT_RACE", "Random")
     bot_name = os.environ.get("BOT_NAME", bot_class_name)
 
@@ -64,9 +64,25 @@ def main() -> str:
         logger.error("TAKEOVER_GAME_LOOP environment variable is required")
         sys.exit(1)
 
-    # Dynamically import the bot class
-    bot_module = importlib.import_module(bot_module_path)
-    bot_cls = getattr(bot_module, bot_class_name)
+    # Prefer bot_loader.py (avoids module-name collisions), fall back to
+    # dynamic import via BOT_MODULE / BOT_CLASS.
+    from bot_import import try_load_bot_loader
+
+    loader = try_load_bot_loader(bot_dir)
+    if loader:
+        bot_cls = loader.create_bot
+        bot_name = os.environ.get("BOT_NAME") or getattr(loader, "BOT_NAME", bot_name)
+        bot_race_name = os.environ.get("BOT_RACE") or getattr(loader, "BOT_DEFAULT_RACE", bot_race_name)
+    else:
+        if not bot_module_path or not bot_class_name:
+            raise RuntimeError(
+                "BOT_MODULE and BOT_CLASS environment variables are required "
+                "(unless the bot ships a bot_loader.py)."
+            )
+        bot_module = importlib.import_module(bot_module_path)
+        _cls = getattr(bot_module, bot_class_name)
+        bot_cls = _cls  # type: ignore[assignment]
+
     bot_race = RACE_DICT.get(bot_race_name.lower(), Race[bot_race_name])
 
     takeover_game_loop = int(takeover_loop_str)

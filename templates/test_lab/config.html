@@ -176,20 +176,6 @@ td { text-align: left; }
                         <input type="text" name="archive_paths" id="archive_paths" placeholder="e.g. src/, bot.py, config/">
                         <small style="color: #666;">Comma-separated list of folders to pull from git history for past-version tests. If empty, will use the entire contents of repo at selected commit.</small>
                     </div>
-                    <div>
-                        <p>Python Only</p>
-                        For matches vs Blizzard AI, the path to the custom bot main class is used to import the bot. Not required but if not setting these, may need to fix ladder.py to accept StartPort=None.
-                        <div class="form-group">
-                            <label for="bot_module">Bot Module (optional):</label>
-                            <input type="text" name="bot_module" id="bot_module" placeholder="e.g. bot.main">
-                            <small style="color: #666;">Python module path for the bot class (e.g. 'bot.main'). Used by the single-container Docker runner for dynamic import. Leave blank if not using single-container runner.</small>
-                        </div>
-                        <div class="form-group">
-                            <label for="bot_class">Bot Class (optional):</label>
-                            <input type="text" name="bot_class" id="bot_class" placeholder="e.g. MyBot">
-                            <small style="color: #666;">Python class name that inherits from BotAI (e.g. 'MyBot'). Used by the single-container Docker runner for dynamic import.</small>
-                        </div>
-                    </div>
                     <div class="form-group">
                         <p>Non-Python Only</p>
                         <label for="bot_file">Entry Point (optional):</label>
@@ -246,17 +232,15 @@ td { text-align: left; }
                         </td>
                         <td>
                             {% if bot.is_test_subject %}
-                                <span class="ts-edit-btn" style="color: #28a745; font-weight: bold;" onclick="openTestSubjectModal({{ bot.id }}, '{{ bot.name|escapejs }}', {{ bot.is_test_subject|yesno:'true,false' }}, '{{ bot.source_path|escapejs }}', {{ bot.enable_version_history|yesno:'true,false' }}, '{{ bot.dockerfile|escapejs }}', '{{ bot.env_file|escapejs }}', '{{ bot.bot_module|escapejs }}', '{{ bot.bot_class|escapejs }}', '{{ bot.archive_paths|join:", "|escapejs }}')">Yes</span>
+                                <span class="ts-edit-btn" style="color: #28a745; font-weight: bold;" onclick="openTestSubjectModal({{ bot.id }}, '{{ bot.name|escapejs }}', {{ bot.is_test_subject|yesno:'true,false' }}, '{{ bot.source_path|escapejs }}', {{ bot.enable_version_history|yesno:'true,false' }}, '{{ bot.dockerfile|escapejs }}', '{{ bot.env_file|escapejs }}', '{{ bot.archive_paths|join:", "|escapejs }}')">Yes</span>
                                 {% if bot.source_path %}<br><small>src: <code>{{ bot.source_path }}</code></small>{% endif %}
                                 {% if bot.enable_version_history %}<br><small style="color: #17a2b8;">version history: enabled</small>{% endif %}
                                 {% if bot.archive_paths %}<br><small>archive paths: <code>{{ bot.archive_paths|join:", " }}</code></small>{% endif %}
                                 {% if bot.dockerfile %}<br><small>dockerfile: <code>{{ bot.dockerfile }}</code></small>{% endif %}
                                 {% if bot.env_file %}<br><small>env: <code>{{ bot.env_file }}</code></small>{% endif %}
-                                {% if bot.bot_module %}<br><small>module: <code>{{ bot.bot_module }}</code></small>{% endif %}
-                                {% if bot.bot_class %}<br><small>class: <code>{{ bot.bot_class }}</code></small>{% endif %}
                                 {% if bot.symlink_mounts %}<br><small>symlinks: {{ bot.symlink_mounts|length }}</small>{% endif %}
                             {% else %}
-                                <span class="ts-edit-btn" style="color: #999;" onclick="openTestSubjectModal({{ bot.id }}, '{{ bot.name|escapejs }}', {{ bot.is_test_subject|yesno:'true,false' }}, '{{ bot.source_path|escapejs }}', false, '', '', '{{ bot.bot_module|escapejs }}', '{{ bot.bot_class|escapejs }}', '')">No</span>
+                                <span class="ts-edit-btn" style="color: #999;" onclick="openTestSubjectModal({{ bot.id }}, '{{ bot.name|escapejs }}', {{ bot.is_test_subject|yesno:'true,false' }}, '{{ bot.source_path|escapejs }}', false, '', '', '')">No</span>
                             {% endif %}
                         </td>
                         <td>
@@ -835,16 +819,6 @@ td { text-align: left; }
                 <input type="text" id="ts-modal-env-file" placeholder="e.g. C:\Users\me\mybot\.env">
                 <small style="color: #666;">Absolute path to a .env file on the host. Provides environment variables (e.g. DB credentials) to the Docker container via --env-file.</small>
             </div>
-            <div class="form-group">
-                <label for="ts-modal-bot-module">Bot Module (optional):</label>
-                <input type="text" id="ts-modal-bot-module" placeholder="e.g. bot.main">
-                <small style="color: #666;">Python module path for dynamic import in single-container Docker runner (e.g. 'bot.main').</small>
-            </div>
-            <div class="form-group">
-                <label for="ts-modal-bot-class">Bot Class (optional):</label>
-                <input type="text" id="ts-modal-bot-class" placeholder="e.g. MyBot">
-                <small style="color: #666;">Python class name that inherits from BotAI (e.g. 'MyBot').</small>
-            </div>
         </div>
         <div id="ts-modal-error" style="display: none; color: red; background: #f8d7da; border: 1px solid #f5c6cb; padding: 8px; border-radius: 4px; margin-top: 10px;"></div>
         <div class="modal-actions">
@@ -1089,7 +1063,6 @@ td { text-align: left; }
     // --- Bot directory click-to-autopopulate ---
     (function() {
         var botDetails = {{ aiarena_bots_json|safe }};
-        var botConfig = {{ bot_config_json|safe }};
         var detailsByDir = {};
         botDetails.forEach(function(b) { detailsByDir[b.directory] = b; });
 
@@ -1122,16 +1095,8 @@ td { text-align: left; }
                         }
                     }
                 }
-                // Auto-fill bot_module and bot_class from bot_config.json
-                var cfg = botConfig[info.name];
-                var moduleField = document.getElementById('bot_module');
-                var classField = document.getElementById('bot_class');
                 var botFileField = document.getElementById('bot_file');
                 if (botFileField && info.file_name) botFileField.value = info.file_name;
-                if (cfg) {
-                    if (moduleField && cfg.bot_module) moduleField.value = cfg.bot_module;
-                    if (classField && cfg.bot_class) classField.value = cfg.bot_class;
-                }
             });
         });
     })();
@@ -1184,7 +1149,7 @@ td { text-align: left; }
         document.getElementById('rt_custom_bot_field').style.display = type === 'CustomBot' ? '' : 'none';
     }
 
-    function openTestSubjectModal(botId, botName, isTestSubject, sourcePath, enableVersionHistory, dockerfile, envFile, botModule, botClass, archivePaths) {
+    function openTestSubjectModal(botId, botName, isTestSubject, sourcePath, enableVersionHistory, dockerfile, envFile, archivePaths) {
         document.getElementById('ts-modal-bot-id').value = botId;
         document.getElementById('ts-modal-bot-name').textContent = botName;
         document.getElementById('ts-modal-enabled').checked = isTestSubject;
@@ -1193,8 +1158,6 @@ td { text-align: left; }
         document.getElementById('ts-modal-archive-paths').value = archivePaths || '';
         document.getElementById('ts-modal-dockerfile').value = dockerfile;
         document.getElementById('ts-modal-env-file').value = envFile || '';
-        document.getElementById('ts-modal-bot-module').value = botModule || '';
-        document.getElementById('ts-modal-bot-class').value = botClass || '';
         document.getElementById('ts-modal-fields').style.display = isTestSubject ? 'block' : 'none';
         document.getElementById('ts-modal-error').style.display = 'none';
         document.getElementById('bot-modal').classList.add('active');
@@ -1215,8 +1178,6 @@ td { text-align: left; }
             params.set('archive_paths', document.getElementById('ts-modal-archive-paths').value);
             params.set('dockerfile', document.getElementById('ts-modal-dockerfile').value);
             params.set('env_file', document.getElementById('ts-modal-env-file').value);
-            params.set('bot_module', document.getElementById('ts-modal-bot-module').value);
-            params.set('bot_class', document.getElementById('ts-modal-bot-class').value);
         }
 
         document.getElementById('ts-modal-error').style.display = 'none';

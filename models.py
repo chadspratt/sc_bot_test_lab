@@ -23,24 +23,6 @@ class CustomBot(models.Model):
         default='',
         help_text="Entry point filename (e.g. 'run.py', 'RustyNikolaj'). Passed as BOT_ENTRY to the Docker runner.",
     )
-    bot_class_name = models.CharField(
-        max_length=100,
-        blank=True,
-        default='',
-        help_text="Deprecated: kept for backward compatibility with older bot registrations.",
-    )
-    bot_module = models.CharField(
-        max_length=255,
-        blank=True,
-        default='',
-        help_text="Python module path for dynamic import (e.g. 'bottato.bottato'). Used by the single-container Docker runner.",
-    )
-    bot_class = models.CharField(
-        max_length=100,
-        blank=True,
-        default='',
-        help_text="Python class name that inherits from BotAI (e.g. 'BotTato'). Used by the single-container Docker runner.",
-    )
     is_external = models.BooleanField(
         default=False,
         help_text="Deprecated: kept for backward compatibility.",
@@ -119,7 +101,7 @@ class CustomBot(models.Model):
     def __str__(self):
         if self.is_aiarena:
             return f"{self.name} ({self.race} - aiarena)"
-        return f"{self.name} ({self.race} - {self.bot_class_name})"
+        return f"{self.name} ({self.race})"
 
 
 class TestSuite(models.Model):
