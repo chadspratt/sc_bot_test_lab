@@ -45,9 +45,7 @@ All file paths below are relative to that worktree directory.
 2. Trigger the ticket test suite
 by running this command:
 ```
-curl -X POST http://localhost:8000/test_lab/api/trigger-ticket-tests/ \
-  -H "Content-Type: application/json" \
-  -d '{{"ticket_id": {ticket_id}}}'
+Invoke-RestMethod -Method POST -Uri "http://localhost:8000/test_lab/api/trigger-ticket-tests/" -ContentType "application/json" -Body '{{"ticket_id": {ticket_id}}}'
 ```
 This kicks off the SC2 test matches for your changes. Always do this — do not
 skip it or wait until the end.

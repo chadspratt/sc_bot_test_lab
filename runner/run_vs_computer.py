@@ -118,8 +118,8 @@ def main() -> str:
             game_time_limit=3600,
         )
 
-        bottato_result = result[0] if isinstance(result, list) else result
-        result_str = bottato_result.name if bottato_result else "Crash"
+        testbot_result = result[0] if isinstance(result, list) else result
+        result_str = testbot_result.name if testbot_result else "Crash"
 
         # Extract game duration from the bot's state (BotAI.time = game_loop / 22.4)
         if hasattr(bot_instance, 'time'):

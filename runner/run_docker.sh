@@ -63,12 +63,26 @@ case "$BOT_TYPE" in
         CYTHON_BUILD=""
         if [ -d "cython_extensions" ] && [ -f "cython_extensions/setup.py" ]; then
             PYTHON_VERSION=$(python3 -c 'import sys; print(f"{sys.version_info.major}{sys.version_info.minor}")')
-            echo "Building Cython extensions for Python ${PYTHON_VERSION}..."
-            uv pip install --system cython numpy setuptools
             CYTHON_BUILD="/tmp/cython_build"
             mkdir -p "$CYTHON_BUILD"
             cp -a cython_extensions "$CYTHON_BUILD/"
-            python3 "$CYTHON_BUILD/cython_extensions/setup.py" build_ext --inplace
+
+            # Skip compilation if every .pyx already has a matching .so for
+            # this Python version (files persist on the host via bind-mount).
+            PYX_COUNT=$(find cython_extensions -maxdepth 1 -name '*.pyx' | wc -l)
+            SO_COUNT=$(find cython_extensions -maxdepth 1 -name "*cpython-${PYTHON_VERSION}*.so" | wc -l)
+
+            if [ "$PYX_COUNT" -gt 0 ] && [ "$SO_COUNT" -ge "$PYX_COUNT" ]; then
+                echo "Cython extensions already compiled for Python ${PYTHON_VERSION} (${SO_COUNT}/${PYX_COUNT}), skipping build."
+            else
+                echo "Building Cython extensions for Python ${PYTHON_VERSION} (${SO_COUNT}/${PYX_COUNT} pre-built)..."
+                uv pip install --system cython numpy setuptools
+                python3 "$CYTHON_BUILD/cython_extensions/setup.py" build_ext --inplace
+                # Persist compiled .so files back to the source dir so future containers skip the build.
+                find "$CYTHON_BUILD/cython_extensions" -maxdepth 1 -name "*cpython-${PYTHON_VERSION}*.so" \
+                    -exec cp -f {} cython_extensions/ \;
+                echo "Cython .so files persisted to source directory."
+            fi
         fi
 
         # Auto-discover common framework paths

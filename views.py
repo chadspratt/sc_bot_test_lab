@@ -576,8 +576,11 @@ def _bot_volume_args(
         args += ['-v', f'{src}:/root/bot_dir']
 
         # Mount symlink/junction targets explicitly (Docker on Windows
-        # cannot follow NTFS junctions inside bind mounts)
-        for link in test_bot.symlink_mounts or []:
+        # cannot follow NTFS junctions inside bind mounts).
+        # Scan dynamically so this works even when symlink_mounts on the
+        # model is null/stale (e.g. ad-hoc matches that skip the config UI).
+        live_symlinks = aiarena_runner.scan_directory_symlinks(source)
+        for link in live_symlinks or test_bot.symlink_mounts or []:
             name = link['name']
             target = link['target'].replace('\\', '/')
             args += ['-v', f'{target}:/root/bot_dir/{name}']
