@@ -262,14 +262,16 @@ def _test_bot_volume_mounts(
         bot_dir = os.path.join(AIARENA_BOTS_DIR, aiarena_name).replace('\\', '/')
         return [f'      - "{bot_dir}:/bots/{aiarena_name}"']
 
+    source_host = source
     source = source.replace('\\', '/')
     mounts = [f'      - "{source}:/bots/{aiarena_name}"']
 
-    # Mount symlink/junction targets explicitly
-    for link in test_bot.symlink_mounts or []:
-        name = link['name']
-        target = link['target'].replace('\\', '/')
-        mounts.append(f'      - "{target}:/bots/{aiarena_name}/{name}"')
+    # Merge auto-detected junctions with stored symlink mounts.
+    # Stored entries take precedence to allow manual overrides.
+    stored = {link['name']: link['target'] for link in (test_bot.symlink_mounts or [])}
+    auto_detected = {e['name']: e['target'] for e in scan_directory_symlinks(source_host)}
+    for name, target in {**auto_detected, **stored}.items():
+        mounts.append(f'      - "{target.replace(chr(92), "/")}:/bots/{aiarena_name}/{name}"')
 
     # Overlay files from aiarena/bots/<dir>/
     overlay_dir = os.path.join(AIARENA_BOTS_DIR, aiarena_name)
@@ -309,13 +311,15 @@ def _opponent_volume_mounts(
         bot_dir = os.path.join(AIARENA_BOTS_DIR, aiarena_name).replace('\\', '/')
         return [f'      - "{bot_dir}:/bots/{aiarena_name}"']
 
+    source_host = source
     source = source.replace('\\', '/')
     mounts = [f'      - "{source}:/bots/{aiarena_name}"']
 
-    for link in opponent_bot.symlink_mounts or []:
-        name = link['name']
-        target = link['target'].replace('\\', '/')
-        mounts.append(f'      - "{target}:/bots/{aiarena_name}/{name}"')
+    # Merge auto-detected junctions with stored symlink mounts.
+    stored = {link['name']: link['target'] for link in (opponent_bot.symlink_mounts or [])}
+    auto_detected = {e['name']: e['target'] for e in scan_directory_symlinks(source_host)}
+    for name, target in {**auto_detected, **stored}.items():
+        mounts.append(f'      - "{target.replace(chr(92), "/")}:/bots/{aiarena_name}/{name}"')
 
     overlay_dir = os.path.join(AIARENA_BOTS_DIR, aiarena_name)
     for filename in ('run.py', 'requirements.txt', 'ladderbots.json'):

@@ -85,22 +85,28 @@ case "$BOT_TYPE" in
             fi
         fi
 
-        # Build mapanalyzerext C extension if source is present.
-        # The .so shipped in the repo may have been compiled against a different
-        # NumPy version. Build to /tmp to avoid touching the shared bind-mount.
-        MAPANALYZER_EXT_DIR=""
+        # Build and persist mapanalyzerext using the Python-version-specific
+        # EXT_SUFFIX (e.g. mapanalyzerext.cpython-312-x86_64-linux-gnu.so).
+        # Python's import machinery resolves the cpython-specific name before
+        # the plain mapanalyzerext.so, so both this container and the aiarena
+        # bot-vs-bot containers (which mount the same source dir but lack gcc)
+        # will use this freshly built binary automatically. Skip if already built.
         if [ -f "$BOT_DIR/MapAnalyzer/cext/src/ma_ext.c" ]; then
-            echo "Building mapanalyzerext from source..."
-            MAPANALYZER_EXT_DIR="/tmp/mapanalyzer_ext"
-            mkdir -p "$MAPANALYZER_EXT_DIR"
-            NUMPY_INCLUDE=$(python3 -c "import numpy; print(numpy.get_include())")
-            PYTHON_INCLUDE=$(python3 -c "import sysconfig; print(sysconfig.get_path('include'))")
-            gcc -O2 -shared -fPIC \
-                -I"$NUMPY_INCLUDE" \
-                -I"$PYTHON_INCLUDE" \
-                "$BOT_DIR/MapAnalyzer/cext/src/ma_ext.c" \
-                -o "$MAPANALYZER_EXT_DIR/mapanalyzerext.so"
-            echo "mapanalyzerext built successfully."
+            EXT_SUFFIX=$(python3 -c "import sysconfig; print(sysconfig.get_config_var('EXT_SUFFIX'))")
+            MA_EXT="$BOT_DIR/MapAnalyzer/cext/mapanalyzerext${EXT_SUFFIX}"
+            if [ ! -f "$MA_EXT" ]; then
+                echo "Building mapanalyzerext${EXT_SUFFIX}..."
+                NUMPY_INCLUDE=$(python3 -c "import numpy; print(numpy.get_include())")
+                PYTHON_INCLUDE=$(python3 -c "import sysconfig; print(sysconfig.get_path('include'))")
+                gcc -O2 -shared -fPIC \
+                    -I"$NUMPY_INCLUDE" \
+                    -I"$PYTHON_INCLUDE" \
+                    "$BOT_DIR/MapAnalyzer/cext/src/ma_ext.c" \
+                    -o "$MA_EXT"
+                echo "mapanalyzerext persisted to $MA_EXT"
+            else
+                echo "mapanalyzerext already built (${EXT_SUFFIX}), skipping."
+            fi
         fi
 
         # Auto-discover common framework paths
@@ -109,7 +115,7 @@ case "$BOT_TYPE" in
             EXTRA_PATHS="$BOT_DIR/ares-sc2/src/ares:$BOT_DIR/ares-sc2/src:$BOT_DIR/ares-sc2"
         fi
 
-        export PYTHONPATH="${MAPANALYZER_EXT_DIR:+$MAPANALYZER_EXT_DIR:}${CYTHON_BUILD:+$CYTHON_BUILD:}${BOT_DIR}${EXTRA_PATHS:+:$EXTRA_PATHS}:/root/runner${PYTHONPATH:+:$PYTHONPATH}"
+        export PYTHONPATH="${CYTHON_BUILD:+$CYTHON_BUILD:}${BOT_DIR}${EXTRA_PATHS:+:$EXTRA_PATHS}:/root/runner${PYTHONPATH:+:$PYTHONPATH}"
         echo "PYTHONPATH=$PYTHONPATH"
 
         # If the bot ships a bot_loader.py or has BOT_MODULE/BOT_CLASS set,
