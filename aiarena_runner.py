@@ -59,6 +59,7 @@ AIARENA_MAP_LIST = [
     "TorchesAIE_v4",
     "UltraloveAIE_v2",
     "MagannathaAIE_v2",
+    "LeyLinesAIE_v3",
 ]
 
 # Map race names to single-letter codes used in the aiarena matches file

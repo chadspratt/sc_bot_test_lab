@@ -14,6 +14,7 @@ MAP_LIST = [
     "TorchesAIE_v4",
     "UltraloveAIE_v2",
     "MagannathaAIE_v2",
+    "LeyLinesAIE_v3",
 ]
 
 RACE_DICT = {
