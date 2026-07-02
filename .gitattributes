@@ -1,0 +1,10 @@
+# Force Unix line endings for shell scripts and files that run in Linux containers
+*.sh text eol=lf
+*.py text eol=lf
+
+# Force CRLF for Windows-specific files
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+
+# Auto-detect everything else
+* text=auto
