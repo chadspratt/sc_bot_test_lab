@@ -429,23 +429,37 @@ MAP_LIST = [
 
 
 def get_least_used_map(
-    opponent_race: str, opponent_build: str, opponent_difficulty: str,
+    test_bot: CustomBot, opponent_race: str, opponent_build: str, opponent_difficulty: str,
 ) -> str:
     """Return the map with the fewest completed matches for the given opponent config."""
-    result = (
+    recent_ids = list(
         Match.objects.filter(
+            test_bot=test_bot,
             opponent_race=opponent_race,
             opponent_build=opponent_build,
             opponent_difficulty=opponent_difficulty,
             result__in=['Victory', 'Defeat'],
             test_group_id__gte=0,
         )
+        .order_by('-id')
+        .values_list('id', flat=True)[:15]
+    )
+    results = (
+        Match.objects.filter(id__in=recent_ids)
         .values('map_name')
         .annotate(ct=Count('id'))
         .order_by('ct')
-        .first()
     )
-    return result['map_name'] if result else random.choice(MAP_LIST)
+    if results:
+        recent_maps = {r['map_name'] for r in results}
+        missing_maps = set(MAP_LIST) - recent_maps
+        if missing_maps:
+            # use a map that hasn't been run recently
+            return missing_maps.pop()
+        result = results.first()
+        if result:
+            return result['map_name']
+    return random.choice(MAP_LIST)
 
 
 def create_pending_match(
@@ -463,7 +477,7 @@ def create_pending_match(
     """
     if not map_name:
         map_name = get_least_used_map(
-            race.capitalize(), build.capitalize(), difficulty or 'CheatInsane',
+            test_bot, race.capitalize(), build.capitalize(), difficulty or 'CheatInsane',
         )
     match = Match(
         test_group_id=test_group_id,
