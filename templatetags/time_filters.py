@@ -6,12 +6,12 @@ register = template.Library()
 def format_duration(seconds):
     """Convert seconds to human-readable duration (MM:SS or HH:MM:SS)."""
     if seconds is None:
-        return "-"
+        return "0:00"
     
     try:
         seconds = int(seconds)
         if seconds < 0:
-            return "-"
+            return "0:00"
         
         hours = seconds // 3600
         minutes = (seconds % 3600) // 60
